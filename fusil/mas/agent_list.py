@@ -1,4 +1,5 @@
-from ptrace.error import PTRACE_ERRORS, writeError
+from sys import stderr
+# from ptrace.error import PTRACE_ERRORS, writeError
 
 class AgentList:
     def __init__(self):
@@ -12,8 +13,9 @@ class AgentList:
     def _destroy(self, agent):
         try:
             agent.deactivate()
-        except PTRACE_ERRORS as error:
-            writeError(None, error, "Agent deinit error")
+        except Exception as error:
+            print(None, error, "Agent deinit error", file=stderr)
+            raise
         agent.unregister(False)
 
     def remove(self, agent, destroy=True):

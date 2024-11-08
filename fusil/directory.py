@@ -1,4 +1,6 @@
-from os import mkdir, listdir, chmod, umask
+import grp
+import pwd
+from os import mkdir, listdir, chmod, umask, chown
 from os.path import basename, join as path_join, exists as path_exists
 from fusil.six import text_type
 from shutil import rmtree
@@ -18,7 +20,13 @@ class Directory:
 
     def mkdir(self):
         old_umask = umask(0)
-        mkdir(self.directory, 0o775)
+        mkdir(self.directory, 0o777)
+        try:
+            uid = pwd.getpwnam("fusil").pw_uid
+            gid = grp.getgrnam("fusil").gr_gid
+            chown(self.directory, uid, gid)
+        except Exception as e:
+            print(e)
         umask(old_umask)
 
     def isEmpty(self, ignore_generated=False):

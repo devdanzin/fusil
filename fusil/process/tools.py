@@ -1,6 +1,6 @@
 from os import getenv, access, X_OK, pathsep, devnull, getcwd
 from os.path import dirname, normpath, join as path_join, isabs
-from ptrace.signames import signalName
+# from ptrace.signames import signalName
 from fusil.six import string_types
 from subprocess import Popen, STDOUT
 import re
@@ -85,7 +85,7 @@ def displayProcessStatus(logger, status, prefix="Process"):
     elif status < 0:
         signum = -status
         logger.error("%s killed by signal %s" %
-            (prefix, signalName(signum)))
+            (prefix, signum))
     else:
         logger.warning("%s exited with error code: %s" % (prefix, status))
 
@@ -138,7 +138,7 @@ def runCommand(logger, command, stdin=False, stdout=True, options=None, raise_er
     if not status:
         return
     if status < 0:
-        errmsg = 'process killed by signal %s' % signalName(-status)
+        errmsg = 'process killed by signal %s' % (-status)
     else:
         errmsg = 'exit code %s' % status
     raise RuntimeError("Unable to run the command %s: %s" % (

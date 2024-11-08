@@ -3,7 +3,7 @@ from sys import stderr
 from fusil.mas.message import Message
 from fusil.mas.mailbox import Mailbox
 from weakref import ref as weakref_ref
-from ptrace.error import PTRACE_ERRORS, writeError
+# from ptrace.error import PTRACE_ERRORS, writeError
 from fusil.mas.agent_id import AgentID
 
 class AgentError(Exception):
@@ -46,8 +46,8 @@ class Agent(object):
         except KeyboardInterrupt:
             self.error("Agent destruction interrupted!")
             self.send('application_interrupt')
-        except PTRACE_ERRORS as error:
-            writeError(self, error, "Agent destruction error")
+        except Exception as error:
+            print(self, error, "Agent destruction error", file=stderr)
 
     def destroy(self):
         """

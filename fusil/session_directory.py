@@ -9,6 +9,7 @@ if SUPPORT_UID:
     from os import getgid, chown
 from fusil.unsafe import permissionHelp
 import re
+import grp
 from errno import EPERM
 
 # allow letters, digits, understand and dash
@@ -39,10 +40,11 @@ class SessionDirectory(SessionAgent, Directory):
     def changeOwner(self, uid):
         if not SUPPORT_UID:
             return
-        gid = getgid()
+        gid = grp.getgrnam("fusil").gr_gid
         try:
             chown(self.directory, uid, gid)
         except OSError as err:
+            raise
             if err.errno != EPERM:
                 raise
             help = permissionHelp(self.application().options)

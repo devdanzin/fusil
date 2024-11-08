@@ -97,6 +97,9 @@ class Environment(ProjectAgent):
     def __init__(self, process):
         ProjectAgent.__init__(self, process.project(), "%s:env" % process.name)
         self.clear()
+        self.copies.append("PYTHON_GIL")
+        self.copies.append("PYTHON_JIT")
+        self.copies.append("LSAN_OPTIONS")
         if RUNNING_WINDOWS:
             self.copies.append('SYSTEMROOT')
 

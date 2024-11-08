@@ -1,3 +1,8 @@
+import grp
+import pwd
+
+from shutil import chown
+
 from fusil.unsafe import SUPPORT_UID
 from errno import EACCES
 from os import chdir, access, X_OK
@@ -13,13 +18,22 @@ class ChildError(Exception):
     pass
 
 def prepareProcess(process):
+    from sys import stderr
+    print(f"USER {getuid()}", file=stderr)
     project = process.project()
     config = project.config
     options = process.application().options
 
     # Trace the new process
     process.debugger.traceme()
-
+    # Set current working directory
+    directory = process.getWorkingDirectory()
+    try:
+        uid = pwd.getpwnam("fusil").pw_uid
+        gid = grp.getgrnam("fusil").gr_gid
+        chown(directory, uid, gid)
+    except Exception as e:
+        print(e)
     # Change the user and group
     if SUPPORT_UID:
         changeUserGroup(config, options)
@@ -80,6 +94,9 @@ def changeUserGroup(config, options):
             setgid(gid)
         except OSError:
             errors.append("group to %s" % gid)
+        except Exception as e:
+            print(e)
+            raise
 
     # Change user?
     uid = config.process_uid
@@ -88,6 +105,9 @@ def changeUserGroup(config, options):
             setuid(uid)
         except OSError:
             errors.append("user to %s" % uid)
+        except Exception as e:
+            print(e)
+            raise
     if not errors:
         return
 

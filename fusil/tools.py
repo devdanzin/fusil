@@ -61,8 +61,8 @@ def makeFilename(text):
     else:
         # byte string
         text = text.lower()
-        text = re.sub(b'[^a-z_-]', '_', text)
-        text = re.sub(b'_{2,}', '_', text)
-        text = re.sub(b'_$', '', text)
+        text = re.sub(b'[^a-z_-]', b'_', text)
+        text = re.sub(b'_{2,}', b'_', text)
+        text = re.sub(b'_$', b'', text)
     return text
 
