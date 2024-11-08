@@ -38,8 +38,6 @@ def prepareProcess(process):
     if SUPPORT_UID:
         changeUserGroup(config, options)
 
-    # Set current working directory
-    directory = process.getWorkingDirectory()
     try:
         chdir(directory)
     except OSError as err:

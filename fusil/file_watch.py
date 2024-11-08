@@ -62,8 +62,8 @@ class FileWatch(ProjectAgent):
             u'overflow': 0.40,
 
             # Fatal errors
-            u'fatal': 1.0,
-            u'assert': 1.0,
+            u'fatal': 0.1,
+            u'assert': 0.2,
             u'assertion': 1.0,
             u'critical': 1.0,
             u'exception': 1.0,
