@@ -1,0 +1,105 @@
+#!/usr/bin/env python
+"""
+VLC fuzzer.
+"""
+
+VLC_PROGRAM = 'vlc'
+INTERFACE = 'dummy'
+SECONDS = 5
+MAX_FILESIZE = 1024*1024
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from fusil.auto_mangle import AutoMangle
+
+class Fuzzer(Application):
+    NAME = "vlc"
+    USAGE = "%prog [options] filename"
+    NB_ARGUMENTS = 1
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "VLC")
+        options.add_option("--program", help="VLC program path (default: %s)" % VLC_PROGRAM,
+            type="str", default=VLC_PROGRAM)
+        options.add_option("--seconds", help="Play/convert duration in seconds (default: %s)" % SECONDS,
+            type="int", default=SECONDS)
+        options.add_option("--filesize", help="Maximum file size in bytes (default: %s)" % MAX_FILESIZE,
+            type="int", default=MAX_FILESIZE)
+        options.add_option("--video", help="Enable the video output (default: use dummy video output)",
+            action="store_true", default=False)
+        options.add_option("--audio", help="Enable the audio output (default: use dummy audio output)",
+            action="store_true", default=False)
+        options.add_option("--interface", help="Interface name (default: %s)" % INTERFACE,
+            type="str", default=INTERFACE)
+        return options
+
+    def setupProject(self):
+        project = self.project
+        # Command line
+        minutes, seconds = divmod(self.options.seconds, 60)
+        stop_time = "%02u:%02u" % (minutes, seconds)
+        arguments = [
+            self.options.program,
+            # No GUI
+            '--intf', self.options.interface,
+        ]
+        arguments.append('-vvv')
+        has_run_time_opt = False
+        if has_run_time_opt:
+            arguments.append('--run-time=%s' % stop_time) #option for 0.8.*
+        else:
+            arguments.append('--stop-time=%s' % stop_time) #option for 0.9.* and 1.*
+        if not self.options.audio:
+            # Null audio output
+            arguments.extend(('--aout', 'dummy'))
+        if not self.options.video:
+            # Null video output
+            arguments.extend(('--vout', 'dummy'))
+        # Input filename
+        arguments.append('<movie>')
+        if not has_run_time_opt:
+            # Quit when done
+            arguments.append('vlc://quit')
+
+        # Create buggy input file
+        orig_filename = self.arguments[0]
+        mangle = AutoMangle(project, orig_filename)
+        mangle.max_size = self.options.filesize
+        mangle.first_offset = 100
+
+        # Create the process
+        timeout = self.options.seconds + 2.0
+        process = MangleProcess(project,
+            arguments,
+            "<movie>",use_relative_mangle=False,
+            timeout=timeout)
+        if self.options.interface != 'dummy':
+            process.setupX11()
+#        process.env.copy('HOME')
+        process.max_memory = None
+        WatchProcess(process, timeout_score=0)
+        stdout = WatchStdout(process)
+        stdout.score_weight = 0.4
+#        stdout.ignoreRegex(r"libdvdread: Can't stat ")
+        stdout.ignoreRegex(r'no access_demux module matching "file" could be loaded')
+        stdout.addRegex(r'main input error: no suitable demux module', -0.50)
+        #stdout.addRegex(r'main playlist: nothing to play', -0.50)
+        stdout.addRegex(r'removing module "direct3d"', -0.50)
+        stdout.addRegex(r'garbage at input', -0.50)
+        stdout.addRegex(r'theora decoder error: this bitstream does not contain Theora video data', -0.10)
+        stdout.addRegex(r'Trying to seek to far : EOF?', 0.20)
+        stdout.addRegex(r'marker does not match f_code', 0.20)
+        stdout.addRegex(r'vorbis decoder error: this bitstream does not contain Vorbis audio data', -0.10)
+        stdout.addRegex(r'Error: No ogg data found in file', -0.50)
+#        stdout.addRegex(r'access_file access error: seeking too far', 0.10)
+#        stdout.score_weight = 0.40
+        del stdout.words['error']
+        del stdout.words['failed']
+        del stdout.words["can't"]
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

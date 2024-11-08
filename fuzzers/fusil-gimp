@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+"""
+Gimp fuzzer.
+"""
+
+from __future__ import print_function, with_statement
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.create import CreateProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from fusil.auto_mangle import AutoMangle
+from fusil.dummy_mangle import DummyMangle
+from os.path import basename
+
+PROGRAM = 'gimp'
+NB_FILES = 25
+MAX_FILESIZE = 1024*1024
+
+class Fuzzer(Application):
+    NAME = "gimp"
+    USAGE = "%prog [options] image1 [image2 ...]"
+    NB_ARGUMENTS = (1, None)
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "Gimp")
+        options.add_option("--nb-files", help="Number of generated files (default: %s)" % NB_FILES,
+            type="int", default=NB_FILES)
+        options.add_option("--program", help="Gimp program path (default: %s)" % PROGRAM,
+            type="str", default=PROGRAM)
+        options.add_option("--filesize", help="Maximum file size in bytes (default: %s)" % MAX_FILESIZE,
+            type="int", default=MAX_FILESIZE)
+        options.add_option("--test", help="Test mode (no fuzzing, just make sure that the fuzzer works)",
+            action="store_true")
+        return options
+
+    def setupProject(self):
+        if self.options.test:
+            DummyMangle(self.project, self.arguments)
+        else:
+            mangle = AutoMangle(self.project, self.arguments, self.options.nb_files)
+            mangle.max_size = self.options.filesize
+
+        # Create the process
+        arguments = [self.options.program,
+            '--no-interface',
+#            '--verbose',
+            '--batch-interpreter', 'plug-in-script-fu-eval',
+            '--batch', '-']
+        process = GimpProcess(self.project, arguments)
+        WatchProcess(process)
+        stdout = WatchStdout(process)
+        stdout.ignoreRegex('fatal parse error')
+        # > Error: Procedure execution of gimp-file-load failed: This XCF file is corrupt!
+        # I could not even salvage any partial image data from it.
+        stdout.ignoreRegex('file is corrupt')
+        stdout.max_nb_line = None
+        del stdout.words['warning']
+        del stdout.words['error']
+
+class GimpProcess(CreateProcess):
+    def init(self):
+        CreateProcess.init(self)
+        self.script_filename = None
+
+    def on_mangle_filenames(self, filenames):
+        self.script_filename = self.session().createFilename("script")
+        filenames_str = ' '.join('"%s"' % basename(filename) for filename in filenames)
+        with open(self.script_filename, "w") as fp:
+            print('(gimp-message "Start Gimp fuzzer")', file=fp)
+            print('(define (fuzzfiles n f)', file=fp)
+            print('  (let* (', file=fp)
+            print('       (fname (car f))', file=fp)
+            print('       (img 0)', file=fp)
+            print('    )', file=fp)
+            print('    (gimp-message fname)', file=fp)
+            print('    (set! img (car (gimp-file-load RUN-NONINTERACTIVE fname fname)))', file=fp)
+            print('    (gimp-image-delete img)', file=fp)
+            print('    (if (= n 1) 1 (fuzzfiles (- n 1) (cdr f)))', file=fp)
+            print('  )', file=fp)
+            print(')', file=fp)
+            print("(fuzzfiles %s '(%s))" % (len(filenames), filenames_str), file=fp)
+            print('(gimp-quit 0)', file=fp)
+        self.createProcess()
+
+    def createStdin(self):
+        return open(self.script_filename, 'rb')
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

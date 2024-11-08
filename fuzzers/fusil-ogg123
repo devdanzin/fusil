@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+"""
+ogg123 fuzzer
+"""
+
+MAX_FILESIZE = 32*1024
+PROGRAM = 'ogg123'
+MANGLE = "fixed"
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+if MANGLE == "incr":
+    from fusil.incr_mangle import IncrMangle as OggMangle
+elif MANGLE == "auto":
+    from fusil.auto_mangle import AutoMangle as OggMangle
+else:
+    from fusil.mangle import MangleFile as OggMangle
+
+class Fuzzer(Application):
+    NAME = "ogg123"
+    USAGE = "%prog [options] audio.ogg"
+    NB_ARGUMENTS = 1
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "ogg123 fuzzer")
+        options.add_option("--max-filesize", help="Maximum file size in bytes (default: %s)" % MAX_FILESIZE,
+            type="int", default=MAX_FILESIZE)
+        options.add_option("--program", help="Ogg program: ogg123 or ogginfo (default: %s)" % PROGRAM,
+            choices=("ogg123", "ogginfo"), default=PROGRAM)
+        return options
+
+    def setupProject(self):
+        project = self.project
+
+        orig_filename = self.arguments[0]
+        mangle = OggMangle(project, orig_filename)
+        mangle.max_size = self.options.max_filesize
+        if MANGLE == "auto":
+            mangle.hard_min_op = 1
+            mangle.hard_max_op = 100
+        elif MANGLE == "incr":
+            from fusil.incr_mangle_op import InverseBit, Increment
+            mangle.operations = (InverseBit, Increment)
+        else:
+            mangle.config.min_op = 1
+            mangle.config.max_op = 10
+
+        if self.options.program == "ogginfo":
+            COMMAND = ['ogginfo', '<ogg>']
+        else:
+            COMMAND = ['ogg123', '-d', 'null', '<ogg>']
+
+        process = MangleProcess(project, COMMAND, "<ogg>", timeout=60.0)
+        process.env.copy('HOME')
+
+        if COMMAND[0] == 'ogg123':
+            WatchProcess(process, exitcode_score=-0.25)
+        else:
+            WatchProcess(process, exitcode_score=0)
+
+        stdout = WatchStdout(process)
+        stdout.max_nb_line = None
+        stdout.show_matching = True
+        stdout.addRegex(r"The file may be corrupted", -0.50)
+        stdout.addRegex(r"Corrupted ogg", -0.50)
+        stdout.addRegex(r"Could not decode vorbis header packet", -0.50)
+    #    stdout.ignoreRegex('^Warning: Could not decode vorbis header packet')
+        stdout.ignoreRegex('^Warning: sequence number gap')
+        stdout.ignoreRegex('^New logical stream.*: type invalid$')
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

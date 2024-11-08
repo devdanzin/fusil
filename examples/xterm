@@ -1,0 +1,37 @@
+#!/usr/bin/env python
+"""
+Demontration of xterm bug: off-by-one error in memory allocation used
+to parse PATH environement variable.
+
+Bug fixed in xterm version 236:
+
+   http://bugs.freedesktop.org/show_bug.cgi?id=16790
+"""
+
+from fusil.application import Application
+from fusil.process.env import EnvVarLength
+from fusil.process.create import ProjectProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+
+class Fuzzer(Application):
+    NAME = "xterm"
+
+    def setupProject(self):
+        # Run "xterm ls" command with a timeout of one second
+        process = ProjectProcess(self.project, ['xterm', 'ls'], timeout=1.0)
+
+        # Project is using X11 (eg. setup environment variables)
+        process.setupX11()
+
+        # Ask Fusil to generate the environment variable "PATH" with a size in 0..1000
+        process.env.add(EnvVarLength('PATH', max_length=1000))
+
+        # Watch the created process
+        # Since timeouts are meaningless, just ignore them (use nul score)
+        WatchProcess(process, timeout_score=0)
+        WatchStdout(process)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+"""
+Mplayer audio/video mplayer.
+
+Supported file formats:
+ - AVI video
+ - WAV audio
+ - Ogg/Vorbis audio
+ - Ogg/Theora video
+ - Mastroska (.mkv) video
+ - DVD
+"""
+
+MPLAYER_PROGRAM = 'mplayer'
+PLAY_DURATION = 5
+MAX_FILESIZE = 1024*1024
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from fusil.auto_mangle import AutoMangle
+from fusil.terminal_echo import TerminalEcho
+
+class Fuzzer(Application):
+    NAME = "mplayer"
+    USAGE = "%prog [options] filename"
+    NB_ARGUMENTS = 1
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "Mplayer")
+        options.add_option("--mplayer", help="Mplayer program path (default: %s)" % MPLAYER_PROGRAM,
+            type="str", default=MPLAYER_PROGRAM)
+        options.add_option("--duration", help="Playing maximum duration in seconds (default: %s)" % PLAY_DURATION,
+            type="int", default=PLAY_DURATION)
+        options.add_option("--filesize", help="Maximum file size in bytes (default: %s)" % MAX_FILESIZE,
+            type="int", default=MAX_FILESIZE)
+        options.add_option("--video", help="Enable video (default: use null output)",
+            action="store_true", default=False)
+        options.add_option("--audio", help="Enable audio (default: use null output)",
+            action="store_true", default=False)
+        return options
+
+    def setupProject(self):
+        project = self.project
+        # Command line
+        arguments = [self.options.mplayer, '-quiet']
+        if not self.options.audio:
+            arguments.extend(['-ao', 'null'])
+        if not self.options.video:
+            arguments.extend(['-vo', 'null'])
+        timeout = self.options.duration + 1.0
+        arguments.extend(('-endpos', str(self.options.duration)))
+        arguments.append("<movie>")
+
+        # Create buggy input file
+        orig_filename = self.arguments[0]
+        mangle = AutoMangle(project, orig_filename)
+        mangle.max_size = self.options.filesize
+
+        process = MangleProcess(project,
+            arguments,
+            "<movie>",
+            timeout=timeout)
+        if self.options.video:
+            process.setupX11()
+        process.env.copy('HOME')
+        watch = WatchProcess(process, timeout_score=0)
+        if watch.cpu:
+            watch.cpu.weight = 0.20
+            watch.cpu.max_load = 0.50
+            watch.cpu.max_duration = min(3, timeout-0.5)
+            watch.cpu.max_score = 0.50
+
+        stdout = WatchStdout(process)
+
+        # Ignore input errors
+        stdout.ignoreRegex('^Failed to open LIRC support')
+        stdout.ignoreRegex("^Can't init input joystick$")
+        stdout.ignoreRegex("^Can't open joystick device ")
+
+        # Ignore codec loading errors
+        stdout.ignoreRegex('^Failed to create DirectShow filter$')
+        stdout.ignoreRegex('^Win32 LoadLibrary failed')
+        stdout.ignoreRegex('^Error loading dll$')
+        stdout.ignoreRegex('^ERROR: Could not open required DirectShow codec ')
+        stdout.ignoreRegex("could not open DirectShow")
+
+        # Ignore other errors
+        stdout.ignoreRegex("^Terminal type `unknown' is not defined.$")
+        stdout.ignoreRegex('^VDecoder init failed')
+        stdout.ignoreRegex("Read error at pos\. [0-9]+")
+        stdout.ignoreRegex("could not connect to socket")
+        stdout.ignoreRegex('^ADecoder init failed')
+        stdout.ignoreRegex('^error while decoding block:')
+        stdout.ignoreRegex('^Error while decoding frame!$')
+        stdout.ignoreRegex('^\[(mpeg4|msmpeg4|wmv1|h264|NULL) @ ')
+
+        stdout.addRegex('[oO]verflow', 0.10)
+        stdout.addRegex('MPlayer interrupted by signal', 1.0)
+        stdout.addRegex('AVI: Missing video stream', -0.50)
+        stdout.addRegex('^No stream found.$', -0.50)
+        stdout.max_nb_line = None
+
+        # Restore terminal state
+        TerminalEcho(project)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

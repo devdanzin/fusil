@@ -1,0 +1,181 @@
+#!/usr/bin/env python
+"""
+Fuzzer for GNU libc environment variables.
+
+Errors (?) with libc 2.5 and 2.6.1:
+    MALLOC_TOP_PAD_: (len=38) '-8819591051163692829984324870324709886'
+    LD_HWCAP_MASK: (len=31) '4604331229650750074196056802320'
+
+GNU libc variable list:
+    http://www.scratchbox.org/documentation/general/tutorials/glibcenv.html
+
+Old advisories about unsecure variables:
+ * 2000-09-01: NLSPATH
+   Unix locale format string vulnerability
+   http://www.coresecurity.com/index.php5?module=ContentMod&action=item&id=1067
+ * 2003-12-30: LANG
+   Xsok "LANG" Environment Variable Privilege Escalation Vulnerability
+   http://secunia.com/advisories/10513/
+ * 2007-07-05: LD_HWCAP_MASK integer overflow
+   http://securitytracker.com/alerts/2007/Jul/1018334.html
+ * MALLOC_TOP_PAD_: exploit
+   http://www.synnergy.net/downloads/exploits/traceroute-exp.txt
+ * 2007-11-07: LC_TIME: setlocale() exploit for aix 5.2 (CVE-2006-4254)
+   http://www.milw0rm.com/exploits/4612
+
+Disabled variables for SUID programs:
+
+* __libc_init_secure(): elf/enbl-secure.c (__libc_enable_secure=1)
+* UNSECURE_ENVVARS: sysdeps/generic/unsecvars.h
+   - GCONV_PATH
+   - GETCONF_DIR
+   - HOSTALIASES
+   - LD_AUDIT
+   - LD_DEBUG
+   - LD_DEBUG_OUTPUT
+   - LD_DYNAMIC_WEAK
+   - LD_LIBRARY_PATH
+   - LD_ORIGIN_PATH
+   - LD_PRELOAD
+   - LD_PROFILE
+   - LD_SHOW_AUXV
+   - LD_USE_LOAD_BIAS
+   - LOCALDOMAIN
+   - LOCPATH
+   - MALLOC_TRACE
+   - NIS_PATH
+   - NLSPATH
+   - RESOLV_HOST_CONF
+   - RES_OPTIONS
+   - TMPDIR
+   - TZDIR
+* EXTRA_UNSECURE_ENVVARS: sysdeps/unix/sysv/linux/i386/dl-librecon.h:
+  - LD_AOUT_LIBRARY_PATH
+  - LD_AOUT_PRELOAD
+"""
+
+# Use non trival program to make sure that libc uses many environment variables
+COMMAND = """python -c 'print "Hello World!"'"""
+MAX_COUNT = 5
+
+from fusil.application import Application
+from fusil.bytes_generator import LETTERS, PUNCTUATION
+from fusil.process.env import EnvVarRandom, EnvVarInteger, EnvVarLength
+from fusil.process.create import ProjectProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from optparse import OptionGroup
+
+class Fuzzer(Application):
+    NAME = "libc-env"
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "libc env fuzzer")
+        options.add_option("--max-count", help="Maximum number of environment variables (default: %s)" % MAX_COUNT,
+            type="int", default=MAX_COUNT)
+        options.add_option("--command", help="Command used to test the variables (default: %r)" % COMMAND,
+            type="str", default=COMMAND)
+        return options
+
+    def setupProject(self):
+        project = self.project
+
+        # Run program with fuzzed environment variables
+        vars = list(LIBC_VARIABLES)
+        if False:
+            # AVOID libc bugs
+            vars.remove('LD_HWCAP_MASK')
+            vars.remove('MALLOC_TOP_PAD_')
+        if True:
+            var = EnvVarInteger(vars, max_count=self.options.max_count)
+        elif False:
+            var = EnvVarLength(vars, max_length=4096, max_count=self.options.max_count)
+        elif False:
+            var = EnvVarRandom(vars, max_count=self.options.max_count,
+                max_length=200,
+                bytes_set = LETTERS | PUNCTUATION)
+        else:
+            var = EnvVarRandom(vars, max_length=2000, max_count=self.options.max_count)
+        command = self.options.command
+        process = ProjectProcess(project, command)
+        process.env.add(var)
+
+        # Watch process failure with its PID
+        WatchProcess(process)
+
+        # Watch process failure with its text output
+        stdout = WatchStdout(process)
+        stdout.words['failed'] = 0
+
+# List generated from GNU libc 2.4 using shell command:
+#    find -name "*.c"|xargs grep -H 'getenv *("'\
+#    | sed 's/^.*getenv *("\([A-Z_0-9]*\)".*$/\1/'\
+#    | sort -u
+LIBC_VARIABLES = (
+    'ARGP_HELP_FMT',
+    'CHARSET',
+    'COREFILE',
+    'CRASHSERVER',
+    'DATEMSK',
+    'GCONV_PATH',
+    'GETCONF_DIR',
+    'GMON_OUT_PREFIX',
+    'HES_DOMAIN',
+    'HESIOD_CONFIG',
+    'HOME',
+    'HOSTALIASES',
+    'HZ',
+    'I18NPATH',
+    'IFS',
+    'LANG',
+    'LANGUAGE',
+    'LC_ALL',
+    'LC_CTYPE',
+    'LD_BIND_NOT',
+    'LD_BIND_NOW',
+    'LD_DYNAMIC_WEAK',
+    'LD_HWCAP_MASK',
+    'LD_LIBRARY_PATH',
+    'LD_PROFILE_OUTPUT',
+    'LD_WARN',
+    'LIBC_FATAL_STDERR_',
+    'LOCALDOMAIN',
+    'LOCPATH',
+    'MALLOC_CHECK_',
+    'MALLOC_MMAP_MAX_',
+    'MALLOC_MMAP_THRESHOLD_',
+    'MALLOC_PERTURB_',
+    'MALLOC_TOP_PAD_',
+    'MALLOC_TRIM_THRESHOLD_',
+    'MEMUSAGE_BUFFER_SIZE',
+    'MEMUSAGE_NO_TIMER',
+    'MEMUSAGE_OUTPUT',
+    'MEMUSAGE_PROG_NAME',
+    'MEMUSAGE_TRACE_MMAP',
+    'MSGVERB',
+    'NIS_DEFAULTS',
+    'NIS_GROUP',
+    'NIS_PATH',
+    'NLSPATH',
+    'OUTPUT_CHARSET',
+    'PATH',
+    'PCPROFILE_OUTPUT',
+    'POSIXLY_CORRECT',
+    'PWD',
+    'RES_OPTIONS',
+    'SEGFAULT_OUTPUT_NAME',
+    'SEGFAULT_SIGNALS',
+    'SEGFAULT_USE_ALTSTACK',
+    'SEV_LEVEL',
+    'SOMETHING_NOBODY_USES',
+    'TIMEOUTFACTOR',
+    'TMPDIR',
+    'TZ',
+    'TZDIR',
+    'X',
+    'XYZZY',
+)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

@@ -1,0 +1,95 @@
+#!/usr/bin/env python
+"""
+ClamAV anti-virus.
+
+Supported file formats:
+ - ZIP, CAB archive
+ - JPEG
+ - Windows PE program (.exe)
+ - HTML
+"""
+
+NB_FILES = 10
+MAX_MUTATIONS = 100
+MAX_MEMORY = 100*1024*1024
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.create import CreateProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.attach import AttachProcess
+from fusil.process.stdout import WatchStdout
+from fusil.auto_mangle import AutoMangle
+from fusil.file_watch import FileWatch
+
+class Fuzzer(Application):
+    NAME = "clamav"
+    USAGE = "%prog [options] filename"
+    NB_ARGUMENTS = 1
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "ClamAV")
+        options.add_option("--use-clamd", help="Use the ClamAV daemon (clamd)",
+            action="store_true")
+        options.add_option("--change-filesize", help="Allow mutation to change file size",
+            action="store_true", default=False)
+        options.add_option("--nb-files", help="Number of generated files (default: %s)" % NB_FILES,
+            type="int", default=NB_FILES)
+        options.add_option("--max-mutations", help="Maximum number of mutations (default: %s)" % MAX_MUTATIONS,
+            type="int", default=MAX_MUTATIONS)
+        options.add_option("--max-memory", help="Maximum clamd server memory in bytes (default: %s)" % MAX_MEMORY,
+            type="int", default=MAX_MEMORY)
+        return options
+
+    def setupProject(self):
+        project = self.project
+
+        if self.options.use_clamd:
+            PROGRAM = 'clamdscan'
+        else:
+            PROGRAM = 'clamscan'
+
+        orig_filename = self.arguments[0]
+
+        mangle = AutoMangle(project, orig_filename, self.options.nb_files)
+        mangle.config.max_op = self.options.max_mutations
+        mangle.config.change_size = self.options.change_filesize
+
+        # Watch clamd server
+        if self.options.use_clamd:
+            clamd = AttachProcess(project, 'clamd')
+            clamd.max_memory = self.options.max_memory
+
+        process = ClamavProcess(project, [PROGRAM], timeout=100.0)
+        process.max_memory = self.options.max_memory
+        WatchProcess(process, exitcode_score=0.10)
+        stdout = WatchStdout(process)
+        stdout.max_nb_line = (50+self.options.nb_files, 1.0)
+        stdout.addRegex(r"Can't connect to clamd", 1.0)
+
+        logs = [stdout]
+        if self.options.use_clamd:
+            log = FileWatch.fromFilename(project,
+                '/var/log/clamav/clamav.log', start="end")
+            log.max_nb_line = None
+            logs.append(log)
+
+        for log in logs:
+            log.ignoreRegex(r"\*\*\* DON'T PANIC!")
+            log.ignoreRegex('SCAN SUMMARY')
+            log.ignoreRegex(': OK$')
+            log.ignoreRegex('^Infected files: 0$')
+            log.ignoreRegex('^Time: ')
+            log.addRegex(' FOUND$', 0.05)
+            del log.words['error']
+            log.show_matching = True
+            log.show_not_matching = True
+
+class ClamavProcess(CreateProcess):
+    def on_mangle_filenames(self, new_files):
+        self.cmdline.arguments = self.cmdline.arguments[:1] + new_files
+        self.createProcess()
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

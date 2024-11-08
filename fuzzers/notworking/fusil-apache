@@ -1,0 +1,328 @@
+#!/usr/bin/env python
+"""
+Apache fuzzer: HTTP open connection.
+"""
+
+from fusil.application import Application
+from optparse import OptionGroup
+from ptrace.linux_proc import searchProcessesByName
+from fusil.process.attach import AttachProcessPID
+from fusil.file_watch import FileWatch
+# from hashlib import md5
+from fusil.network.tcp_client import TcpClient
+from fusil.bytes_generator import (
+    BytesGenerator,
+    LOWER_LETTERS, LETTERS, ASCII8, PRINTABLE_ASCII,
+    DECIMAL_DIGITS, PUNCTUATION)
+from fusil.unicode_generator import UnixPathGenerator
+from ptrace.six.moves import range as xrange
+from random import choice, randint
+import re
+
+DEFAULT_HOST = '127.0.0.1'
+DEFAULT_PORT = 80
+
+CLEANUP_REGEX = (
+    re.compile(r"((?:Date|Last-Modified|Content-Length|Keep-Alive): ).*", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"(<address>).*(</address>)", re.MULTILINE),
+    re.compile(r"(The requested URL ).* (was not found)", re.MULTILINE),
+)
+ANSWER_REGEX = re.compile(r"^HTTP/1.1 ([0-9]{3}) (.*)")
+ERROR_LOG_REGEX = re.compile(r"^\[[^]]+\] \[error\] \[client [^]]+\] ")
+
+class Fuzzer(Application):
+    NAME = "apache"
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "Apacher fuzzer")
+        options.add_option("--host", help="Apache Host name or IP (default: %s)" % DEFAULT_HOST,
+            type="str", default=DEFAULT_HOST)
+        options.add_option("--port", help="Apache port number (default: %s)" % DEFAULT_PORT,
+            type="int", default=DEFAULT_PORT)
+        options.add_option("--http-width", help="HTTP line width (default: 80)",
+            type="int", default=80)
+        options.add_option("--printable", help="Only use ASCII7 printable characters (32..127)",
+            action="store_true")
+        options.add_option("--webdav", help="Use also WEBDAV verbs (PUT, DELETE, PROPFIND, ...)",
+            action="store_true")
+        return options
+
+    def setupProject(self):
+        project = self.project
+        project.session_timeout = 10.0
+
+        for pid in searchProcessesByName("apache2"):
+            project.error("Found Apache process: %s" % pid)
+            AttachProcessPID(project, pid)
+
+        HttpClient(project, self.options,
+            self.options.host, self.options.port,
+            connect_timeout=1.0)
+
+        error = FileWatch.fromFilename(project, '/var/log/apache2/error.log', 'end')
+        error.cleanup_func = lambda text: ERROR_LOG_REGEX.sub("", text)
+        error.ignoreRegex(r"^File does not exist: ")
+        error.ignoreRegex(r"^Invalid URI in request ")
+        error.ignoreRegex(r"^Client sent malformed Host header")
+
+        access = FileWatch.fromFilename(project, '/var/log/apache2/access.log', 'end')
+        access.ignoreRegex(r'^[^-]+- - \[[^]]+\] "(GET|POST|HEAD)')
+        for log in (error, access):
+            log.show_matching = True
+            log.show_not_matching = True
+
+class CommonHeader:
+    def __init__(self):
+        self.headers = (
+            "Host",
+            "User-Agent",
+            "Accept",
+            "Accept-Language",
+            "Accept-Encoding",
+            "Accept-Charset",
+            "Keep-Alive",
+            "Connection",
+            "Cookie",
+            "Referer",
+        )
+
+    def createValue(self):
+        return choice(self.headers)
+
+class Answer:
+    def __init__(self, raw):
+        self.raw = raw
+        self.code = None
+        self.message = None
+        self.parse()
+
+    def parse(self):
+        match = ANSWER_REGEX.search(self.raw)
+        if not match:
+            return None
+        self.code = int(match.group(1))
+        self.message = match.group(2).strip()
+
+
+class HttpClient(TcpClient):
+    def __init__(self, project, options, host, port, **kw):
+        TcpClient.__init__(self, project, host, port, **kw)
+        self.options = options
+        self.max_request_size = 49000
+
+        key_size = 400
+        self.key_generators = (
+            BytesGenerator(1, key_size, LETTERS | set("-")),
+            CommonHeader(),
+        )
+        self.uri_generator = UnixPathGenerator(100, absolute=True)
+
+        self.verbs = (
+            "GET", "HEAD", "POST")
+        if self.options.webdav:
+            self.verbs += (
+                "PUT", "COPY", "MERGE", "DELETE", "CHECKOUT"
+                "PROPFIND", "PROPPATCH", "CONNECT",
+                "MKACTIVITY", "MKCOL",
+                "REPORT", "OPTIONS")
+
+        # See limit_req_fieldsize and DEFAULT_LIMIT_REQUEST_FIELDSIZE
+        # in Apache source code
+        #
+        # why max-2? -1 for the nul byte and -1 to avoid the limit!
+        self.max_header_size = 8190 - 2
+        if self.options.printable:
+            charset = PRINTABLE_ASCII
+        else:
+            charset = ASCII8
+        self.value_generators = (
+            BytesGenerator(1, 20, LETTERS | DECIMAL_DIGITS | PUNCTUATION),
+            UriGenerator(100),
+            BytesGenerator(0, self.max_header_size, charset - set("\r\n")),
+        )
+        self.min_nb_header = 1
+        # Apache hard limit: 100
+        self.max_nb_header = 6
+        self.checksums = set((
+            # Error 400 (GET)
+            "18f151df7e0029b70d8c8cb18915524b",
+            # Error 400 (HEAD)
+            "8c74110d0c22403d1c9a2b87812d727c",
+            # Error 404 (GET)
+            "a230e5cdc2a1cb909f0e720ecfa0425c",
+            # Error 404 (GET keepalive)
+            "a387c51bbecd904318a6b5ccf1db7f07",
+            # Error 404 (HEAD)
+            "82c22eb36543805e036826ef1d22e1b0",
+            # Error 404 (HEAD keepalive)
+            "701edea58d4248a6f0860306eb9f1937",
+        ))
+
+    def init(self):
+        TcpClient.init(self)
+        self.score = None
+        self.step = "send"
+
+    def stopSession(self):
+        self.closeSocket()
+        self.send('session_stop')
+
+    def createHeaders(self):
+        # VERB
+        uri = str(self.uri_generator.createValue())
+        verb = choice(self.verbs)
+        yield ("%s %s HTTP/1.0" % (verb, uri),)
+
+        # Headers
+        nb_header = randint(self.min_nb_header, self.max_nb_header)
+        for index in xrange(nb_header):
+            generator = choice(self.key_generators)
+            raw = generator.createValue()
+            raw += ": "
+            generator = choice(self.value_generators)
+            raw += generator.createValue()
+
+            size = self.max_header_size
+            lines = []
+            while raw:
+                if lines:
+                    raw = ' ' + raw
+
+                width = min(self.options.http_width, size)
+                if width < 1:
+                    break
+
+                lines.append(raw[:width])
+                size -= width
+                raw = raw[width:]
+            yield lines
+
+    def live(self):
+        if not self.socket:
+            return
+        if self.step == "send":
+            self.sendRequest()
+            self.step = "recv"
+        else:
+            answer = self.recvBytes(timeout=4.0)
+            self.processAnswer(answer)
+            self.stopSession()
+
+    def createRequest(self):
+        size = self.max_request_size - 2
+        request = []
+        for lines in self.createHeaders():
+            header_len = sum( len(line) for line in lines ) + len(lines)
+            if not request:
+                header_len -= 1
+            if size < header_len:
+                break
+            size -= header_len
+            request.extend(lines)
+        request = "\n".join(request) + "\n\n"
+        return request
+
+    def createFile(self, filename):
+        filename = self.session().createFilename(filename)
+        return open(filename, "w")
+
+    def sendRequest(self):
+        request = self.createRequest()
+
+        # Store the request
+        output = self.createFile("request.txt")
+        output.write(request)
+        output.close()
+
+        self.socket.setblocking(False)
+        if not self.sendBytes(request):
+            self.stopSession()
+            return
+
+    def sessionSuccess(self):
+        self.score = 1.0
+        #self.send('project_stop')
+
+    def processAnswer(self, answer):
+        if not answer:
+            self.error("Server doesn't answer!")
+            self.sessionSuccess()
+            return
+
+        # Store the answer
+        output = self.createFile("answer.txt")
+        output.write(answer)
+        output.close()
+
+        answer = Answer(answer)
+        if answer.code == 200:
+            # Nothing interesting here
+            return
+        if answer.code:
+            self.warning("Answer: code=%s, message=%r" % (answer.code, answer.message))
+
+        if answer.code in (400, 404):
+            return
+
+        self.sessionSuccess()
+
+#        def replace(regs):
+#            return ''.join(regs.groups())
+#
+#        clean_answer = answer.raw
+#        for regex in CLEANUP_REGEX:
+#            clean_answer = regex.sub(replace, clean_answer)
+#
+#        checksum = md5(clean_answer).hexdigest()
+#        display = clean_answer
+#        if checksum not in self.checksums:
+#            self.error("Unknown answer checksum! MD5=%s" % checksum)
+#            log = self.error
+#        else:
+#            log = self.info
+#        for line in display.splitlines():
+#            log("Answer: %r" % line)
+
+    def getScore(self):
+        return self.score
+
+class UriGenerator(BytesGenerator):
+    def __init__(self, max_length):
+        BytesGenerator.__init__(self, 1, max_length)
+        self.domain_generator = BytesGenerator(2, 3, LOWER_LETTERS)
+        self.host_part_generator = BytesGenerator(1, 10, LOWER_LETTERS | set("-"))
+        self.path_generator = UnixPathGenerator(100)
+        self.host_min_part = 1
+        self.host_max_part = 5
+        self.min_port = 1
+        self.max_port = 65535
+        self.protocols = ("http", "https", "ftp")
+
+    def createValue(self, length=None):
+        if length is None:
+            length = self.createLength()
+
+        uri = choice(self.protocols) + "://"
+
+        # TODO: Username and password
+
+        # Host
+        parts = randint(self.host_min_part, self.host_max_part)
+        uri += '.'.join( self.host_part_generator.createValue()
+            for index in xrange(parts) )
+        uri += '.' + self.domain_generator.createValue()
+
+        # Port
+        if randint(0, 3) == 0:
+            uri += ":%s" % randint(self.min_port, self.max_port)
+
+        # Path
+        uri += "/"
+        size = length-len(uri)
+        if 0 < size:
+            uri += str(self.path_generator.createValue(size))
+        return uri
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

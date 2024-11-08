@@ -1,0 +1,46 @@
+#!/usr/bin/env python
+
+# Improved version of the Fusil "Hello World!": run the echo command with
+# random arguments and watch the created process (status and standard output).
+
+from fusil.application import Application
+from fusil.process.create import CreateProcess
+from fusil.bytes_generator import BytesGenerator, ASCII0
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from random import randint, choice
+
+class EchoProcess(CreateProcess):
+    OPTIONS = ("-e", "-E", "-n")
+
+    def __init__(self, project):
+        CreateProcess.__init__(self, project, ["echo"])
+        self.datagen = BytesGenerator(1, 10, ASCII0)
+
+    def createCmdline(self):
+        arguments = ['echo']
+        for index in xrange(randint(3, 6)):
+            if randint(1, 5) == 1:
+                option = choice(self.OPTIONS)
+                arguments.append(option)
+            else:
+                data = self.datagen.createValue()
+                arguments.append(data)
+        self.error("Command line=%s" % repr(arguments))
+        return arguments
+
+    def on_session_start(self):
+        self.cmdline.arguments = self.createCmdline()
+        self.createProcess()
+
+class Fuzzer(Application):
+    NAME = "goodbye"
+
+    def setupProject(self):
+        process = EchoProcess(self.project)
+        WatchProcess(process)
+        WatchStdout(process)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

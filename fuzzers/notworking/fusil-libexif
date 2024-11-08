@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+"""
+libexif fuzzer: use "exif picture.jpeg" command.
+
+Supported file formats: JPEG
+"""
+
+INCR_MANGLE = False
+
+from fusil.application import Application
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+if INCR_MANGLE:
+    from fusil.incr_mangle import IncrMangle
+else:
+    from fusil.auto_mangle import AutoMangle
+
+class Fuzzer(Application):
+    NAME = "libexif"
+    USAGE = "%prog [options] image.jpg"
+    NB_ARGUMENTS = 1
+
+    def setupProject(self):
+        project = self.project
+        orig_filename = self.arguments[0]
+        if INCR_MANGLE:
+            mangle = IncrMangle(project, orig_filename)
+            mangle.operation_per_version = 25
+            mangle.max_version = 50
+            # FIXME: Only fuzz JPEG EXIF header
+            #mangle.min_offset = 2
+            #mangle.max_offset = 555
+        else:
+            AutoMangle(project, orig_filename)
+
+        process = MangleProcess(project, ['exif', "<picture>"], "<picture>")
+        WatchProcess(process,
+    #        exitcode_score=-0.50,
+            exitcode_score=0,
+        )
+
+        stdout = WatchStdout(process)
+        stdout.min_nb_line = (3, -0.5)
+        stdout.words['error'] = 0.10
+        # "Color Space         |Internal error (unknown value 4097)." is not a fatal error
+        stdout.ignoreRegex(r'unknown (value|data)')
+        stdout.ignoreRegex(r'Unknown Exif version')
+        stdout.addRegex(r'^Corrupt data', -1.0)
+        stdout.addRegex(r'does not contain EXIF data!$', -1.0)
+        stdout.addRegex(r'The data supplied does not seem to contain EXIF data.$', -1.0)
+        stdout.addRegex(r'does not contain EXIF data!$', -1.0)
+        stdout.addRegex(r'^Unknown encoding\.$', -1.0)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

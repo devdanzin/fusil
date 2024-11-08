@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+"""
+ImageMagick picture toolkit
+
+Use "identify -verbose image" or "convert image temp.bmp" command line.
+
+Supported file formats: BMP, GIF, JPG, ICO, ...
+"""
+
+INCR_MANGLE = False
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+if INCR_MANGLE:
+    from fusil.incr_mangle import IncrMangle as BaseMangle
+else:
+    from fusil.auto_mangle import AutoMangle as BaseMangle
+from fusil.fixpng import fixPNG
+
+class Fuzzer(Application):
+    NAME = "imagemagick"
+    USAGE = "%prog [--convert] [options] filename"
+    NB_ARGUMENTS = 1
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "ImageMagick fuzzer")
+        options.add_option("--convert", help="Use convert program instead of identify",
+            action="store_true")
+        options.add_option("--no-stdout", dest="use_stdout", help="Don't use stdout/stderr",
+            action="store_false", default=True)
+        return options
+
+    def setupProject(self):
+        project = self.project
+
+        orig_filename = self.arguments[0]
+        mangle = ImageMangle(project, orig_filename)
+        if INCR_MANGLE:
+            mangle.operation_per_version = 1
+            mangle.max_version = 50
+        else:
+            mangle.fixed_size_factor = 0.5
+
+        options = {'timeout': 2.0}
+        if self.options.convert:
+            output = project.createFilename('output.bmp')
+            cmdline = ['convert', '<image>', output]
+        else:
+            cmdline = ['identify', '-verbose', '<image>']
+        if not self.options.use_stdout:
+            options['stdout'] = 'null'
+        process = MangleProcess(project, cmdline, '<image>', **options)
+        options = {'exitcode_score': -0.25}
+        if orig_filename.endswith(".jpg"):
+            # Don't care about libjpeg stdout flooding
+            options['timeout_score'] = -0.25
+        WatchProcess(process, **options)
+
+        if self.options.use_stdout:
+            stdout = WatchStdout(process)
+            stdout.max_nb_line = (3000, 0.20)
+            stdout.addRegex('Memory allocation failed', 1.0)
+            stdout.addRegex('no decode delegate for this image format', -1.0)
+            stdout.addRegex('Corrupt', 0.05)
+            stdout.addRegex('Unsupported', 0.05)
+            stdout.addRegex('Not a JPEG file', -0.50)
+            stdout.addRegex('JPEG datastream contains no image', -0.50)
+            stdout.show_not_matching = False
+
+class ImageMangle(BaseMangle):
+    def writeData(self, filename, data):
+        if filename.endswith(".png"):
+            self.info("Fix CRC32 of PNG chunks")
+            data = fixPNG(data)
+        BaseMangle.writeData(self, filename, data)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

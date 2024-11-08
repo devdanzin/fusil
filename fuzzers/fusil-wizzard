@@ -1,0 +1,387 @@
+#!/usr/bin/env python
+"""
+Fusil wizzard
+"""
+from __future__ import print_function
+
+# File format version
+FILE_MAGIC = u"fusil-wizzard 0.1.3"
+
+# Use stdout probe?
+USE_STDOUT = False
+
+# Stages
+STAGE_HELP, STAGE_GETENV, STAGE_FUZZ, STAGE_DONE = tuple(range(4))
+
+# Command line option to get the usage
+HELP_OPTIONS = ("--help", "-h")
+
+# ltrace program name
+LTRACE = 'ltrace'
+
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.project_agent import ProjectAgent
+from fusil.process.create import CreateProcess
+from fusil.process.env import EnvVarRandom
+from fusil.process.watch import WatchProcess
+from fusil.process.tools import runCommand, locateProgram
+from fusil.cmd_help_parser import CommandHelpParser, Option
+from fusil.bytes_generator import (
+    BytesGenerator,
+#    LengthGenerator,
+    ASCII0, PRINTABLE_ASCII, LETTERS, HEXADECIMAL_DIGITS, PUNCTUATION)
+from os.path import basename
+from random import randint, choice
+from errno import ENOENT
+from sys import argv
+from os import rename, unlink
+import codecs
+import re
+if USE_STDOUT:
+    from fusil.process.stdout import WatchStdout
+
+# Match >getenv("COLUMNS")<
+GETENV_REGEX = re.compile(r'^[0-9]+ getenv\("([^"]+)"\)')
+
+CONFIG = (
+    "arg_min_count", "arg_max_count",
+    "opt_min_count", "opt_max_count",
+    "env_min_count", "env_max_count",
+    "env_min_length", "env_max_length",
+)
+
+class Fuzzer(Application):
+    NAME = "wizzard"
+    USAGE = "%prog [options] --project=PROJECT program [arg1 arg2 ...]"
+    NB_ARGUMENTS = (0, None)
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "Mplayer")
+        options.add_option("--project", help="Project filename",
+            type="str")
+        options.add_option("--no-ltrace", dest="ltrace",
+            help="Don't use ltrace to find environment variables",
+            action="store_false", default=True)
+        return options
+
+    def processOptions(self, parser, options, arguments):
+        Application.processOptions(self, parser, options, arguments)
+        if not options.project:
+            parser.print_help()
+            exit(1)
+
+    def setupProject(self):
+        if self.options.ltrace and self.config.use_debugger:
+            self.error("Disable the debugger to be able to use ltrace")
+            self.project.debugger.disable()
+
+        process = CreateProcess(self.project, ["program"])
+        WatchProcess(process, exitcode_score=0.25)
+        if USE_STDOUT:
+            stdout = WatchStdout(process)
+            stdout.words = dict(
+                (pattern, score)
+                for pattern, score in stdout.words.items()
+                if score >= 0.7)
+            stdout.max_nb_line = None
+
+        Wizzard(self.project, self.options, self.arguments, process)
+
+class FuzzOption:
+    def __init__(self, option):
+        self.option = option
+
+class Wizzard(ProjectAgent):
+    def __init__(self, project, options, arguments, process):
+        ProjectAgent.__init__(self, project, "wizzard")
+        self.options = options
+        self.filename = options.project
+        self.arg_min_count = 0
+        self.arg_max_count = 0
+        self.opt_min_count = 1
+        self.opt_max_count = 5
+        self.env_min_count = 1
+        self.env_max_count = 5
+        self.env_min_length = 0
+        self.env_max_length = 10
+        self.generators = [
+            BytesGenerator(1, 20, ASCII0),
+            BytesGenerator(1, 20, PRINTABLE_ASCII),
+            BytesGenerator(1, 20, LETTERS | HEXADECIMAL_DIGITS | PUNCTUATION),
+#            LengthGenerator(1024, 8192),
+        ]
+        self.stage = STAGE_HELP
+        self.help_index = 0
+        self.cmdline_options = []
+        self.environment = set()
+        self.arguments = arguments
+        self.process = process
+        self.saved = False
+        self.ltrace_program = None
+
+        # Try to load the project
+        loaded = self.load()
+        if loaded:
+            if not self.arguments:
+                raise ValueError("Missing program name on command line")
+            self.arguments[0] = locateProgram(self.arguments[0], raise_error=True)
+            self.createEnv()
+
+    def destroy(self):
+        if self.saved:
+            self.error("==> continue fuzzing using command: %s --project %s" % (argv[0], self.filename))
+
+    def load(self):
+        try:
+            out = codecs.open(self.filename, 'r', 'utf-8')
+        except IOError as err:
+            if err.errno == ENOENT:
+                return False
+            else:
+                raise
+
+        self.error("Reload project: %s" % self.filename)
+        self.stage = STAGE_FUZZ
+        self.arguments = []
+        section = None
+        line_number = 0
+        for line in out:
+            line_number += 1
+            line = line.rstrip()
+            if line_number == 1:
+                if line != FILE_MAGIC:
+                    raise SyntaxError("Unknown file format or version: %r" % line)
+                continue
+            if not line:
+                section = None
+                continue
+            if section:
+                if section == "[arguments]":
+                    arg = str(line)
+                    self.arguments.append(arg)
+                elif section == "[config]":
+                    key, value = line.split("=", 1)
+                    if key not in CONFIG:
+                        raise SyntaxError("Line %s: unknown option %s" % (line_number, key))
+                    value = int(value)
+                    setattr(self, key, value)
+                elif section == "[options]":
+                    format = str(line)
+                    nb_arg = format.count("%s")
+                    opt = Option(format, nb_arg)
+                    self.cmdline_options.append(opt)
+                elif section == "[environment]":
+                    name = str(line)
+                    self.environment.add(name)
+                else:
+                    raise SyntaxError("Line %s: unknown section %r" % (line_number, line))
+            else:
+                section = line
+        out.close()
+        return True
+
+    def write(self):
+        # Create a new file (using a temporary name)
+        tmpname = self.filename + ".tmp"
+        out = codecs.open(tmpname, 'w', 'utf-8')
+        try:
+            self._write(out)
+        except:
+            out.close()
+            unlink(tmpname)
+            raise
+        out.close()
+
+        # Rename the file on success
+        rename(tmpname, self.filename)
+        self.saved = True
+
+    def _write(self, out):
+        # write arguments
+        print(FILE_MAGIC, file=out)
+        print(file=out)
+
+        # [config]
+        print("[config]", file=out)
+        for key in CONFIG:
+            value = getattr(self, key)
+            print("%s=%s" % (key, value), file=out)
+        print(file=out)
+
+        print("[arguments]", file=out)
+        for arg in self.arguments:
+            arg = str(arg)
+            print(arg, file=out)
+        print(file=out)
+
+        # write options (if any)
+        if self.cmdline_options:
+            print("[options]", file=out)
+            options = list(self.cmdline_options)
+            options.sort(key=lambda opt: str(opt))
+            for opt in options:
+                print("%s" % opt.format, file=out)
+            print(file=out)
+
+        # write environment (if any)
+        if self.environment:
+            print("[environment]", file=out)
+            environ = list(self.environment)
+            environ.sort()
+            for name in environ:
+                print(name, file=out)
+            print(file=out)
+
+    def createArgument(self):
+        generator = choice(self.generators)
+        return generator.createValue()
+
+    def createOption(self):
+        option = choice(self.cmdline_options)
+        generator = choice(self.generators)
+        arguments = []
+        for index in range(option.nb_argument):
+            value = generator.createValue()
+            arguments.append(value)
+        return option.formatArguments(arguments)
+
+    def init(self):
+        self.trace_filename = None
+        self.live_done = False
+
+    def live(self):
+        # Only execute live() once by session
+        if self.live_done:
+            return
+        self.live_done = True
+
+        if self.stage == STAGE_HELP:
+            self.stageHelp()
+        elif self.stage == STAGE_GETENV:
+            self.stageGetenv()
+        elif self.stage == STAGE_FUZZ:
+            self.stageFuzz()
+        else:
+            self.nextStage()
+
+    def deinit(self):
+        self.write()
+
+    def nextStage(self):
+        if STAGE_DONE <= self.stage:
+            self.send('project_stop')
+        else:
+            self.stage += 1
+            self.send('session_stop')
+        if self.stage == STAGE_GETENV and (not self.options.ltrace):
+            self.stage += 1
+
+    def parseLtrace(self, filename):
+        trace = open(filename)
+        for line in trace:
+            match = GETENV_REGEX.search(line)
+            if not match:
+                continue
+            name = match.group(1)
+            if name in self.environment:
+                continue
+            self.environment.add(name)
+            self.error("Found new environment variable: %s" % name)
+        trace.close()
+
+    def createEnv(self):
+        if not self.environment:
+            return
+        names = list(self.environment)
+        var = EnvVarRandom(names,
+            self.env_min_length, self.env_max_length,
+            max_count=self.env_max_count)
+        var.min_count = self.env_min_count
+        self.process.env.add(var)
+
+    def ltraceArguments(self):
+        if not self.ltrace_program:
+            self.ltrace_program = locateProgram(LTRACE, raise_error=True)
+        tracefile = self.session().createFilename("ltrace")
+        return [self.ltrace_program, "-f", "-e", "getenv", "-o", tracefile, "--"], tracefile
+
+    def stageGetenv(self):
+        arguments, tracefile = self.ltraceArguments()
+        arguments += self.arguments
+        runCommand(self, arguments, stdout=False)
+        self.parseLtrace(tracefile)
+        self.nextStage()
+
+    def stageFuzz(self):
+        # ltrace arguments
+        if self.options.ltrace:
+            arguments, self.trace_filename = self.ltraceArguments()
+            # Workaround ltrace bug:
+            # https://bugzilla.redhat.com/show_bug.cgi?id=1044766
+            self.process.env.clear()
+            self.process.env.copy('PATH')
+        else:
+            arguments = []
+            self.process.env.clear()
+            self.createEnv()
+
+        # random options
+        arguments.append(self.arguments[0])
+        if self.cmdline_options:
+            nbopt = randint(self.opt_min_count, self.opt_max_count)
+            for index in range(nbopt):
+                opts = self.createOption()
+                arguments.extend(opts)
+            arguments.extend(self.arguments[1:])
+
+        # random arguments
+        nbarg = randint(self.arg_min_count, self.arg_max_count)
+        for index in range(nbarg):
+            arg = self.createArgument()
+            arguments.append(arg)
+
+        # create the process
+        self.warning("Arguments: %s" % repr(arguments))
+        self.process.cmdline.arguments = arguments
+        self.process.createProcess()
+
+    def on_process_exit(self, agent, status):
+        if self.trace_filename:
+            try:
+                self.parseLtrace(self.trace_filename)
+            except IOError:
+                pass
+
+    def stageHelp(self):
+        filename = self.session().createFilename("help.stdout")
+        stdout = open(filename, 'w')
+        program = self.arguments[0]
+        help_opt = HELP_OPTIONS[self.help_index]
+        arguments = [program, help_opt]
+        try:
+            runCommand(self, arguments, stdout=stdout)
+        except RuntimeError as err:
+            self.error(str(err))
+        stdout.close()
+
+        # Get the help
+        help = CommandHelpParser(basename(program))
+        stdout = open(filename)
+        help.parseFile(stdout)
+        stdout.close()
+        if not help.options:
+            self.help_index += 1
+            if self.help_index == len(HELP_OPTIONS):
+                raise ValueError("Unable to parse the help :-/")
+            self.send('session_stop')
+            return
+
+        self.cmdline_options = help.options
+        for opt in self.cmdline_options:
+            self.error("Found option: %s" % opt)
+        self.nextStage()
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

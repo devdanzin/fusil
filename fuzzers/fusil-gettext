@@ -1,0 +1,144 @@
+#!/usr/bin/env python
+"""
+Demonstration of poor gettext parser quality: inject errors
+in valid .mo file and use it using dummy program (bash).
+"""
+
+from __future__ import print_function
+from fusil.application import Application
+from optparse import OptionGroup
+from fusil.process.create import CreateProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from fusil.auto_mangle import AutoMangle
+from os.path import basename, dirname, join as path_join
+from sys import stderr, exit
+from os import unlink, mkdir
+from os.path import isabs
+from fusil.process.tools import runCommand, locateProgram
+from fusil.project_agent import ProjectAgent
+import re
+
+# strace program
+STRACE = 'strace'
+
+# Any command using gettext and displaying a translated message
+COMMAND = '/bin/cat /nonexistantpath/nonexistantfile'
+
+# Default .mo filename
+MO_FILENAME = 'libc.mo'
+
+class Fuzzer(Application):
+    NAME = "gettext"
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "Gettext fuzzer")
+        options.add_option("--command", help="command using libc translation (default: %s)" % COMMAND,
+            type="str", default=COMMAND)
+        options.add_option("--mo-filename", help="MO file used by the command (default: %s)" % MO_FILENAME,
+            type="str", default=MO_FILENAME)
+        options.add_option("--strace", help="strace program path, used to locate full path of the mo file (default: %s)" % STRACE,
+            type="str", default=STRACE)
+        return options
+
+    def setupProject(self):
+        project = self.project
+        command = self.options.command
+
+        # Locate MO full path
+        orig_filename = self.locateMO(project, self.options.mo_filename)
+
+        # Create (...)/LC_MESSAGES/ directory
+        LocaleDirectory(project, "locale_dir")
+
+        # Create mangled MO file
+        mangle = MangleGettext(project, orig_filename)
+        mangle.max_size = None
+        mangle.config.max_op = 2000
+
+        # Run program with fuzzy MO file and special LANGUAGE env var
+        process = GettextProcess(project, command)
+        process.timeout = 10.0
+
+        # <path> value will be replaced later, on the mangle_filenames() event
+        process.env.set('LANGUAGE', '<path>')
+        process.env.copy('LANG')
+
+        # Watch process failure with its PID
+        # Ignore bash exit code (127: command not found)
+        WatchProcess(process, exitcode_score=0)
+
+        # Watch process failure with its text output
+        stdout = WatchStdout(process)
+        stdout.words['failed'] = 0
+
+    def locateMO(self, project, mo_filename):
+        """
+        Locate full path of a MO file used by a command using strace program.
+        """
+        if isabs(mo_filename):
+            return mo_filename
+        command = self.options.command
+
+        # Run strace program
+        log = project.createFilename('strace')
+        strace_program = locateProgram(self.options.strace, raise_error=True)
+        arguments = [
+            strace_program,
+            "-e", "open",
+            "-o", log,
+            "--"]
+        arguments += command.split()
+        runCommand(self, arguments, stdout=None, raise_error=False)
+
+        # Find full mo filename in strace output
+        regex = re.compile('open\("([^"]+%s)", [^)]+\) = [0-9]+' % mo_filename)
+        mo_path = None
+        for line in open(log):
+            match = regex.match(line.rstrip())
+            if not match:
+                continue
+            mo_path = match.group(1)
+            break
+        unlink(log)
+        if not mo_path:
+            print("Unable to find the full path of the MO file (%s) used by command %r" \
+                % (mo_filename, command), file=stderr)
+            exit(1)
+        return mo_path
+
+class LocaleDirectory(ProjectAgent):
+    def on_session_start(self):
+        messages_dir = self.session().createFilename('LC_MESSAGES')
+        mkdir(messages_dir)
+        self.send('gettext_messages_dir', messages_dir)
+
+class MangleGettext(AutoMangle):
+    def on_aggressivity_value(self, value):
+        self.aggressivity = value
+        self.checkMangle()
+
+    def checkMangle(self):
+        if self.messages_dir and self.aggressivity is not None:
+            self.mangle()
+
+    def createFilename(self, filename, index):
+        return path_join(self.messages_dir, basename(filename))
+
+    def on_gettext_messages_dir(self, messages_dir):
+        self.messages_dir = messages_dir
+        self.checkMangle()
+
+    def init(self):
+        self.messages_dir = None
+        self.aggressivity = None
+
+class GettextProcess(CreateProcess):
+    def on_mangle_filenames(self, filenames):
+        locale_dir = dirname(dirname(filenames[0]))
+        self.env['LANGUAGE'].value = '../'*10 + locale_dir
+        self.createProcess()
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

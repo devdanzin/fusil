@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+"""
+librpm fuzzer using "rpm" command program.
+Inject errors in valid RPM file and then recompute MD5 and SHA1 checksums.
+"""
+
+from fusil.application import Application
+from fusil.process.mangle import MangleProcess
+from fusil.process.watch import WatchProcess
+from fusil.process.stdout import WatchStdout
+from fusil.mangle import MangleFile
+from array import array
+from md5 import md5
+from sha import sha
+from hachoir_core import config as hachoir_config
+from hachoir_core.stream import StringInputStream
+from hachoir_parser import guessParser
+
+class Fuzzer(Application):
+    NAME = "rpm"
+    USAGE = "%prog [options] package.rpm"
+    NB_ARGUMENTS = 1
+
+    def setupProject(self):
+        project = self.project
+
+        # Hachoir: be quiet!
+        hachoir_config.quiet = True
+
+        # Create mangle agent
+        orig_filename = self.arguments[0]
+        mangle = MangleRPM(project, orig_filename)
+        mangle.config.max_op = 200
+
+        # Create rpm process
+        process = MangleProcess(project,
+            ['rpm', '-qpi', '<rpm>'], '<rpm>',
+            timeout=10.0)
+
+        # Create some probes
+        WatchProcess(process, exitcode_score=0.10)
+        stdout = WatchStdout(process)
+        stdout.addRegex('memory allocation failed', 1.0)
+        del stdout.words['error']
+
+class MangleRPM(MangleFile):
+    def useHachoirParser(self, parser):
+        last = None
+        sha1_offset = None
+        md5_offset = None
+        if "checksum" in parser:
+            for item in parser.array('checksum/item'):
+                last = item
+                if ('tag' not in item) or ('offset' not in item):
+                    continue
+                tag = item['tag'].value
+                if tag == 269:
+                    sha1_offset = item['offset'].value
+                elif tag == 1004:
+                    md5_offset = item['offset'].value
+        if last:
+            offset0 = (last.absolute_address + last.size) // 8
+            if sha1_offset is not None:
+                self.sha1_offset = offset0 + sha1_offset
+            if md5_offset is not None:
+                self.md5_offset = offset0 + md5_offset
+        if "header" in parser:
+            header = parser['header']
+            self.header_offset = header.absolute_address // 8
+            self.filedata_offset = self.header_offset + (header.size // 8)
+
+    def mangleData(self, data, index):
+        data = MangleFile.mangleData(self, data, index)
+
+        # Create Hachoir parser
+        data_str = data.tostring()
+        parser = guessParser(StringInputStream(data_str))
+
+        # Find checksum offets
+        self.sha1_offset = None
+        self.md5_offset = None
+        self.header_offset = None
+        self.filedata_offset = None
+        if parser:
+            self.useHachoirParser(parser)
+        else:
+            self.error("Unable to create Hachoir parser")
+
+        # Recompute the checksums
+        self.fixChecksums(data)
+        return data
+
+    def fixChecksums(self, data):
+        if not self.header_offset:
+            self.error("Unable to get header offset! (don't recompute checksums)")
+            return
+        if (self.md5_offset is not None) \
+        and (self.header_offset is not None):
+            summary_data = data[self.header_offset:].tostring()
+            checksum = md5(summary_data).digest()
+            data[self.md5_offset:self.md5_offset+16] = array('B', checksum)
+        else:
+            self.error("Warning: Unable to get MD5 ckecksum or header offset! (don't recompute MD5 checksum)")
+
+        if (self.sha1_offset is not None) \
+        and (self.header_offset is not None) \
+        and (self.filedata_offset is not None):
+            summary_data = data[self.header_offset:self.filedata_offset].tostring()
+            checksum = sha(summary_data).hexdigest()
+            data[self.sha1_offset:self.sha1_offset+40] = array('B', checksum)
+        else:
+            self.error("Warning: Unable to get SHA-1, file data or header offset! (don't recompute SHA-1 checksum)")
+
+if __name__ == "__main__":
+    Fuzzer().main()
+

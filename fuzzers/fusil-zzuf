@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+"""
+Fuzz a process using the zzuf library.
+
+zzuf homepage: http://libcaca.zoy.org/wiki/zzuf
+"""
+
+MIN_SEED = 0
+MAX_SEED = 2**32 - 1
+
+from fusil.application import Application
+from fusil.process.create import DEFAULT_TIMEOUT
+from fusil.process.env import EnvVarIntegerRange
+from fusil.process.watch import WatchProcess, DEFAULT_TIMEOUT_SCORE
+from fusil.zzuf import ZzufProcess, DEFAULT_RATIO
+from optparse import OptionGroup
+from ptrace.six.moves import map as imap
+import re
+
+class Fuzzer(Application):
+    NAME = "zzuf"
+    USAGE = "%prog [options] program [arg1 arg2 ...]"
+    NB_ARGUMENTS = (1, None)
+
+    def createFuzzerOptions(self, parser):
+        options = OptionGroup(parser, "zzuf fuzzer options")
+        options.add_option("-r", "--ratio",
+            help="bit fuzzing ratio (default %g) or ratio range (<start:stop>)" % DEFAULT_RATIO,
+            type="str")
+        options.add_option("-b", "--bytes",
+            help="only fuzz bytes at offsets within <ranges>",
+            type="str")
+        options.add_option("-l", "--list",
+            help="only fuzz Nth descriptor with N in <list>",
+            type="str")
+        options.add_option("-f", "--fuzzing",
+            help="use fuzzing mode <mode>: xor, set, unset (default: xor)",
+            type="str")
+        options.add_option("-E", "--exclude",
+            help="do not fuzz files matching <regex>",
+            type="str")
+        options.add_option("-I", "--include",
+            help="only fuzz files matching <regex>",
+            type="str")
+        options.add_option("-p", "--ports",
+            help="only fuzz network destination ports in <list>",
+            type="str")
+        options.add_option("-P", "--protect",
+            help="protect bytes and characters in <list>",
+            type="str")
+        options.add_option("-R", "--refuse",
+            help="refuse bytes and characters in <list>",
+            type="str")
+        options.add_option("-n", "--network",
+            help="fuzz network input",
+            action="store_true")
+        options.add_option("--cmdline",
+            help="Only fuzz files specified in the command line",
+            action="store_true")
+        options.add_option("--timeout",
+            help="Process maximum execution time in seconds (default: %.1f sec)" % DEFAULT_TIMEOUT,
+            type="float", default=DEFAULT_TIMEOUT)
+        options.add_option("--check-exit",
+            help="report processes that exit with a non-zero status",
+            action="store_true")
+        options.add_option("--timeout-score",
+            help="Process timeout score in percent (default: %.1f%%)" % (DEFAULT_TIMEOUT_SCORE*100),
+            type="float", default=DEFAULT_TIMEOUT_SCORE*100)
+        options.add_option("--zzuf-library",
+            help="zzuf library full path (default: guess common paths)",
+            type="str", default=None)
+        return options
+
+    def getFilenames(self):
+        dashdash = False
+        filenames = []
+        for arg in self.arguments[1:]:
+            if dashdash:
+                filenames.append(arg)
+            elif arg == '--':
+                dashdash = True
+            elif not arg.startswith("-"):
+                filenames.append(arg)
+        return filenames
+
+    def setupProject(self):
+        # Check options
+        if self.options.ports \
+        and not self.options.network:
+            raise ValueError("port option (-p) requires network fuzzing (-n)")
+
+        # Create include/exclude filters
+        include = None
+        if self.options.include:
+            include = self.options.include
+        elif self.options.cmdline:
+            filenames = self.getFilenames()
+            filenames = imap(re.escape, filenames)
+            include = '(%s)' % '|'.join(filenames)
+        exclude = self.options.exclude
+
+        # Get the ratio
+        if self.options.ratio:
+            ratio = self.options.ratio
+            if ":" in ratio:
+                ratio = ratio.split(":", 1)
+                minratio = float(ratio[0])
+                maxratio = float(ratio[1])
+            else:
+                minratio = float(ratio)
+                maxratio = minratio
+        else:
+            minratio = DEFAULT_RATIO
+            maxratio = DEFAULT_RATIO
+
+        # Create the process agent
+        process = ZzufProcess(self.project,
+            self.arguments,
+            library_path=self.options.zzuf_library,
+            timeout=self.options.timeout)
+
+        # Generate a random zzuf seed
+        process.env.add(EnvVarIntegerRange('ZZUF_SEED', MIN_SEED, MAX_SEED))
+
+        # Set zzuf options
+        process.setRatio(minratio, maxratio)
+
+        if include:
+            process.env.set('ZZUF_INCLUDE', include)
+        if exclude:
+            process.env.set('ZZUF_EXCLUDE', exclude)
+        if self.options.network:
+            process.env.set('ZZUF_NETWORK', '1')
+
+        if self.options.fuzzing:
+            process.env.set('ZZUF_FUZZING', self.options.fuzzing)
+        if self.options.bytes:
+            process.env.set('ZZUF_BYTES', self.options.bytes)
+        if self.options.list:
+            process.env.set('ZZUF_LIST', self.options.list)
+        if self.options.ports:
+            process.env.set('ZZUF_PORTS', self.options.ports)
+        if self.options.protect:
+            process.env.set('ZZUF_PROTECT', self.options.protect)
+        if self.options.refuse:
+            process.env.set('ZZUF_REFUSE', self.options.refuse)
+
+        # Watch process exit status and stdout
+        if self.options.check_exit:
+            exitcode_score = 1.00
+        else:
+            exitcode_score = 0.10
+        WatchProcess(process,
+            exitcode_score=exitcode_score,
+            timeout_score=self.options.timeout_score / 100)
+
+if __name__ == "__main__":
+    Fuzzer().main()
+
