@@ -1,3 +1,4 @@
+import sys
 from fusil.unsafe import SUPPORT_UID
 from errno import ENOENT
 from os import devnull
@@ -11,11 +12,12 @@ from fusil.process.replay_python import createReplayPythonScript
 from fusil.process.tools import (
         locateProgram, displayProcessStatus, splitCommand)
 from fusil.project_agent import ProjectAgent
-from ptrace.os_tools import RUNNING_WINDOWS
 from ptrace.signames import signalName
 from ptrace.six import string_types, text_type, binary_type
 if SUPPORT_UID:
     from pwd import getpwuid
+
+RUNNING_WINDOWS = sys.platform == 'win32'
 
 if RUNNING_WINDOWS:
     from win32api import TerminateProcess

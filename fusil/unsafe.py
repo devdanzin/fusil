@@ -1,4 +1,7 @@
-from ptrace.os_tools import RUNNING_WINDOWS
+import sys
+
+RUNNING_WINDOWS = sys.platform == 'win32'
+
 SUPPORT_UID = not RUNNING_WINDOWS
 if SUPPORT_UID:
     from os import getuid

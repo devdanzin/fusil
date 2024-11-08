@@ -1,15 +1,18 @@
+import sys
 from fusil.project_agent import ProjectAgent
-from ptrace.os_tools import HAS_PROC, RUNNING_WINDOWS
+from ptrace.os_tools import HAS_PROC
 if HAS_PROC:
     from ptrace.linux_proc import (
         ProcError, readProcessStatm, searchProcessByName)
 from ptrace.process_tools import dumpProcessInfo
+RUNNING_WINDOWS = sys.platform == 'win32'
 if HAS_PROC:
     from os import stat
     from fusil.process.cpu_probe import CpuProbe
 elif not RUNNING_WINDOWS:
     from os import kill
 from errno import ESRCH, ENOENT
+
 
 class AttachProcessPID(ProjectAgent):
     def __init__(self, project, pid, name=None):

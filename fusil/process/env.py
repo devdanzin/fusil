@@ -1,9 +1,12 @@
+import sys
 from fusil.project_agent import ProjectAgent
 from random import choice, randint
 from os import getenv
 from fusil.bytes_generator import BytesGenerator, LengthGenerator, ASCII0
 from fusil.unicode_generator import IntegerGenerator
-from ptrace.os_tools import RUNNING_WINDOWS
+
+RUNNING_WINDOWS = sys.platform == 'win32'
+
 
 class EnvironmentVariable:
     def __init__(self, name, max_count=1):

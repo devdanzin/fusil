@@ -1,10 +1,12 @@
 from os import getenv, access, X_OK, pathsep, devnull, getcwd
 from os.path import dirname, normpath, join as path_join, isabs
-from ptrace.os_tools import RUNNING_WINDOWS
 from ptrace.signames import signalName
 from ptrace.six import string_types
 from subprocess import Popen, STDOUT
 import re
+import sys
+
+RUNNING_WINDOWS = sys.platform == 'win32'
 
 if RUNNING_WINDOWS:
     from win32process import SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS

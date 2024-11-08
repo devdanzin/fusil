@@ -1,11 +1,15 @@
+import sys
+
 from fusil.bytes_generator import BytesGenerator
 from fusil.process.tools import runCommand, locateProgram
 from fusil.write_code import WriteCode
 from os.path import basename
-from ptrace.os_tools import RUNNING_WINDOWS
 from ptrace.six import b, text_type, string_types, PY2
 from random import choice, randint
 from struct import pack
+
+RUNNING_WINDOWS = sys.platform == 'win32'
+
 
 class CompilerError(Exception):
     pass
