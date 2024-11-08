@@ -20,7 +20,7 @@
 #  - hg ci
 #  - hg push
 
-from imp import load_source
+from importlib.machinery import SourceFileLoader
 from os import path
 from sys import argv
 from glob import glob
@@ -55,7 +55,7 @@ def main():
         from distutils.core import setup
         use_setuptools = False
 
-    fusil = load_source("version", path.join("fusil", "version.py"))
+    fusil = SourceFileLoader("version", path.join("fusil", "version.py")).load_module()
     PACKAGES = {}
     for name in MODULES:
         PACKAGES[name] = name.replace(".", "/")
