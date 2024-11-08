@@ -1,5 +1,5 @@
 from os import chmod
-from ptrace.six import text_type
+from fusil.six import text_type
 
 class WriteCode:
     def __init__(self):

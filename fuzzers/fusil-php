@@ -15,7 +15,7 @@ from fusil.bytes_generator import (
     ASCII8, PRINTABLE_ASCII)
 from fusil.write_code import WriteCode
 from optparse import OptionGroup
-from ptrace.six import unichr, PY2
+from fusil.six import unichr, PY2
 from random import choice, randint
 from weakref import ref
 import re

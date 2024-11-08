@@ -2,7 +2,7 @@ from fusil.python_tools import RUNNING_PYTHON3
 from fusil.write_code import WriteCode
 from fusil.xhost import xhostCommand
 from os.path import normpath
-from ptrace.six import itervalues, iteritems, binary_type, text_type
+from fusil.six import itervalues, iteritems, binary_type, text_type
 from sys import executable, getfilesystemencoding, path as sys_path
 import itertools
 

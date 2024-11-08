@@ -17,7 +17,7 @@ from fusil.bytes_generator import (BytesGenerator, LengthGenerator,
     LETTERS, DECIMAL_DIGITS, PUNCTUATION)
 from fusil.unicode_generator import IntegerGenerator
 from fusil.c_tools import quoteString
-from ptrace.six.moves import range as xrange
+from fusil.six.moves import range as xrange
 from random import choice, randint
 
 DEBUG = False

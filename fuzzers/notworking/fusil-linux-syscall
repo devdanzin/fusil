@@ -11,7 +11,7 @@ from fusil.c_tools import FuzzyFunctionC, CodeC
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
-from ptrace.six.moves import range as xrange
+from fusil.six.moves import range as xrange
 from random import choice, randint
 from fusil.project_agent import ProjectAgent
 from fusil.linux.syslog import Syslog

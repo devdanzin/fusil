@@ -1,6 +1,6 @@
 from fusil.bytes_generator import Generator
-from ptrace.six import text_type, unichr
-from ptrace.six.moves import range as xrange
+from fusil.six import text_type, unichr
+from fusil.six.moves import range as xrange
 from random import choice, randint
 
 def createCharset(start, stop):

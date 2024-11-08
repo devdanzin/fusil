@@ -14,7 +14,7 @@ from fusil.process.env import EnvVarIntegerRange
 from fusil.process.watch import WatchProcess, DEFAULT_TIMEOUT_SCORE
 from fusil.zzuf import ZzufProcess, DEFAULT_RATIO
 from optparse import OptionGroup
-from ptrace.six.moves import map as imap
+from fusil.six.moves import map as imap
 import re
 
 class Fuzzer(Application):

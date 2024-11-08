@@ -13,7 +13,7 @@ from fusil.process.tools import (
         locateProgram, displayProcessStatus, splitCommand)
 from fusil.project_agent import ProjectAgent
 from ptrace.signames import signalName
-from ptrace.six import string_types, text_type, binary_type
+from fusil.six import string_types, text_type, binary_type
 if SUPPORT_UID:
     from pwd import getpwuid
 

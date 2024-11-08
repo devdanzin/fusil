@@ -1,5 +1,5 @@
-from ptrace.six import text_type
-from ptrace.six.moves import zip as izip
+from fusil.six import text_type
+from fusil.six.moves import zip as izip
 
 import re
 

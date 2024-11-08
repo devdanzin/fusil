@@ -15,7 +15,7 @@ from fusil.bytes_generator import (
     LOWER_LETTERS, LETTERS, ASCII8, PRINTABLE_ASCII,
     DECIMAL_DIGITS, PUNCTUATION)
 from fusil.unicode_generator import UnixPathGenerator
-from ptrace.six.moves import range as xrange
+from fusil.six.moves import range as xrange
 from random import choice, randint
 import re
 

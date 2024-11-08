@@ -3,8 +3,8 @@ from fusil.project_agent import ProjectAgent
 from fusil.score import scoreLogFunc
 from fusil.tools import makeFilename
 from os.path import basename
-from ptrace.six import b
-from ptrace.six import text_type, iteritems
+from fusil.six import b
+from fusil.six import text_type, iteritems
 from time import time
 import re
 

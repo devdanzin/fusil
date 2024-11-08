@@ -2,8 +2,8 @@ from __future__ import with_statement
 from array import array
 from fusil.project_agent import ProjectAgent
 from os import fstat
-from ptrace.six import string_types
-from ptrace.six.moves import range as xrange
+from fusil.six import string_types
+from fusil.six.moves import range as xrange
 from random import choice
 from stat import ST_SIZE
 

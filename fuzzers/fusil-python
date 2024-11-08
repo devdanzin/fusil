@@ -30,8 +30,8 @@ from fusil.process.create import CreateProcess
 from fusil.write_code import WriteCode
 from inspect import ismethoddescriptor, isclass
 from ptrace.os_tools import RUNNING_PYTHON3
-from ptrace.six import text_type, string_types
-from ptrace.six.moves import range as xrange
+from fusil.six import text_type, string_types
+from fusil.six.moves import range as xrange
 from sys import executable, version as PYTHON_VERSION
 import imp
 import pkgutil

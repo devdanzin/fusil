@@ -1,4 +1,4 @@
-from ptrace.six import b
+from fusil.six import b
 
 def generateSpecialValues():
     values = (

@@ -2,7 +2,7 @@ from array import array
 from fusil.mangle_agent import MangleAgent
 from fusil.mangle_op import SPECIAL_VALUES, MAX_INCR
 from fusil.tools import minmax
-from ptrace.six.moves import range as xrange
+from fusil.six.moves import range as xrange
 from random import randint, choice
 
 class MangleConfig:

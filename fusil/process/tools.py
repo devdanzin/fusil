@@ -1,7 +1,7 @@
 from os import getenv, access, X_OK, pathsep, devnull, getcwd
 from os.path import dirname, normpath, join as path_join, isabs
 from ptrace.signames import signalName
-from ptrace.six import string_types
+from fusil.six import string_types
 from subprocess import Popen, STDOUT
 import re
 import sys

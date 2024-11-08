@@ -1,6 +1,6 @@
 from os import mkdir, listdir, chmod, umask
 from os.path import basename, join as path_join, exists as path_exists
-from ptrace.six import text_type
+from fusil.six import text_type
 from shutil import rmtree
 from sys import getfilesystemencoding
 
