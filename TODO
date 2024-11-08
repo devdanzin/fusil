@@ -1,0 +1,13 @@
+Fusil TODO list
+===============
+
+ * setup.py: run 2to3 on docstrings and rst files ("2to3 -w -d . doc/*.rst
+   tests/*.rst"). See also python3.0.rst
+ * replay.py is unable to open a file as stdin, required by fusil-gimp
+ * Factorize code responsible to rename the session on process exit
+   (share code between Debugger and CreateProcess)
+ * Protect the terminal using setsid(), setpgrp(), or setpgid()
+ * Use initgroups() in CreateProcess?
+ * Remove the class WatchProcess: move code to CreateProcess to avoid duplicate
+   events (agent score) and duplicate code
+

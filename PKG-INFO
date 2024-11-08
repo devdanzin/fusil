@@ -1,0 +1,259 @@
+Metadata-Version: 1.1
+Name: fusil
+Version: 1.5
+Summary: Fuzzing framework
+Home-page: http://bitbucket.org/haypo/fusil/wiki/Home
+Author: Victor Stinner
+Author-email: UNKNOWN
+License: GNU GPL v2
+Download-URL: http://bitbucket.org/haypo/fusil/wiki/Home
+Description: Fusil is a Python library used to write fuzzing programs. It helps to start
+        process with a prepared environment (limit memory, environment variables,
+        redirect stdout, etc.), start network client or server, and create mangled
+        files. Fusil has many probes to detect program crash: watch process exit code,
+        watch process stdout and syslog for text patterns (eg. "segmentation fault"),
+        watch session duration, watch cpu usage (process and system load), etc.
+        
+        Fusil is based on a multi-agent system architecture. It computes a session
+        score used to guess fuzzing parameters like number of injected errors to input
+        files.
+        
+        Available fuzzing projects: ClamAV, Firefox (contains an HTTP server),
+        gettext, gstreamer, identify, libc_env, libc_printf, libexif, linux_syscall,
+        mplayer, php, poppler, vim, xterm.
+        
+        Website: http://bitbucket.org/haypo/fusil/wiki/Home
+        
+        
+        Usage
+        =====
+        
+        Fusil is a library and a set of fuzzers called "fusil-...". To run a fuzzer,
+        call it by its name. Example: ::
+        
+            $ fusil-gettext
+            Fusil version 0.9.1 -- GNU GPL v2
+            http://bitbucket.org/haypo/fusil/wiki/Home
+            (...)
+            [0][session 13] Start session
+            [0][session 13] ------------------------------------------------------------
+            [0][session 13] PID: 16989
+            [0][session 13] Signal: SIGSEGV
+            [0][session 13] Invalid read from 0x0c1086e0
+            [0][session 13] - instruction: CMP EDX, [EAX]
+            [0][session 13] - mapping: 0x0c1086e0 is not mapped in memory
+            [0][session 13] - register eax=0x0c1086e0
+            [0][session 13] - register edx=0x00000019
+            [0][session 13] ------------------------------------------------------------
+            [0][session 13] End of session: score=100.0%, duration=3.806 second
+            (...)
+            Success 1/1!
+            Project done: 13 sessions in 5.4 seconds (414.5 ms per session), total 5.9 seconds, aggresssivity: 19.0%
+            Total: 1 success
+            Keep non-empty directory: /home/haypo/prog/SVN/fusil/trunk/run-3
+        
+        
+        Features
+        ========
+        
+        Why using Fusil instead your own hand made C script?
+        
+         * Fusil limits child process environment: limit memory, use timeout, make
+           sure that process is killed on session end
+         * Fusil waits until system load is load before starting a fuzzing session
+         * Fusil creates a session directory used as the process current working
+           directory and Fusil only creates files in this directory (and not in /tmp)
+         * Fusil stores all actions in fusil.log but also session.log for all
+           actions related of a session
+         * Fusil has multiple available probes to compute session score: guess if
+           a sessions is a succes or not
+         * Fusil redirects process output to a file and searchs bug text patterns
+           in the stdout/stderr (Fusil contains many text patterns to detect crashes
+           and problems)
+        
+        
+        Installation
+        ============
+        
+        Read INSTALL documentation file.
+        
+        
+        Documentation
+        =============
+        
+        Read doc/index.rst: documentation index.
+        
+        Changelog
+        =========
+        
+        Fusil 1.5 (2013-03-05)
+        ----------------------
+        
+         * experimental Python 3.3 support with the same code base; python 2.5 is no
+           more supported
+         * fusil-python: generate buffer objects and Unicode strings with surrogate
+           characters
+         * Change the default process memory limit from 100 MB to 500 MB
+        
+        Fusil 1.4 (2011-02-16)
+        ----------------------
+        
+         * Python 3 support
+         * fusil-python:
+        
+           - improve function listing all Python modules: use sys.builtin_module_names
+             and pkgutil.iter_modules()
+           - blacklist more modules, classes and functions
+        
+        Fusil 1.3.2 (2010-01-09)
+        ------------------------
+        
+         * replay.py: set sys.path to ease the usage of Fusil without installing it
+         * Fix fusil-gettext: ignore strace errors in locateMO()
+         * fusil-python:
+        
+           - hide Python warnings
+           - listAllModules() includes builtin modules
+           - new option --only-c to test only modules written in C
+           - fix memory leak: unload tested modules
+           - fix getFunctions(): use also isclass() to detect classes
+        
+         * Disable Fusil process maximum memory limit
+        
+        Fusil 1.3.1 (2009-11-09)
+        ------------------------
+        
+         * fusil-python: autodiscover all modules instead of using a static list of
+           modules, catch any exception when loading a module, only fuzz public
+           functions (use module.__all__)
+         * FileWatch: ignore duplicate parts on session rename
+         * Remove session name parts duplicate (eg. "pickle-error-error" =>
+           "picke-error")
+         * replay.py: don't redirect stdin to /dev/null if --ptrace is used
+         * CPU probe: set max duration from 3 to 10 seconds (and rename the session on
+           success)
+        
+        Fusil 1.3 (2009-09-18)
+        ----------------------
+        
+         * Create fusil-gimp
+         * Remove charset from WriteCode: use builtin open() instead codecs.open()
+           because files created by open() are much faster
+         * Optimize FileWatch: don't recompile patterns at each session
+         * fusil now depends on python-ptrace 0.6
+         * Don't use close_fds argument of subprocess.Popen() on Windows
+         * Fix configuration reader: normal_calm_load, normal_calm_sleep,
+           slow_calm_load, slow_calm_sleep keys global options are float, not integer
+         * Project website moved to http://bitbucket.org/haypo/fusil/wiki/Home
+         * FileWatch uses the pattern to rename the session
+        
+        Fusil 1.2.1 (2009-02-06)
+        ------------------------
+        
+         * Fix mangle agent of the Image Magick fuzzer
+         * Fix AttachProcessPID() probe: stop the probe at process exit
+        
+        Fusil 1.2 (2009-02-04)
+        ----------------------
+        
+        User visible changes:
+        
+         * Fusil now requires Python 2.5
+         * Documentation: write an index (index.rst) and an user guide (usage.rst)
+         * Replay script: copy HOME environment for GDB and catch setuid() error
+         * fusil-firefox: support more file formats (bmp, gif, ico, png, svg), create
+           --test command line option, write the HTML page into index.html file
+         * fusil-python: write errors to stderr (instead of stdout) to avoid unicode
+           error (especially with Python3)
+         * FileWatch: rename the session with "long_output" if the program wrote more
+           than max_nbline lines
+         * fusil-python: blacklist posix.fork() to avoid false positive
+         * If the process is killed by a signal, rename the session using the
+           signal name (already worked if the debugger was disabled)
+        
+        Developer changes:
+        
+         * MangleAgent supports multiple input files
+         * Create DummyMangle: agent with MangleFile API but don't touch file content
+           to test the fuzzer
+         * Network: close() method of NetworkClient and ServerClient use
+           shutdown(SHUT_RDWR)
+         * NetworkServer uses a backlog of 5 clients for socket.listen() (instead of 1)
+        
+        Bugfixes:
+        
+         * Fix Directory.rmtree() and replay script for Python 3.0
+         * Fix ServerClient.sendBytes(): use socket.send() result to get the next
+           data offset
+        
+        Fusil 1.1 (2008-10-22)
+        ----------------------
+        
+        User visible changes:
+         * replay.py: ask confirmation if the fuzzer will not be running under a
+           different user or as root
+         * Even with --force-unsafe, show safety warning if the fuzzer is
+           running as the root user
+         * Close files for child processes (close_fds=True)
+         * Fix directory.rmtree() for Python 3.0 final
+        
+        Developer changes:
+         * Create IntegerRangeGenerator in fusil.unicode_generator
+         * Create EnvVarIntegerRange in fusil.process.env
+         * Create fusil-wizzard fuzzer
+         * Write timestamp in session.log
+         * Add session() method to ProjectAgent
+         * Add NAME attribute to a fuzzer, reused to choose the project directory name
+        
+        Bugfixes:
+         * Fix Debugger.processSignal(): use the process agent to send the message
+           (session_rename) since the debugger agent may be disabled
+         * Fix replay.py: quote gdb arguments escape quote and antislash characters
+           (eg. "text=\"Hello\\n\".")
+         * replay.py uses /dev/null for stdin as Fusil does
+         * FileWatch: open file in binary mode to use bytes in Python3
+        
+        Fusil 1.0 final (2008-09-13)
+        ----------------------------
+        
+        Visible changes:
+        
+         * Create fusil-zzuf fuzzer (use the zzuf library)
+         * Create fusil-vlc fuzzer (VLC media player)
+         * For each session, generate a Python script (replay.py) to replay the
+           session. The script can run the target in gdb, valgrind or gdb.py
+           (python-ptrace debugger), with many options (--user, --limit, etc.)
+         * Create --force-unsafe option, like --unsafe without the confirmation
+         * CreateProcess is now a probe (with a score): if the debugger catchs a
+           fatal signal, the session stops
+         * Always use a null device as stdin for child processes to avoid blocking the
+           fuzzer if the process reads stdin (eg. call getchar())
+         * Write the created process identifier in the logs
+        
+        Developer:
+        
+         * Create EnvVarIntegerRange: environment variable with an integer value
+           in a fixed range
+         * Changes to get a minimal Windows support: disable "change user/group"
+           feature on Windows; remove log file before removing the project directory;
+           use ":NUL" instead of /dev/null for null input/output
+         * On setupProject() error, make sure that the project is cleaned
+         * Close stdout files (input and output) at process exit (fix needed
+           by Windows)
+         * Rename long2raw() to uint2bytes(), and bytes2long() to bytes2uint()
+         * Normalize score that make sure that a probe score is in range [-1; +1]
+           and so that score*weight is in range[-weight; +weight]
+         * CodeC: remove method lines(), writeCode() is renamed writeIntoFile(),
+           use unicode strings (instead of byte strings)
+         * Remove StdoutFile class, code merged in CreateProcess
+        
+        
+Platform: UNKNOWN
+Classifier: Intended Audience :: Developers
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Console
+Classifier: License :: OSI Approved :: GNU General Public License (GPL)
+Classifier: Operating System :: OS Independent
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3

@@ -1,0 +1,54 @@
+Reuse existing libraries and projects
+=====================================
+
+ * http://www.nongnu.org/failmalloc/
+
+
+Ideas to crash programs
+=======================
+
+ * Don't create stdin, stdout or stderr to check if first open file gets file descriptor #0
+ * Continue to analyze gettext :-)
+ * write C library to inject errors in libc calls (eg. malloc() failure)
+
+   * Generate [http://michael-prokop.at/blog/2007/06/12/error-handling-enospc/ ENOSPC] errors?
+   * file: open(), close(), read(), write()
+   * directory: opendir(), chdir()
+   * memory:  malloc(), realloc(), calloc()
+   * network: socket(), setsockopt()
+   * time: time(), gettimeofday()
+     http://software.inl.fr/trac/trac.cgi/wiki/Macfly
+
+ * network socket proxy fuzzer
+
+Signals
+-------
+
+Send signals like SIGINT, SIGTERM, SIGSTOP, SIGUSR1, SIGUSR2.
+
+Old bugs:
+ * broken pipe (SIGPIPE)
+   https://bugzilla.mindrot.org/show_bug.cgi?id=85
+ * libc deadlock
+   http://sourceware.org/bugzilla/show_bug.cgi?id=838
+ * openssh pre-authentification denial of service
+   https://bugzilla.mindrot.org/show_bug.cgi?id=1129
+
+
+Score
+=====
+
+ * Code coverage:
+
+   * gcov: http://gcc.gnu.org/onlinedocs/gcc/Gcov.html
+   * Valgrind: http://www.valgrind.org/ Valgrind
+   * DynamoRio: http://www.cag.lcs.mit.edu/dynamorio/
+
+ * Check invalid use of memory using Valgrind (or any memory checker tool)
+ * increment score if one of these function is called:
+
+   - fgets(), memcpy(), strcpy()
+   - input comes from user (?)
+   - bytes read by the program
+   - memory usage
+
