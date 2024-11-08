@@ -1,6 +1,8 @@
+from time import sleep, time
+
 from fusil.error import FusilError
 from fusil.linux.cpu_load import SystemCpuLoad
-from time import time, sleep
+
 
 class SystemCalm:
     def __init__(self, max_load, sleep_second):

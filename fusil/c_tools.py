@@ -1,12 +1,12 @@
 import sys
-
-from fusil.bytes_generator import BytesGenerator
-from fusil.process.tools import runCommand, locateProgram
-from fusil.write_code import WriteCode
 from os.path import basename
-from fusil.six import b, text_type, string_types, PY2
 from random import choice, randint
 from struct import pack
+
+from fusil.bytes_generator import BytesGenerator
+from fusil.process.tools import locateProgram, runCommand
+from fusil.six import PY2, b, string_types, text_type
+from fusil.write_code import WriteCode
 
 RUNNING_WINDOWS = sys.platform == 'win32'
 

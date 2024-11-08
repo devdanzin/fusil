@@ -1,6 +1,9 @@
-from fusil.project_agent import ProjectAgent
 from weakref import ref as weakref_ref
+
 from ptrace.os_tools import RUNNING_LINUX
+
+from fusil.project_agent import ProjectAgent
+
 if RUNNING_LINUX:
     from fusil.process.cpu_probe import CpuProbe
 

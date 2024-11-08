@@ -1,7 +1,9 @@
-from random import randint, choice
-from fusil.mangle_op import SPECIAL_VALUES, MAX_INCR
 from array import array
+from random import choice, randint
+
+from fusil.mangle_op import MAX_INCR, SPECIAL_VALUES
 from fusil.tools import minmax
+
 
 def createBitOffset(agent, datalen):
     min_offset = 0

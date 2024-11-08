@@ -1,5 +1,7 @@
-from fusil.time_watch import TimeWatch
 from time import time
+
+from fusil.time_watch import TimeWatch
+
 
 class ProcessTimeWatch(TimeWatch):
     def init(self):

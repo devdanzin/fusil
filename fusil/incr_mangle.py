@@ -1,7 +1,8 @@
-from fusil.mangle_agent import MangleAgent
-from fusil.incr_mangle_op import OPERATIONS
-from random import randint, choice
 from array import array
+from random import choice, randint
+
+from fusil.incr_mangle_op import OPERATIONS
+from fusil.mangle_agent import MangleAgent
 
 MAX_TRY = 25000
 

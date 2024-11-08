@@ -1,12 +1,15 @@
-from fusil.project_agent import ProjectAgent
-from fusil.session import Session
-from fusil.mas.agent_list import AgentList
-from fusil.project_directory import ProjectDirectory
-from time import time
-from fusil.aggressivity import AggressivityAgent
-from ptrace.os_tools import RUNNING_LINUX, RUNNING_PYPY
-from fusil.process.debugger import Debugger
 from shutil import copyfile
+from time import time
+
+from ptrace.os_tools import RUNNING_LINUX, RUNNING_PYPY
+
+from fusil.aggressivity import AggressivityAgent
+from fusil.mas.agent_list import AgentList
+from fusil.process.debugger import Debugger
+from fusil.project_agent import ProjectAgent
+from fusil.project_directory import ProjectDirectory
+from fusil.session import Session
+
 if RUNNING_PYPY:
     from gc import collect as gc_collect
 if RUNNING_LINUX:

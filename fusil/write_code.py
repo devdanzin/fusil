@@ -1,5 +1,7 @@
 from os import chmod
+
 from fusil.six import text_type
+
 
 class WriteCode:
     def __init__(self):

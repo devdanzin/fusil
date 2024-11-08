@@ -1,6 +1,7 @@
-from fusil.network.tcp_server import TcpServer
-from fusil.network.server_client import ServerClientDisconnect
 from fusil.network.http_request import HttpRequest
+from fusil.network.server_client import ServerClientDisconnect
+from fusil.network.tcp_server import TcpServer
+
 
 class HttpServer(TcpServer):
     def __init__(self, *args):

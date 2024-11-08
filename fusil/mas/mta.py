@@ -1,5 +1,7 @@
-from fusil.mas.application_agent import ApplicationAgent
 from weakref import ref as weakref_ref
+
+from fusil.mas.application_agent import ApplicationAgent
+
 
 class MTA(ApplicationAgent):
     """

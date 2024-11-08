@@ -1,10 +1,13 @@
 from __future__ import print_function
+
 from sys import stderr
-from fusil.mas.message import Message
-from fusil.mas.mailbox import Mailbox
 from weakref import ref as weakref_ref
+
 # from ptrace.error import PTRACE_ERRORS, writeError
 from fusil.mas.agent_id import AgentID
+from fusil.mas.mailbox import Mailbox
+from fusil.mas.message import Message
+
 
 class AgentError(Exception):
     pass

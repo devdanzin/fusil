@@ -1,12 +1,14 @@
-from fusil.project_agent import ProjectAgent
-from fusil.session_agent import SessionAgent
-from fusil.mas.agent_list import AgentList
-from fusil.session_directory import SessionDirectory
-from fusil.score import normalizeScore
-from logging import INFO
-from ptrace.os_tools import RUNNING_PYPY
-from logging import Formatter
 import re
+from logging import INFO, Formatter
+
+from ptrace.os_tools import RUNNING_PYPY
+
+from fusil.mas.agent_list import AgentList
+from fusil.project_agent import ProjectAgent
+from fusil.score import normalizeScore
+from fusil.session_agent import SessionAgent
+from fusil.session_directory import SessionDirectory
+
 if RUNNING_PYPY:
     from gc import collect as gc_collect
 

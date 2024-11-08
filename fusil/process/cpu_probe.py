@@ -1,7 +1,10 @@
-from fusil.project_agent import ProjectAgent
-from fusil.linux.cpu_load import ProcessCpuLoad
-from ptrace.linux_proc import ProcError
 from time import time
+
+from ptrace.linux_proc import ProcError
+
+from fusil.linux.cpu_load import ProcessCpuLoad
+from fusil.project_agent import ProjectAgent
+
 
 class CpuProbe(ProjectAgent):
     def __init__(self, project, name,

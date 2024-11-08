@@ -1,21 +1,24 @@
-from os import getenv, access, X_OK, pathsep, devnull, getcwd
-from os.path import dirname, normpath, join as path_join, isabs
-# from ptrace.signames import signalName
-from fusil.six import string_types
-from subprocess import Popen, STDOUT
 import re
 import sys
+from os import X_OK, access, devnull, getcwd, getenv, pathsep
+from os.path import dirname, isabs
+from os.path import join as path_join
+from os.path import normpath
+from subprocess import STDOUT, Popen
+
+# from ptrace.signames import signalName
+from fusil.six import string_types
 
 RUNNING_WINDOWS = sys.platform == 'win32'
 
 if RUNNING_WINDOWS:
-    from win32process import SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS
     from win32api import GetCurrentProcessId, OpenProcess
     from win32con import PROCESS_ALL_ACCESS
+    from win32process import (BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS,
+                              SetPriorityClass)
 else:
-    from resource import (
-        getrlimit, setrlimit,
-        RLIMIT_AS, RLIMIT_CORE, RLIMIT_NPROC, RLIMIT_CPU)
+    from resource import (RLIMIT_AS, RLIMIT_CORE, RLIMIT_CPU, RLIMIT_NPROC,
+                          getrlimit, setrlimit)
     try:
         from os import nice
     except ImportError:

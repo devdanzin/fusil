@@ -1,5 +1,7 @@
-from fusil.network.client import NetworkClient
 from socket import AF_UNIX, SOCK_STREAM
+
+from fusil.network.client import NetworkClient
+
 
 class UnixSocketClient(NetworkClient):
     def __init__(self, project, socket_filename, connect_timeout=5.0):

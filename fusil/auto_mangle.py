@@ -1,6 +1,7 @@
 from fusil.mangle import MangleFile
 from fusil.tools import minmax
 
+
 class AutoMangle(MangleFile):
     def __init__(self, project, *args, **kw):
         MangleFile.__init__(self, project, *args, **kw)

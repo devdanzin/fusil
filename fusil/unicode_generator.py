@@ -1,7 +1,9 @@
+from random import choice, randint
+
 from fusil.bytes_generator import Generator
 from fusil.six import text_type, unichr
 from fusil.six.moves import range as xrange
-from random import choice, randint
+
 
 def createCharset(start, stop):
     return set(u''.join( unichr(code) for code in xrange(start, stop+1) ))

@@ -1,5 +1,6 @@
 import re
 
+
 class Option:
     def __init__(self, format, nb_argument):
         self.format = format

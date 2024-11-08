@@ -1,11 +1,15 @@
-from fusil.project_agent import ProjectAgent
-from socket import (socket, SHUT_RDWR,
-    error as socket_error,
-    timeout as socket_timeout)
-from ptrace.error import formatError, writeError
-from fusil.network.tools import formatAddress
-from time import time
 from errno import EAGAIN
+from socket import SHUT_RDWR
+from socket import error as socket_error
+from socket import socket
+from socket import timeout as socket_timeout
+from time import time
+
+from ptrace.error import formatError, writeError
+
+from fusil.network.tools import formatAddress
+from fusil.project_agent import ProjectAgent
+
 
 class NetworkClient(ProjectAgent):
     def __init__(self, project, name):

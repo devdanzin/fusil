@@ -3,14 +3,18 @@ Functions to recompute (fix) CRC32 checksums of an PNG picture.
 """
 
 from array import array
+
 try:
     from io import StringIO
 except ImportError:
     # Python 2
     from StringIO import StringIO
-from fusil.bits import bytes2uint, BIG_ENDIAN, uint2bytes
-from zlib import crc32
+
 from logging import info
+from zlib import crc32
+
+from fusil.bits import BIG_ENDIAN, bytes2uint, uint2bytes
+
 
 def pngCRC32(data):
     """

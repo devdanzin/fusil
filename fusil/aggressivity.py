@@ -1,7 +1,9 @@
 from __future__ import print_function
+
+from datetime import datetime
+
 from fusil.project_agent import ProjectAgent
 from fusil.tools import minmax
-from datetime import datetime
 
 CREATE_GRAPH_DAT = True
 

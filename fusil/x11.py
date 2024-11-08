@@ -1,9 +1,12 @@
-from Xlib.X import NONE, KeyPress, KeyRelease, AnyPropertyType, CurrentTime
+from re import IGNORECASE
+from re import compile as compileRegex
+
 from Xlib.display import Display
-from Xlib.protocol.event import (KeyPress as KeyPressEvent,
-    KeyRelease as KeyReleaseEvent)
+from Xlib.protocol.event import KeyPress as KeyPressEvent
+from Xlib.protocol.event import KeyRelease as KeyReleaseEvent
 from Xlib.protocol.request import InternAtom
-from re import compile as compileRegex, IGNORECASE
+from Xlib.X import NONE, AnyPropertyType, CurrentTime, KeyPress, KeyRelease
+
 
 def listWindows(root):
     children = root.query_tree().children

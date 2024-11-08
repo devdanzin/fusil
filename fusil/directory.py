@@ -1,10 +1,14 @@
 import grp
 import pwd
-from os import mkdir, listdir, chmod, umask, chown
-from os.path import basename, join as path_join, exists as path_exists
-from fusil.six import text_type
+from os import chmod, chown, listdir, mkdir, umask
+from os.path import basename
+from os.path import exists as path_exists
+from os.path import join as path_join
 from shutil import rmtree
 from sys import getfilesystemencoding
+
+from fusil.six import text_type
+
 
 class Directory:
     def __init__(self, directory):

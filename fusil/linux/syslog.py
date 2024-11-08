@@ -1,6 +1,7 @@
-from fusil.project_agent import ProjectAgent
+from os.path import basename, exists
+
 from fusil.file_watch import FileWatch
-from os.path import exists, basename
+from fusil.project_agent import ProjectAgent
 
 FILENAMES = (
     # Linux: system logs

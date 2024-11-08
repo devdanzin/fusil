@@ -1,5 +1,6 @@
 from fusil.tools import minmax
 
+
 def scoreLogFunc(object, score):
     if score in (None, 0):
         return object.info

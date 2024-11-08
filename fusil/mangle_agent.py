@@ -1,11 +1,14 @@
 from __future__ import with_statement
+
 from array import array
-from fusil.project_agent import ProjectAgent
 from os import fstat
-from fusil.six import string_types
-from fusil.six.moves import range as xrange
 from random import choice
 from stat import ST_SIZE
+
+from fusil.project_agent import ProjectAgent
+from fusil.six import string_types
+from fusil.six.moves import range as xrange
+
 
 class MangleAgent(ProjectAgent):
     def __init__(self, project, sources, nb_file=1):

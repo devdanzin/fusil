@@ -1,5 +1,7 @@
-from fusil.file_watch import FileWatch
 from weakref import ref as weakref_ref
+
+from fusil.file_watch import FileWatch
+
 
 class WatchStdout(FileWatch):
     def __init__(self, process):

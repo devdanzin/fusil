@@ -1,7 +1,9 @@
-from os.path import basename
-from fusil.project_agent import ProjectAgent
-from fusil.directory import Directory
 from os import getcwd
+from os.path import basename
+
+from fusil.directory import Directory
+from fusil.project_agent import ProjectAgent
+
 
 class ProjectDirectory(ProjectAgent, Directory):
     def __init__(self, project):

@@ -1,5 +1,6 @@
 from fusil.process.tools import locateProgram
 
+
 def xhostCommand(xhost_program, user, allow=True):
     if not xhostCommand.program:
         xhostCommand.program = locateProgram(

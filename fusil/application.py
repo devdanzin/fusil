@@ -1,25 +1,29 @@
-from optparse import OptionParser, OptionGroup
-from fusil.unsafe import SUPPORT_UID
+from optparse import OptionGroup, OptionParser
 from sys import exit, stdout
+
+from fusil.unsafe import SUPPORT_UID
+
 if SUPPORT_UID:
     from os import getuid, getgid
-from fusil.process.tools import runCommand
-from fusil.project import Project
+
+from ptrace.error import PTRACE_ERRORS, writeError
+from ptrace.os_tools import RUNNING_PYTHON3
+
+from fusil.application_logger import ApplicationLogger
+from fusil.config import ConfigError, FusilConfig
+from fusil.file_tools import relativePath
+from fusil.mas.agent_list import AgentList
 from fusil.mas.application_agent import ApplicationAgent
 from fusil.mas.mta import MTA
 from fusil.mas.univers import Univers
-from ptrace.error import PTRACE_ERRORS, writeError
-from ptrace.os_tools import RUNNING_PYTHON3
-from fusil.application_logger import ApplicationLogger
-from fusil.process.tools import limitMemory, beNice
-from fusil.file_tools import relativePath
-from fusil.version import VERSION, LICENSE, WEBSITE
-from fusil.mas.agent_list import AgentList
-from fusil.config import FusilConfig, ConfigError
+from fusil.process.tools import beNice, limitMemory, runCommand
+from fusil.project import Project
+from fusil.version import LICENSE, VERSION, WEBSITE
 from fusil.xhost import xhostCommand
+
 if SUPPORT_UID:
+    from grp import getgrgid, getgrnam
     from pwd import getpwnam, getpwuid
-    from grp import getgrnam, getgrgid
 try:
     # Use readline to get better raw_input()
     import readline

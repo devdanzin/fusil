@@ -1,5 +1,7 @@
-from fusil.project_agent import ProjectAgent
 from weakref import ref as weakref_ref
+
+from fusil.project_agent import ProjectAgent
+
 
 class SessionAgent(ProjectAgent):
     def __init__(self, session, name, project=None):

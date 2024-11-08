@@ -1,16 +1,15 @@
 import grp
 import pwd
-
+from errno import EACCES
+from os import X_OK, access, chdir
 from shutil import chown
 
-from fusil.unsafe import SUPPORT_UID
-from errno import EACCES
-from os import chdir, access, X_OK
-from fusil.process.tools import (
-    limitMemory, beNice, allowCoreDump, limitUserProcess)
-from fusil.unsafe import permissionHelp
+from fusil.process.tools import (allowCoreDump, beNice, limitMemory,
+                                 limitUserProcess)
+from fusil.unsafe import SUPPORT_UID, permissionHelp
+
 if SUPPORT_UID:
-    from os import getuid, setuid, setgid
+    from os import getuid, setgid, setuid
     from pwd import getpwuid
 
 class ChildError(Exception):

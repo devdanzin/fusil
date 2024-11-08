@@ -1,5 +1,7 @@
-from fusil.project_agent import ProjectAgent
 from ptrace.terminal import enableEchoMode
+
+from fusil.project_agent import ProjectAgent
+
 
 class TerminalEcho(ProjectAgent):
     def __init__(self, project):

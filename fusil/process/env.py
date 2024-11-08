@@ -1,8 +1,9 @@
 import sys
-from fusil.project_agent import ProjectAgent
-from random import choice, randint
 from os import getenv
-from fusil.bytes_generator import BytesGenerator, LengthGenerator, ASCII0
+from random import choice, randint
+
+from fusil.bytes_generator import ASCII0, BytesGenerator, LengthGenerator
+from fusil.project_agent import ProjectAgent
 from fusil.unicode_generator import IntegerGenerator
 
 RUNNING_WINDOWS = sys.platform == 'win32'

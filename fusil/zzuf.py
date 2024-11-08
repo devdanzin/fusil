@@ -1,5 +1,6 @@
-from fusil.process.create import ProjectProcess
 from os.path import exists
+
+from fusil.process.create import ProjectProcess
 
 LIBRARY_PATHS = (
     # Linux

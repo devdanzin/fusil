@@ -1,6 +1,8 @@
-from fusil.mas.agent import Agent
 from weakref import ref as weakref_ref
+
+from fusil.mas.agent import Agent
 from fusil.score import scoreLogFunc
+
 
 class ProjectAgent(Agent):
     def __init__(self, project, name, mta=None, application=None):

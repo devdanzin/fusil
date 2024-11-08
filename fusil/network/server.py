@@ -1,10 +1,14 @@
-from fusil.project_agent import ProjectAgent
+from select import select
+from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET
+from socket import error as socket_error
+from socket import socket
+
+from ptrace.error import writeError
+
 from fusil.network.server_client import ServerClient
 from fusil.network.tools import formatAddress
-from socket import (socket, error as socket_error,
-    AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR)
-from ptrace.error import writeError
-from select import select
+from fusil.project_agent import ProjectAgent
+
 
 class NetworkServer(ProjectAgent):
     CLIENT_CLASS = ServerClient

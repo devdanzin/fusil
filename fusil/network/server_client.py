@@ -1,8 +1,13 @@
+from socket import SHUT_RDWR
+from socket import error as socket_error
+from socket import timeout as socket_timeout
+from weakref import ref as weakref_ref
+
+from ptrace.error import formatError
+
 from fusil.network.tools import formatAddress
 from fusil.session_agent import SessionAgent
-from socket import error as socket_error, timeout as socket_timeout, SHUT_RDWR
-from ptrace.error import formatError
-from weakref import ref as weakref_ref
+
 
 class ServerClientDisconnect(Exception):
     pass

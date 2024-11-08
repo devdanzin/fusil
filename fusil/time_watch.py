@@ -1,5 +1,7 @@
-from fusil.project_agent import ProjectAgent
 from time import time
+
+from fusil.project_agent import ProjectAgent
+
 
 class TimeWatch(ProjectAgent):
     def __init__(self, project,

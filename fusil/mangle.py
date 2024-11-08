@@ -1,9 +1,11 @@
 from array import array
+from random import choice, randint
+
 from fusil.mangle_agent import MangleAgent
-from fusil.mangle_op import SPECIAL_VALUES, MAX_INCR
-from fusil.tools import minmax
+from fusil.mangle_op import MAX_INCR, SPECIAL_VALUES
 from fusil.six.moves import range as xrange
-from random import randint, choice
+from fusil.tools import minmax
+
 
 class MangleConfig:
     def __init__(self, min_op=1, max_op=100, operations=None):

@@ -1,19 +1,22 @@
 import sys
-from fusil.unsafe import SUPPORT_UID
 from errno import ENOENT
 from os import devnull
 from os.path import basename
-from subprocess import Popen, STDOUT
-from time import time, sleep
-from fusil.process.cmdline import CommandLine
-from fusil.process.prepare import prepareProcess, ChildError
-from fusil.process.env import Environment
-from fusil.process.replay_python import createReplayPythonScript
-from fusil.process.tools import (
-        locateProgram, displayProcessStatus, splitCommand)
-from fusil.project_agent import ProjectAgent
+from subprocess import STDOUT, Popen
+from time import sleep, time
+
 from ptrace.signames import signalName
-from fusil.six import string_types, text_type, binary_type
+
+from fusil.process.cmdline import CommandLine
+from fusil.process.env import Environment
+from fusil.process.prepare import ChildError, prepareProcess
+from fusil.process.replay_python import createReplayPythonScript
+from fusil.process.tools import (displayProcessStatus, locateProgram,
+                                 splitCommand)
+from fusil.project_agent import ProjectAgent
+from fusil.six import binary_type, string_types, text_type
+from fusil.unsafe import SUPPORT_UID
+
 if SUPPORT_UID:
     from pwd import getpwuid
 

@@ -1,5 +1,6 @@
 import re
 
+
 class HttpRequest:
     def __init__(self, data):
         self.method = None

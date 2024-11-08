@@ -1,5 +1,6 @@
-from fusil.process.create import CreateProcess
 from fusil.file_tools import relativePath
+from fusil.process.create import CreateProcess
+
 
 class MangleProcess(CreateProcess):
     def __init__(self, project, arguments, mangle_pattern, use_relative_mangle=True, **kw):

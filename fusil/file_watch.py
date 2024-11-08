@@ -1,12 +1,12 @@
+import re
 from errno import EBADF
+from os.path import basename
+from time import time
+
 from fusil.project_agent import ProjectAgent
 from fusil.score import scoreLogFunc
+from fusil.six import b, iteritems, text_type
 from fusil.tools import makeFilename
-from os.path import basename
-from fusil.six import b
-from fusil.six import text_type, iteritems
-from time import time
-import re
 
 VALID_POS = ('zero', 'end', 'current')
 

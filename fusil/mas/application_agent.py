@@ -1,5 +1,7 @@
-from fusil.mas.agent import Agent
 from weakref import ref as weakref_ref
+
+from fusil.mas.agent import Agent
+
 
 class ApplicationAgent(Agent):
     def __init__(self, name, application, mta):

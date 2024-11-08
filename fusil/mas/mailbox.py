@@ -1,5 +1,6 @@
 from weakref import ref as weakref_ref
 
+
 class Mailbox:
     def __init__(self, agent, mta):
         self.messages = []

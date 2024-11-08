@@ -1,8 +1,10 @@
-from errno import EEXIST
-from os import mkdir, getpid, fstat, getcwd
-from os.path import basename
 from datetime import datetime
+from errno import EEXIST
+from os import fstat, getcwd, getpid, mkdir
+from os.path import basename
+
 from ptrace.os_tools import RUNNING_LINUX
+
 if RUNNING_LINUX:
     from ptrace.linux_proc import readProcessLink
 

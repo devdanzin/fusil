@@ -1,8 +1,12 @@
-from ptrace.linux_proc import openProc, readProcessStat, getSystemBoot, ProcError
-from os import sysconf
-from fusil.tools import listDiff, timedeltaSeconds, minmax
 from datetime import datetime, timedelta
+from os import sysconf
 from time import sleep
+
+from ptrace.linux_proc import (ProcError, getSystemBoot, openProc,
+                               readProcessStat)
+
+from fusil.tools import listDiff, minmax, timedeltaSeconds
+
 
 class CpuLoadError(ProcError):
     pass

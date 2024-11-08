@@ -1,6 +1,8 @@
 from socket import AF_INET
+
 from fusil.network.server import NetworkServer
 from fusil.network.tools import formatAddress
+
 
 class TcpServer(NetworkServer):
     def __init__(self, project, port, host=''):

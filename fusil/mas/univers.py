@@ -1,5 +1,7 @@
 from time import sleep
+
 from fusil.mas.application_agent import ApplicationAgent
+
 
 class Univers(ApplicationAgent):
     def __init__(self, application, mta, step_sleep):

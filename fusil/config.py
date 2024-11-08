@@ -1,10 +1,13 @@
 try:
-    from configparser import RawConfigParser, NoSectionError, NoOptionError
+    from configparser import NoOptionError, NoSectionError, RawConfigParser
 except ImportError:
     # Python 2
     from ConfigParser import RawConfigParser, NoSectionError, NoOptionError
-from os.path import exists as path_exists, join as path_join
+
 from os import getenv
+from os.path import exists as path_exists
+from os.path import join as path_join
+
 
 class ConfigError(Exception):
     pass

@@ -4,6 +4,7 @@ Classes mockup used for unit tests.
 
 from weakref import ref
 
+
 class Logger:
     def __init__(self, show=False):
         self.show = show

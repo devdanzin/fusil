@@ -1,7 +1,8 @@
+import re
+
 from fusil.six import text_type
 from fusil.six.moves import zip as izip
 
-import re
 
 def minmax(min_value, value, max_value):
     """

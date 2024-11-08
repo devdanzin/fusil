@@ -1,15 +1,19 @@
-from fusil.project_agent import ProjectAgent
 from ptrace.os_tools import HAS_PTRACE
-from fusil.process.watch import DEFAULT_SIGNAL_SCORE
 from ptrace.signames import signalName
+
+from fusil.process.watch import DEFAULT_SIGNAL_SCORE
+from fusil.project_agent import ProjectAgent
+
 if HAS_PTRACE:
+    from errno import EPERM
     from signal import SIGCHLD, SIGTRAP
+
     from ptrace import PtraceError
     from ptrace.binding import ptrace_traceme
-    from ptrace.debugger import (
-        PtraceDebugger, DebuggerError as PtraceDebuggerError,
-        ProcessExit, ProcessSignal, NewProcessEvent)
-    from errno import EPERM
+    from ptrace.debugger import DebuggerError as PtraceDebuggerError
+    from ptrace.debugger import (NewProcessEvent, ProcessExit, ProcessSignal,
+                                 PtraceDebugger)
+
     from fusil.unsafe import permissionHelp
 
 class DebuggerError(Exception):
@@ -18,7 +22,8 @@ class DebuggerError(Exception):
 # Status for "process terminated abnormally"
 ABNORMAL_STATUS = 1
 
-from signal import SIGFPE, SIGSEGV, SIGABRT
+from signal import SIGABRT, SIGFPE, SIGSEGV
+
 FATAL_SIGNALS = set((SIGFPE, SIGSEGV, SIGABRT))
 try:
     from signal import SIGBUS

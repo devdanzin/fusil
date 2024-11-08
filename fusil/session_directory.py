@@ -1,16 +1,20 @@
-from fusil.session_agent import SessionAgent
-from fusil.directory import Directory
-from fusil.tools import makeUnicode
-from fusil.error import FusilError
-from os.path import basename
-from fusil.unsafe import SUPPORT_UID
 from os import rename
+from os.path import basename
+
+from fusil.directory import Directory
+from fusil.error import FusilError
+from fusil.session_agent import SessionAgent
+from fusil.tools import makeUnicode
+from fusil.unsafe import SUPPORT_UID
+
 if SUPPORT_UID:
     from os import getgid, chown
-from fusil.unsafe import permissionHelp
-import re
+
 import grp
+import re
 from errno import EPERM
+
+from fusil.unsafe import permissionHelp
 
 # allow letters, digits, understand and dash
 NORMALIZE_REGEX = re.compile(u'[^a-zA-Z0-9_-]')

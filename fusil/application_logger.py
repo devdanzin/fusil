@@ -1,8 +1,8 @@
+from logging import (DEBUG, ERROR, INFO, WARNING, Formatter, StreamHandler,
+                     getLogger)
+from os import unlink
 from sys import stdout
 from weakref import ref as weakref_ref
-from logging import (getLogger, StreamHandler, Formatter,
-    DEBUG, INFO, WARNING, ERROR)
-from os import unlink
 
 LOG_FILENAME = 'fusil.log'
 

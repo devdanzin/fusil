@@ -2,8 +2,10 @@
 Convert bytes string to integer, and integer to bytes string.
 """
 
-from struct import calcsize, unpack, error as struct_error
 from itertools import chain, repeat
+from struct import calcsize
+from struct import error as struct_error
+from struct import unpack
 
 BIG_ENDIAN = "ABCD"
 LITTLE_ENDIAN = "DCBA"

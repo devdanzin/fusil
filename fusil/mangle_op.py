@@ -1,5 +1,6 @@
 from fusil.six import b
 
+
 def generateSpecialValues():
     values = (
         # Special values in big endian

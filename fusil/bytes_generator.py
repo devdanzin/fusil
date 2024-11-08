@@ -17,8 +17,11 @@ Byte sets:
 """
 
 from random import choice, randint
+
 from ptrace.os_tools import RUNNING_PYTHON3
+
 from fusil.six import b
+
 
 def createBytesSet(start, stop):
     if RUNNING_PYTHON3:

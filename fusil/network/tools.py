@@ -1,5 +1,6 @@
 from socket import AF_INET
 
+
 def formatAddress(family, address, short=False):
     if family == AF_INET:
         host, port = address
