@@ -1,3 +1,20 @@
+Fusil is back
+=============
+
+This is a republishing of Victor Stinner's fusil project. While some
+development is planned for fuzzing Python, many other aspects of the
+library and other fuzzers are currently out of scope for this repository.
+A general updating of the code to Python 3 is also expected.
+
+However, code contributions to any parts of fusil will be accepted. Just
+don't expect that new features will be worked on absent corresponding
+code.
+
+Many links in the docs don't work, but some can be retrieved using the
+WayBack Machine. We'll probably update them sometime.
+
+------------------------------------------------------------
+
 Fusil is a Python library used to write fuzzing programs. It helps to start
 process with a prepared environment (limit memory, environment variables,
 redirect stdout, etc.), start network client or server, and create mangled
