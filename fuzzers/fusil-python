@@ -33,7 +33,6 @@ from ptrace.os_tools import RUNNING_PYTHON3
 from fusil.six import text_type, string_types
 from fusil.six.moves import range as xrange
 from sys import executable, version as PYTHON_VERSION
-import imp
 import pkgutil
 import re
 import sys
@@ -44,7 +43,7 @@ if not RUNNING_PYTHON3:
 # Constants
 TIMEOUT = 30.0
 PYTHON = executable
-FILENAMES = "/etc/motd,/bin/sh"
+FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
 PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
 
@@ -307,7 +306,7 @@ class ListAllModules:
         if is_package:
             return False
         if any(filename.endswith(ext)
-               for ext in ('.py', '.pyc', '.pyo')):
+               for ext in ('.py', '.pyc', '.pyo') if filename is not None):
             return False
         return True
 
@@ -334,19 +333,21 @@ class ListAllModules:
             fullname = prefix + name
             # Get module filename / directory name
             try:
-                module = imp.find_module(name, path)
+                import importlib.util
+                module = importlib.util.module_from_spec(importlib.util.find_spec(name, path))
             except ImportError:
                 self.logger.warning("Failed to import module %s" % name)
                 continue
-            if module[0]:
-                module[0].close()
-            filename = module[1]
+            # if module[0]:
+            #     module[0].close()
+            filename = None
+            if hasattr(module, "__file__"):
+                filename = module.__file__
             if self.matchModule(is_package, name, filename):
-                self.names.add(fullname)
-            if is_package:
-                new_paths = [filename]
-                new_prefix = prefix + name + '.'
-                self.search_modules(new_paths, new_prefix)
+                if is_package:
+                    new_paths = [filename]
+                    new_prefix = prefix + name + '.'
+                    self.search_modules(new_paths, new_prefix)
 
     def search(self):
         self.search_modules(None, '')
@@ -706,7 +707,9 @@ class WritePythonCode(WriteCode):
                 continue
             if (not self.options.test_private) and name.startswith("__"):
                 continue
-            attr = getattr(object, name)
+            attr = getattr(object, name, None)
+            if attr is None:
+                continue
             if not ismethoddescriptor(attr):
                 continue
             methods.append(name)
