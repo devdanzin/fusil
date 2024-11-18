@@ -7,39 +7,55 @@ Interresting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
 
+import inspect
+import pkgutil
+import re
+import sys
+import warnings
+from inspect import isclass
+from optparse import OptionGroup
+from os.path import exists as path_exists
+from os.path import isabs
+from os.path import sep as path_sep
+from random import choice, randint, sample
+from sys import executable
+from sys import version as PYTHON_VERSION
+from types import BuiltinFunctionType, FunctionType, ModuleType
+
+from ptrace.os_tools import RUNNING_PYTHON3
+
+from fusil.application import Application
+from fusil.bytes_generator import BytesGenerator
+from fusil.process.create import CreateProcess
+from fusil.process.stdout import WatchStdout
+from fusil.process.watch import WatchProcess
+from fusil.project_agent import ProjectAgent
+from fusil.six import string_types, text_type
+from fusil.unicode_generator import (
+    ASCII8,
+    DECIMAL_DIGITS,
+    LETTERS,
+    PRINTABLE_ASCII,
+    UNICODE_65535,
+    IntegerGenerator,
+    IntegerRangeGenerator,
+    UnicodeGenerator,
+    UnixPathGenerator,
+    UnsignedGenerator,
+)
+from fusil.write_code import WriteCode
+
+if not RUNNING_PYTHON3:
+    from sys import getfilesystemencoding
+
+
 # Fuzzer options
 IGNORE_TIMEOUT = True
 IGNORE_CPU = True
 SHOW_STDOUT = False
 DEBUG = False
 
-from fusil.application import Application
-from optparse import OptionGroup
-from os.path import exists as path_exists, isabs, sep as path_sep
-from fusil.process.watch import WatchProcess
-from types import FunctionType, BuiltinFunctionType, ModuleType
-from random import choice, randint, sample
-from fusil.bytes_generator import BytesGenerator
-from fusil.unicode_generator import (
-    UnicodeGenerator, IntegerGenerator, IntegerRangeGenerator,
-    UnsignedGenerator, UnixPathGenerator,
-    LETTERS, DECIMAL_DIGITS, UNICODE_65535, PRINTABLE_ASCII, ASCII8)
-from fusil.process.stdout import WatchStdout
-from fusil.project_agent import ProjectAgent
-from fusil.process.create import CreateProcess
-from fusil.write_code import WriteCode
-from inspect import isclass
-from ptrace.os_tools import RUNNING_PYTHON3
-from fusil.six import text_type, string_types
 xrange = range
-from sys import executable, version as PYTHON_VERSION
-import inspect
-import pkgutil
-import re
-import sys
-import warnings
-if not RUNNING_PYTHON3:
-    from sys import getfilesystemencoding
 
 print(PYTHON_VERSION)
 
@@ -50,83 +66,136 @@ FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
 PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
 
-MODULE_BLACKLIST = set((
-    # wait keystroke from the keyboard
-    "getpass",
-    # execute child processes
-    "commands",
-    "subprocess",
-    # run a webbrowser
-    "antigravity",
-    # too slow, search for .py in the whole hard drive
-    "compileall",
-    # nothing to fuzz
-    "user",
-    "this",
-    # module dedicated to tests, not used in real world project, but it's build
-    # by default
-    "_testcapi", "_testlimitedcapi", "_testinternalcapi",
-    # ignore the whole CPython test suite
-    "test",
-    # read/write from/to arbitrary memory (eg. ctypes.string_at())
-    "ctypes", "_ctypes",
-    # don't fuzz fusil nor python-ptrace
-    "fusil", "ptrace",
-    # bad stuff
-    "pip", "setuptools", "distutils", "_signal", "signal",
-    # "builtins",
-    "__builtin__",
-))
+MODULE_BLACKLIST = set(
+    (
+        # wait keystroke from the keyboard
+        "getpass",
+        # execute child processes
+        "commands",
+        "subprocess",
+        # run a webbrowser
+        "antigravity",
+        # too slow, search for .py in the whole hard drive
+        "compileall",
+        # nothing to fuzz
+        "user",
+        "this",
+        # module dedicated to tests, not used in real world project, but it's build
+        # by default
+        "_testcapi",
+        "_testlimitedcapi",
+        "_testinternalcapi",
+        # ignore the whole CPython test suite
+        "test",
+        # read/write from/to arbitrary memory (eg. ctypes.string_at())
+        "ctypes",
+        "_ctypes",
+        # don't fuzz fusil nor python-ptrace
+        "fusil",
+        "ptrace",
+        # bad stuff
+        "pip",
+        "setuptools",
+        "distutils",
+        "_signal",
+        "signal",
+        # "builtins",
+        "__builtin__",
+    )
+)
 
-CTYPES = set((
-    # Read/write arbitrary memory
-    'PyObj_FromPtr', 'string_at', 'wstring_at',
-    'call_function', 'call_cdeclfunction',
-    'Py_INCREF', 'Py_DECREF',
-    'dlsym', 'dlclose',
-    '_string_at_addr', '_wstring_at_addr',
+CTYPES = set(
+    (
+        # Read/write arbitrary memory
+        "PyObj_FromPtr",
+        "string_at",
+        "wstring_at",
+        "call_function",
+        "call_cdeclfunction",
+        "Py_INCREF",
+        "Py_DECREF",
+        "dlsym",
+        "dlclose",
+        "_string_at_addr",
+        "_wstring_at_addr",
+        # _ctypes.dlopen("/bin/sh", -5):
+        # Inconsistency detected by ld.so: dl-open.c: 652:
+        # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
+        # The bug is specific to Python (not reproductible outside Python)
+        "dlopen",
+    )
+)
 
-    # _ctypes.dlopen("/bin/sh", -5):
-    # Inconsistency detected by ld.so: dl-open.c: 652:
-    # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
-    # The bug is specific to Python (not reproductible outside Python)
-    "dlopen",
-))
+SOCKET = set(
+    (
+        # Avoid DNS request (timeout)
+        "gethostbyname",
+        "gethostbyname_ex",
+        "gethostbyaddr",
+        "getnameinfo",
+        "getaddrinfo",
+        # network objects having blocking operations like accept() or recv()
+        "socket",
+        "SocketType",
+    )
+)
 
-SOCKET = set((
-    # Avoid DNS request (timeout)
-    "gethostbyname", "gethostbyname_ex", "gethostbyaddr",
-    "getnameinfo", "getaddrinfo",
+POSIX = set(
+    (
+        # exit python
+        "_exit",
+        "abort",
+        # read -> timeout
+        "read",
+        # truncate file, remove directory, remove file
+        "ftruncate",
+        "rmdir",
+        "unlink",
+        # send a signal to the current process or a process group
+        "kill",
+        "killpg",
+        # create child process
+        "fork",
+        "forkpty",
+        "system",
+        "popen",
+        "popen2",
+        "popen3",
+        "popen4",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        # wait process exit (-> timeout)
+        "wait",
+        "wait3",
+        "waitpid",
+        # break the terminal?
+        "tcsetpgrp",
+        # long loop
+        "closerange",
+    )
+)
 
-    # network objects having blocking operations like accept() or recv()
-    "socket", "SocketType",
-))
-
-POSIX = set((
-    # exit python
-    "_exit", "abort",
-    # read -> timeout
-    "read",
-    # truncate file, remove directory, remove file
-    "ftruncate", "rmdir", "unlink",
-    # send a signal to the current process or a process group
-    "kill", "killpg",
-    # create child process
-    "fork", "forkpty", "system", "popen", "popen2", "popen3", "popen4",
-    "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
-    "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe",
-    # wait process exit (-> timeout)
-    "wait", "wait3", "waitpid",
-    # break the terminal?
-    "tcsetpgrp",
-    # long loop
-    "closerange",
-))
-
-BUILTINS = set((
-    # Create huge integer, very long string or list
-    "pow", "round",
-))
+BUILTINS = set(
+    (
+        # Create huge integer, very long string or list
+        "pow",
+        "round",
+    )
+)
 
 # Functions and methods blacklist. Format:
 #   module name => function and class names
@@ -134,131 +203,150 @@ BUILTINS = set((
 #    module name:class name => method names
 BLACKLIST = {
     # Dangerous module: ctypes
-    'ctypes': CTYPES,
-    '_ctypes': CTYPES,
-
+    "ctypes": CTYPES,
+    "_ctypes": CTYPES,
     # Eat lot of CPU with large arguments
-    'itertools': set(("tee",)),
-    'math': set(("factorial",)),
-    'operator': set((
-        # Create huge integer, very long string or list
-        "pow", "__pow__",
-        "ipow", "__ipow__",
-        "mul", "__mul__",
-        "repeat", "__repeat__",
-    )),
-
-    '__builtin__': BUILTINS,
-    'builtins': BUILTINS,
-
+    "itertools": set(("tee",)),
+    "math": set(("factorial",)),
+    "operator": set(
+        (
+            # Create huge integer, very long string or list
+            "pow",
+            "__pow__",
+            "ipow",
+            "__ipow__",
+            "mul",
+            "__mul__",
+            "repeat",
+            "__repeat__",
+        )
+    ),
+    "__builtin__": BUILTINS,
+    "builtins": BUILTINS,
     # Don't raise SystemError
-    '_builtin__:set': set(("test_c_api",)),
-    'builtins:set': set(("test_c_api",)),
-
+    "_builtin__:set": set(("test_c_api",)),
+    "builtins:set": set(("test_c_api",)),
     # Sleep
-    'time': set(("sleep", "pthread_getcpuclockid")),
-    'select': set(("epoll", "poll", "select")),
-    'signal': set(("pause", "alarm", "setitimer", "pthread_kill")),
-    '_signal': set(("pause", "alarm", "setitimer", "pthread_kill")),
-
-    '_socket': SOCKET,
-    'socket': SOCKET,
-    'posix': POSIX,
-    'os': POSIX,
-
-    '_fileio:_FileIO': set((
-        # timeout
-        "read", "readall",
-    )),
-
+    "time": set(("sleep", "pthread_getcpuclockid")),
+    "select": set(("epoll", "poll", "select")),
+    "signal": set(("pause", "alarm", "setitimer", "pthread_kill")),
+    "_signal": set(("pause", "alarm", "setitimer", "pthread_kill")),
+    "_socket": SOCKET,
+    "socket": SOCKET,
+    "posix": POSIX,
+    "os": POSIX,
+    "_fileio:_FileIO": set(
+        (
+            # timeout
+            "read",
+            "readall",
+        )
+    ),
     # timeout
-    'multiprocessing': set(("Pool",)),
-    '_multiprocessing:SemLock': set((
-        # deadlock
-        "acquire",
-    )),
-    '_multiprocessing:Connection': set((
-        # timeout
-        "recv", "recv_bytes", "poll",
-    )),
-
-    '_tkinter': set((
-        # timeout
-        'dooneevent',
-        'create',
-        # no window -> no event -> loop on select()
-        'mainloop',
-    )),
-
-    "termios": set((
-        # tcflow(0, False) suspend output to stdout
-        "tcflow",
-    )),
-
-    "dl": set((
-        # dl.open("/bin/sh", -5):
-        # Inconsistency detected by ld.so: dl-open.c: 652:
-        # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
-        # The bug is specific to Python (not reproductible outside Python)
-        "open",
-    )),
-
-    "pydoc": set((
-        # listen to a socket and wait for requests
-        "serve",
-        # avoid false positive with pattern (eg. "memory") on stdout
-        "doc", "apropos",
-    )),
-
+    "multiprocessing": set(("Pool",)),
+    "_multiprocessing:SemLock": set(
+        (
+            # deadlock
+            "acquire",
+        )
+    ),
+    "_multiprocessing:Connection": set(
+        (
+            # timeout
+            "recv",
+            "recv_bytes",
+            "poll",
+        )
+    ),
+    "_tkinter": set(
+        (
+            # timeout
+            "dooneevent",
+            "create",
+            # no window -> no event -> loop on select()
+            "mainloop",
+        )
+    ),
+    "termios": set(
+        (
+            # tcflow(0, False) suspend output to stdout
+            "tcflow",
+        )
+    ),
+    "dl": set(
+        (
+            # dl.open("/bin/sh", -5):
+            # Inconsistency detected by ld.so: dl-open.c: 652:
+            # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
+            # The bug is specific to Python (not reproductible outside Python)
+            "open",
+        )
+    ),
+    "pydoc": set(
+        (
+            # listen to a socket and wait for requests
+            "serve",
+            # avoid false positive with pattern (eg. "memory") on stdout
+            "doc",
+            "apropos",
+        )
+    ),
     # listen to a socket and wait for requests
     "BaseHTTPServer": set(("test",)),
     "CGIHTTPServer": set(("test",)),
     "SimpleHTTPServer": set(("test",)),
-
-    "pprint": set(("_perfcheck",)), # timeout (unlimited loop?)
-    "tabnanny": set(("check",)),    # python 2.5.2 implementation is just slow
-
+    "pprint": set(("_perfcheck",)),  # timeout (unlimited loop?)
+    "tabnanny": set(("check",)),  # python 2.5.2 implementation is just slow
     # create child process
     "popen2": set(("popen2", "popen3", "popen4", "Popen3", "Popen4")),
     "pty": set(("fork", "spawn")),
     "platform": set(("_syscmd_uname",)),
-
     # avoid false positive with pattern on stdout
     "logging": set(("warning", "error", "fatal", "critical")),
     "formatter": set(("test",)),
-
     # Create huge integer, very long string or list
     "fpformat": set(("fix",)),
-
     # remove directory
     "shutil": set(("copytree", "rmtree")),
-
     # open a network connection (timeout)
     # FIXME: only blacklist the blocking methods, not the whole class?
-    "imaplib": set(("IMAP4", "IMAP4_stream",)),
+    "imaplib": set(
+        (
+            "IMAP4",
+            "IMAP4_stream",
+        )
+    ),
     "telnetlib": set(("Telnet",)),
     "nntplib": set(("NNTP",)),
     "smtplib": set(("SMTP", "SMTP_SSL")),
-
     # open a network connection (timeout),
     # the constructor opens directly a connection
-    "poplib": set(("POP3", "POP3_SSL",)),
+    "poplib": set(
+        (
+            "POP3",
+            "POP3_SSL",
+        )
+    ),
     "ftplib": set(("FTP", "FTP_TLS")),
-
     # set resource limit, may stop the process:
     # setrlimit(RLIMIT_CPU, (0, 0)) kills the process with a SIGKILL signal
     "resource": set(("setrlimit",)),
-
-    "xmllib": set(("test",)),          # timeout
+    "xmllib": set(("test",)),  # timeout
     "urllib2": set(("randombytes",)),  # unlimited loop
-
     "py_compile": set(("compile",)),
     "runpy": set(("run_path",)),
-
-    "faulthandler": set((
-        '_fatal_error', '_read_null', '_sigabrt', '_sigbus', '_sigfpe', '_sigill', '_sigsegv', '_stack_overflow',
-    )),
-
+    "faulthandler": set(
+        (
+            "_fatal_error",
+            "_read_null",
+            "_sigabrt",
+            "_sigbus",
+            "_sigfpe",
+            "_sigill",
+            "_sigsegv",
+            "_stack_overflow",
+        )
+    ),
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
@@ -285,119 +373,107 @@ MAX_VAR_ARG = 5
 
 if RUNNING_PYTHON3:
     SURROGATES = (
-        u'"\\x00"',
-        u'"\\x00"',
-        u'"\\x00"',
-        u'"\\x00"',
-        u'"\\uDC80"',
-        u'"\\uDC80"',
-        u'"\\U0010FFFF"',
-        u'"\\U0010FFFF"',
-        u'"\\udbff\\udfff"',
+        '"\\x00"',
+        '"\\x00"',
+        '"\\x00"',
+        '"\\x00"',
+        '"\\uDC80"',
+        '"\\uDC80"',
+        '"\\U0010FFFF"',
+        '"\\U0010FFFF"',
+        '"\\udbff\\udfff"',
     )
 
     BUFFER_OBJECTS = (
-        u'bytearray(b"abc\\xe9\\xff")',
-        u'memoryview(b"abc\\xe9\\xff")',
-        u'memoryview(bytearray(b"abc\\xe9\\xff"))',
+        'bytearray(b"abc\\xe9\\xff")',
+        'memoryview(b"abc\\xe9\\xff")',
+        'memoryview(bytearray(b"abc\\xe9\\xff"))',
     )
 else:
     SURROGATES = (
-        u'u"\\uDC80"',
-        u'u"\\uDC80"',
-        u'u"\\U0010FFFF"',
-        u'u"\\udbff\\udfff"',
+        'u"\\uDC80"',
+        'u"\\uDC80"',
+        'u"\\U0010FFFF"',
+        'u"\\udbff\\udfff"',
     )
 
-    BUFFER_OBJECTS = (
-        u'buffer("abc\\xe9\\xff")',
-    )
+    BUFFER_OBJECTS = ('buffer("abc\\xe9\\xff")',)
 
 INTERESTING = (
     # Large integer boundaries
-    'sys.maxsize',                      # Maximum integer size for current platform
-    'sys.maxsize - 1',                  # One below maximum integer size
-    'sys.maxsize + 1',                  # One above maximum integer size (overflow test)
-    '-sys.maxsize',                     # Negative maximum integer boundary
-    '2 ** 63 - 1',                      # 64-bit integer boundary (signed max for 64-bit)
-    '-2 ** 63',                         # 64-bit integer boundary (signed min for 64-bit)
-    '2 ** 31 - 1',                      # 32-bit integer boundary (signed max for 32-bit)
-    '-2 ** 31',                         # 32-bit integer boundary (signed min for 32-bit)
-
+    "sys.maxsize",  # Maximum integer size for current platform
+    "sys.maxsize - 1",  # One below maximum integer size
+    "sys.maxsize + 1",  # One above maximum integer size (overflow test)
+    "-sys.maxsize",  # Negative maximum integer boundary
+    "2 ** 63 - 1",  # 64-bit integer boundary (signed max for 64-bit)
+    "-2 ** 63",  # 64-bit integer boundary (signed min for 64-bit)
+    "2 ** 31 - 1",  # 32-bit integer boundary (signed max for 32-bit)
+    "-2 ** 31",  # 32-bit integer boundary (signed min for 32-bit)
     # Large powers and exponential values
-    '10 ** (sys.int_info.default_max_str_digits + 1)',  # Overflow of typical max digit handling
-    '10 ** 100',                      # Extremely large integer to test overflow and precision
-    '-10 ** (sys.int_info.default_max_str_digits)',    # Large negative integer boundary
-    '10 ** (sys.int_info.default_max_str_digits + 2)', # Further max digit overflow test
-
+    "10 ** (sys.int_info.default_max_str_digits + 1)",  # Overflow of typical max digit handling
+    "10 ** 100",  # Extremely large integer to test overflow and precision
+    "-10 ** (sys.int_info.default_max_str_digits)",  # Large negative integer boundary
+    "10 ** (sys.int_info.default_max_str_digits + 2)",  # Further max digit overflow test
     # Floating-point boundaries and edge cases
-    'float("nan")',                   # NaN, tests handling of undefined floats
-    'float("inf")',                   # Positive infinity
-    'float("-inf")',                  # Negative infinity
-    'sys.float_info.epsilon',         # Smallest positive float greater than zero
-    'sys.float_info.max',             # Maximum representable float
-    'sys.float_info.min',             # Minimum positive float
-    '-sys.float_info.max',            # Negative maximum float
-    '-sys.float_info.epsilon',        # Negative epsilon (smallest magnitude negative float)
-    'sys.float_info.min / 2',         # Value close to underflow boundary
-    '-sys.float_info.min / 2',        # Negative value close to underflow boundary
-    'float("0.0000001")',             # Very small float, near zero
-    '-float("0.0000001")',            # Very small negative float, near zero
-
+    'float("nan")',  # NaN, tests handling of undefined floats
+    'float("inf")',  # Positive infinity
+    'float("-inf")',  # Negative infinity
+    "sys.float_info.epsilon",  # Smallest positive float greater than zero
+    "sys.float_info.max",  # Maximum representable float
+    "sys.float_info.min",  # Minimum positive float
+    "-sys.float_info.max",  # Negative maximum float
+    "-sys.float_info.epsilon",  # Negative epsilon (smallest magnitude negative float)
+    "sys.float_info.min / 2",  # Value close to underflow boundary
+    "-sys.float_info.min / 2",  # Negative value close to underflow boundary
+    'float("0.0000001")',  # Very small float, near zero
+    '-float("0.0000001")',  # Very small negative float, near zero
     # Complex numbers with extreme values
-    'complex(sys.maxsize, sys.maxsize)',     # Large complex number with large real and imaginary parts
-    'complex(float("inf"), float("nan"))',   # Complex with infinity and NaN
-    'complex(sys.float_info.max, sys.float_info.epsilon)', # Mix of large and tiny parts in complex
-    '1j',                                    # Small complex number with imaginary unit
-    '-1j',                                   # Negative small complex number with imaginary unit
-
+    "complex(sys.maxsize, sys.maxsize)",  # Large complex number with large real and imaginary parts
+    'complex(float("inf"), float("nan"))',  # Complex with infinity and NaN
+    "complex(sys.float_info.max, sys.float_info.epsilon)",  # Mix of large and tiny parts in complex
+    "1j",  # Small complex number with imaginary unit
+    "-1j",  # Negative small complex number with imaginary unit
     # Unicode and string boundary tests
-    'chr(0)',                               # Null character
-    'chr(127)',                             # Edge of ASCII range
-    'chr(255)',                             # Edge of extended ASCII range
-    'chr(0x10FFFF)',                        # Maximum Unicode code point
-    r'"\uDC80"',                             # Unpaired surrogate, tests encoding robustness
-    '"𝒜"',                                  # Surrogate pair in UTF-16
-    r'"\x00" * 10',                          # Null byte sequence
-    '"A" * (2 ** 16)',                      # Large string boundary (typical buffer size)
-    '"💻" * 2**10',                         # Large string with multi-byte Unicode characters
-
+    "chr(0)",  # Null character
+    "chr(127)",  # Edge of ASCII range
+    "chr(255)",  # Edge of extended ASCII range
+    "chr(0x10FFFF)",  # Maximum Unicode code point
+    r'"\uDC80"',  # Unpaired surrogate, tests encoding robustness
+    '"𝒜"',  # Surrogate pair in UTF-16
+    r'"\x00" * 10',  # Null byte sequence
+    '"A" * (2 ** 16)',  # Large string boundary (typical buffer size)
+    '"💻" * 2**10',  # Large string with multi-byte Unicode characters
     # Boolean and None values
-    'True',                                 # Basic boolean value
-    'False',                                # Basic boolean value
-    'None',                                 # None, tests for null handling
-
+    "True",  # Basic boolean value
+    "False",  # Basic boolean value
+    "None",  # None, tests for null handling
     # Pathological data structures
-    '[]',                                   # Empty list
-    '[[]]',                                 # Nested empty list
-    '[[[]]]',                               # Deeply nested empty list
-    '{0: {0: {0: {}}}}',                    # Deeply nested dictionary
-    '[(None, 1, "a") for _ in range(2**10)]', # Large list with mixed types
-    '[[1] * 10] * 10',                      # Nested lists with shared references
-    'bytearray(b"")',                       # Empty byte array
-    'bytearray(b"A" * 2**10)',              # Moderately large byte array
-
+    "[]",  # Empty list
+    "[[]]",  # Nested empty list
+    "[[[]]]",  # Deeply nested empty list
+    "{0: {0: {0: {}}}}",  # Deeply nested dictionary
+    '[(None, 1, "a") for _ in range(2**10)]',  # Large list with mixed types
+    "[[1] * 10] * 10",  # Nested lists with shared references
+    'bytearray(b"")',  # Empty byte array
+    'bytearray(b"A" * 2**10)',  # Moderately large byte array
     # Bytes and encoded data
-    'bytes(10 ** 5)',                       # Large empty bytes sequence
-    'bytes(range(256))',                    # Full byte range, all possible byte values
-    r'b"\x00" * (2**16)',                    # Maximum byte array handling with null bytes
-    'memoryview(b"A" * 2**8)',              # Memory view around a moderately large byte array
-
+    "bytes(10 ** 5)",  # Large empty bytes sequence
+    "bytes(range(256))",  # Full byte range, all possible byte values
+    r'b"\x00" * (2**16)',  # Maximum byte array handling with null bytes
+    'memoryview(b"A" * 2**8)',  # Memory view around a moderately large byte array
     # Regular expressions and raw strings
-    'r"^(?:a|aa)*$"',                       # Complex regex pattern
-    r'r"\A[\w-]+\Z"',                        # Simple regex pattern
-    r'r"\d{1,100}"',                         # Large quantifier regex pattern
-
+    'r"^(?:a|aa)*$"',  # Complex regex pattern
+    r'r"\A[\w-]+\Z"',  # Simple regex pattern
+    r'r"\d{1,100}"',  # Large quantifier regex pattern
     # Lambda and object instances
-    'lambda: None',                         # Simple lambda function (tests function call handling)
-    '(lambda x: sys.maxsize)',           # Lambda with boundary value as output
-    'object()',                             # Base object with minimal attributes
-    'frozenset({sys.maxsize, -sys.maxsize})', # Immutable set with boundary values
-
+    "lambda: None",  # Simple lambda function (tests function call handling)
+    "(lambda x: sys.maxsize)",  # Lambda with boundary value as output
+    "object()",  # Base object with minimal attributes
+    "frozenset({sys.maxsize, -sys.maxsize})",  # Immutable set with boundary values
     # Other encoding and integer tests
-    '"A" * (2**10)',                        # Large simple string
-    'complex(-10 ** 10, 10 ** 10)',         # Complex number with extreme real and imaginary values
-    '(sys.maxunicode + 1,)',                # Beyond max Unicode
+    '"A" * (2**10)',  # Large simple string
+    "complex(-10 ** 10, 10 ** 10)",  # Complex number with extreme real and imaginary values
+    "(sys.maxunicode + 1,)",  # Beyond max Unicode
 )
 
 
@@ -407,7 +483,7 @@ class ListAllModules:
         self.only_c = only_c
         self.site_package = site_package
         self.blacklist = blacklist
-        self.names = set(sys.builtin_module_names) - set(('__main__',))
+        self.names = set(sys.builtin_module_names) - set(("__main__",))
 
     def matchModule(self, is_package, name, filename):
         if filename is not None and not self.filter_filename(filename):
@@ -416,18 +492,21 @@ class ListAllModules:
             return True
         if is_package:
             return False
-        if any(filename.endswith(ext)
-               for ext in ('.py', '.pyc', '.pyo') if filename is not None):
+        if any(
+            filename.endswith(ext)
+            for ext in (".py", ".pyc", ".pyo")
+            if filename is not None
+        ):
             return False
         return True
 
     def filter_filename(self, filename):
         if not self.site_package:
-            if 'site-packages' in filename.split(path_sep):
+            if "site-packages" in filename.split(path_sep):
                 return False
         return True
 
-    def walk_packages(self, path=None, prefix='', onerror=None):
+    def walk_packages(self, path=None, prefix="", onerror=None):
         def seen(p, m={}):
             if p in m:
                 return True
@@ -436,11 +515,13 @@ class ListAllModules:
         for info in pkgutil.iter_modules(path, prefix):
             path = package = None
             if info.name in sys.modules:
-                path = getattr(sys.modules[info.name], '__path__', None)
-                package = getattr(sys.modules[info.name], '__package__', None)
-            if ("test" in info.name or 'pip' in info.name
-                    or (path is not None and any("site-packages" in p for p in path))
-                    or (package is not None and "pip" in package)
+                path = getattr(sys.modules[info.name], "__path__", None)
+                package = getattr(sys.modules[info.name], "__package__", None)
+            if (
+                "test" in info.name
+                or "pip" in info.name
+                or (path is not None and any("site-packages" in p for p in path))
+                or (package is not None and "pip" in package)
             ):
                 print("SKIPPED", info, file=sys.stderr)
                 continue
@@ -459,27 +540,31 @@ class ListAllModules:
                         raise
                 else:
                     if info.name in sys.modules:
-                        path = getattr(sys.modules[info.name], '__path__', None) or []
+                        path = getattr(sys.modules[info.name], "__path__", None) or []
                         # don't traverse path items we've seen before
                         path = [p for p in path if not seen(p)]
-                        yield from self.walk_packages(path, info.name + '.', onerror)
+                        yield from self.walk_packages(path, info.name + ".", onerror)
 
     def search_modules(self, path, prefix):
         if path is not None and not self.site_package:
-            path = [name for name in path
-                    if self.filter_filename(name)]
+            path = [name for name in path if self.filter_filename(name)]
             if not path:
                 return
         try:
-            for loader, name, is_package in self.walk_packages(None, onerror=lambda x: None):
-                if name.endswith('_d'):
+            for loader, name, is_package in self.walk_packages(
+                None, onerror=lambda x: None
+            ):
+                if name.endswith("_d"):
                     # Ignore Debian debug modules
                     # (eg. ignore "_bisect_d", the real module is "_bisect)
                     continue
-                if (name in self.blacklist or prefix in self.blacklist
-                        or prefix.split(".")[0] in self.blacklist
-                        or name.split(".")[0] in self.blacklist
-                        or "test" in name or "idlelib" in name
+                if (
+                    name in self.blacklist
+                    or prefix in self.blacklist
+                    or prefix.split(".")[0] in self.blacklist
+                    or name.split(".")[0] in self.blacklist
+                    or "test" in name
+                    or "idlelib" in name
                 ):
                     # Ignore the module and all of its submodules
                     self.logger.error(f"IGNORED {prefix}:{name}")
@@ -507,51 +592,77 @@ class ListAllModules:
             raise
 
     def search(self):
-        self.search_modules(None, '')
+        self.search_modules(None, "")
         return self.names
+
 
 class Fuzzer(Application):
     NAME = "python"
 
     def createFuzzerOptions(self, parser):
         options = OptionGroup(parser, "Python fuzzer")
-        options.add_option("--modules",
+        options.add_option(
+            "--modules",
             help="Tested Python module names separated by commas (default: test all modules)",
-            type="str", default="*")
-        options.add_option("--blacklist",
+            type="str",
+            default="*",
+        )
+        options.add_option(
+            "--blacklist",
             help='Module blacklist separated by commas (eg. "_lsprof,_json")',
-            type="str")
-        options.add_option("--test-private",
+            type="str",
+        )
+        options.add_option(
+            "--test-private",
             help="Test private methods (default: skip privates methods)",
-            action="store_true")
-        options.add_option("--timeout",
+            action="store_true",
+        )
+        options.add_option(
+            "--timeout",
             help="Timeout in seconds (default: %.1f)" % TIMEOUT,
-            type="float", default=TIMEOUT)
-        options.add_option("--filenames",
-            help="Names separated by commas of readable files (default: %s)" % FILENAMES,
-            type="str", default=FILENAMES)
-        options.add_option("--python",
+            type="float",
+            default=TIMEOUT,
+        )
+        options.add_option(
+            "--filenames",
+            help="Names separated by commas of readable files (default: %s)"
+            % FILENAMES,
+            type="str",
+            default=FILENAMES,
+        )
+        options.add_option(
+            "--python",
             help="Python executable program path (default: %s)" % PYTHON,
-            type="str", default=PYTHON)
-        options.add_option("--only-c",
+            type="str",
+            default=PYTHON,
+        )
+        options.add_option(
+            "--only-c",
             help="Only search for modules written in C (default: search all module)",
-            action="store_true")
-        options.add_option("--no-site-packages",
+            action="store_true",
+        )
+        options.add_option(
+            "--no-site-packages",
             help="Don't search modules in site-packages directory",
-            action="store_true")
+            action="store_true",
+        )
         return options
 
     def setupProject(self):
         project = self.project
 
         project.error("Use python interpreter: %s" % self.options.python)
-        version = ' -- '.join( line.strip() for line in PYTHON_VERSION.splitlines())
+        version = " -- ".join(line.strip() for line in PYTHON_VERSION.splitlines())
         project.error("Python version: %s" % version)
         PythonSource(project, self.options)
-        process = PythonProcess(project, [self.options.python, '-u', '<source.py>'], timeout=self.options.timeout)
-        options = {'exitcode_score' : 0}
+        process = PythonProcess(
+            project,
+            [self.options.python, "-u", "<source.py>"],
+            timeout=self.options.timeout,
+        )
+        options = {"exitcode_score": 0}
         if IGNORE_TIMEOUT:
-            options['timeout_score'] = 0
+            options["timeout_score"] = 0
         watch = WatchProcess(process, **options)
         if watch.cpu and IGNORE_CPU:
             watch.cpu.max_score = 0
@@ -561,17 +672,17 @@ class Fuzzer(Application):
 
         # Disable dummy error messages
         stdout.words = {
-            'oops': 0.30,
-            'bug': 0.10,
-            'fatal': 0.1,
-            'assert': 0.025,
-            'assertion': 1.0,
-            'critical': 1.0,
-            'panic': 1.0,
-            'glibc detected': 1.0,
-            'segfault': 1.0,
-            'segmentation fault': 1.0,
-            'SystemError': 1.0,
+            "oops": 0.30,
+            "bug": 0.10,
+            "fatal": 0.1,
+            "assert": 0.025,
+            "assertion": 1.0,
+            "critical": 1.0,
+            "panic": 1.0,
+            "glibc detected": 1.0,
+            "segfault": 1.0,
+            "segmentation fault": 1.0,
+            "SystemError": 1.0,
         }
 
         # CPython critical messages
@@ -594,56 +705,58 @@ class Fuzzer(Application):
         stdout.ignoreRegex(r"^And now for something completely different:")
 
         # Hide Python warnings on import
-        warnings.simplefilter('ignore')
+        warnings.simplefilter("ignore")
 
-ERRBACK_NAME = u'errback'
+
+ERRBACK_NAME = "errback"
 
 METHODS_NB_ARG = {
-    '__str__': 0,
-    '__repr__': 0,
-    '__hash__': 0,
-    '__reduce__': 0,
-    '__delattr__': 1,
-    '__getattribute__': 1,
-    '__getitem__': 1,
-    '__getslice__': 2,
-    '__reduce_ex__': (0, 1),
-    '__getstate__': 0,
-    '__setattr__': 2,
-    '__setstate__': 1,
-    '__eq__': 1,
-    '__lt__': 1,
-    '__gt__': 1,
-    '__add__': 1,
-    '__sub__': 1,
-    '__mul__': 1,
-    '__div__': 1,
-    '__lshift__': 1,
-    '__iadd__': 1,
-    '__isub__': 1,
-    '__imul__': 1,
-    '__idiv__': 1,
-    '__getattr__': 1,
-    '__ge__': 1,
-    '__le__': 1,
-    '__ne__': 1,
-    '__sizeof__': 0,
-    '__reversed__': 0,
-    '__contains__': 1,
-    '__iter__': 0,
-    '__setitem__': 2,
-    '__or__': 1,
-    '__ior__': 1,
-    '__ror__': 1,
-    '__and__': 1,
-    '__iand__': 1,
-    '__rand__': 1,
-    'exec': 3,
+    "__str__": 0,
+    "__repr__": 0,
+    "__hash__": 0,
+    "__reduce__": 0,
+    "__delattr__": 1,
+    "__getattribute__": 1,
+    "__getitem__": 1,
+    "__getslice__": 2,
+    "__reduce_ex__": (0, 1),
+    "__getstate__": 0,
+    "__setattr__": 2,
+    "__setstate__": 1,
+    "__eq__": 1,
+    "__lt__": 1,
+    "__gt__": 1,
+    "__add__": 1,
+    "__sub__": 1,
+    "__mul__": 1,
+    "__div__": 1,
+    "__lshift__": 1,
+    "__iadd__": 1,
+    "__isub__": 1,
+    "__imul__": 1,
+    "__idiv__": 1,
+    "__getattr__": 1,
+    "__ge__": 1,
+    "__le__": 1,
+    "__ne__": 1,
+    "__sizeof__": 0,
+    "__reversed__": 0,
+    "__contains__": 1,
+    "__iter__": 0,
+    "__setitem__": 2,
+    "__or__": 1,
+    "__ior__": 1,
+    "__ror__": 1,
+    "__and__": 1,
+    "__iand__": 1,
+    "__rand__": 1,
+    "exec": 3,
 }
 
 
 class PythonFuzzerError(Exception):
     pass
+
 
 class PythonSource(ProjectAgent):
     def __init__(self, project, options):
@@ -658,11 +771,16 @@ class PythonSource(ProjectAgent):
                 self.modules.add(module)
         else:
             self.error("Search all Python modules...")
-            self.modules = ListAllModules(self, self.options.only_c, not self.options.no_site_packages, MODULE_BLACKLIST).search()
+            self.modules = ListAllModules(
+                self,
+                self.options.only_c,
+                not self.options.no_site_packages,
+                MODULE_BLACKLIST,
+            ).search()
         blacklist = self.options.blacklist
         if blacklist:
             blacklist = set(blacklist.split(","))
-            removed =  self.modules & blacklist
+            removed = self.modules & blacklist
             self.error("Blacklist modules: %s" % removed)
             self.modules = list(self.modules - blacklist)
         self.modules = list(self.modules)
@@ -675,13 +793,19 @@ class PythonSource(ProjectAgent):
         if not RUNNING_PYTHON3:
             encoding = getfilesystemencoding()
             self.filenames = text_type(self.filenames, encoding)
-        self.filenames = self.filenames.split(u",")
+        self.filenames = self.filenames.split(",")
         for filename in self.filenames:
             if not isabs(filename):
-                raise ValueError("Filename %r is not an absolute path! Fix the --filenames option" % filename)
+                raise ValueError(
+                    "Filename %r is not an absolute path! Fix the --filenames option"
+                    % filename
+                )
             if not path_exists(filename):
-                raise ValueError("File doesn't exist: %s! Use different --filenames option" % filename)
-        project.error(u"Use filenames: %s" % u', '.join(self.filenames))
+                raise ValueError(
+                    "File doesn't exist: %s! Use different --filenames option"
+                    % filename
+                )
+        project.error("Use filenames: %s" % ", ".join(self.filenames))
 
     def loadModule(self, module_name):
         self.module_name = module_name
@@ -696,7 +820,7 @@ class PythonSource(ProjectAgent):
         self.write = WritePythonCode(self, self.filename, self.module, self.module_name)
 
     def on_session_start(self):
-        self.filename = self.session().createFilename(u'source.py')
+        self.filename = self.session().createFilename("source.py")
 
         # copy sys.modules
         old_sys_modules = sys.modules.copy()
@@ -707,51 +831,58 @@ class PythonSource(ProjectAgent):
                 self.loadModule(name)
                 break
             except BaseException as err:
-                self.error("Unable to load module %s: [%s] %s"
-                    % (name, err.__class__.__name__, err))
+                self.error(
+                    "Unable to load module %s: [%s] %s"
+                    % (name, err.__class__.__name__, err)
+                )
                 self.modules.remove(name)
         if not self.modules:
             self.error("There is no more modules!")
-            self.send('project_stop')
+            self.send("project_stop")
             return
         self.error("Test module %s" % name)
-        self.send('session_rename', name)
+        self.send("session_rename", name)
 
         self.write.writeSource()
-        self.send('python_source', self.filename)
+        self.send("python_source", self.filename)
 
         # unload new modules
         sys.modules.clear()
         sys.modules.update(old_sys_modules)
+
 
 class PythonProcess(CreateProcess):
     def on_python_source(self, filename):
         self.cmdline.arguments[-1] = filename
         self.createProcess()
 
+
 # >'<, >"<, >\<
-ESCAPE_CHARARACTERS = u"'" + u'"' + u'\\'
+ESCAPE_CHARARACTERS = "'" + '"' + "\\"
+
 
 def formatCharacter(char):
     if char in ESCAPE_CHARARACTERS:
         # >\"<
-        return u'\\' + char
+        return "\\" + char
     code = ord(char)
     if 32 <= code <= 126:
         # >a<
         return char
     elif code <= 255:
         # >\xEF<
-        return u'\\x%02X' % code
+        return "\\x%02X" % code
     elif code <= 65535:
         # >\u0101<
-        return u'\\u%04X' % code
+        return "\\u%04X" % code
     else:
         # >\U00010FA3<
-        return u'\\U%08X' % code
+        return "\\U%08X" % code
+
 
 def escapeUnicode(text):
-    return ''.join( formatCharacter(char) for char in text)
+    return "".join(formatCharacter(char) for char in text)
+
 
 class WritePythonCode(WriteCode):
     def __init__(self, parent, filename, module, module_name):
@@ -773,8 +904,8 @@ class WritePythonCode(WriteCode):
             self.genFloat,
             self.genExistingFilename,
             self.genErrback,
-#            self.genOpenFile,
-           self.genException,
+            #            self.genOpenFile,
+            self.genException,
             self.genRawString,
         )
         self.simple_argument_generators = self.hashable_argument_generators + (
@@ -794,7 +925,9 @@ class WritePythonCode(WriteCode):
         self.unicode_generator = UnicodeGenerator(1, 20, UNICODE_65535)
         self.ascii_generator = UnicodeGenerator(0, 20, ASCII8)
         self.unix_path_generator = UnixPathGenerator(100)
-        self.letters_generator = UnicodeGenerator(1, 8, LETTERS | DECIMAL_DIGITS | ASCII8)
+        self.letters_generator = UnicodeGenerator(
+            1, 8, LETTERS | DECIMAL_DIGITS | ASCII8
+        )
         self.float_int_generator = IntegerGenerator(4)
         self.float_float_generator = UnsignedGenerator(4)
         self.module = module
@@ -802,51 +935,55 @@ class WritePythonCode(WriteCode):
 
         self.functions, self.classes, self.objects = self.getFunctions()
         if not self.functions and not self.classes:
-            raise PythonFuzzerError("Module %s has no function and no class!" % self.module_name)
+            raise PythonFuzzerError(
+                "Module %s has no function and no class!" % self.module_name
+            )
 
     def writePrint(self, level, arguments):
         if RUNNING_PYTHON3:
-            code = u"print (%s, file=stderr)" % arguments
+            code = "print (%s, file=stderr)" % arguments
         else:
-            code = u"print >>stderr, %s" % arguments
+            code = "print >>stderr, %s" % arguments
         self.write(level, code)
 
     def writeSource(self):
         self.createFile(self.filename)
-        self.write(0, u"from gc import collect")
-        self.write(0, u"from random import choice, sample")
-        self.write(0, u"from sys import stderr")
-        self.write(0, u"import sys")
-        self.write(0, u"from threading import Thread")
-        self.write(0, u"from unittest.mock import MagicMock")
-        self.writePrint(0, u'"import %s"' % self.module_name)
-        self.write(0, u"import %s" % self.module_name)
+        self.write(0, "from gc import collect")
+        self.write(0, "from random import choice, sample")
+        self.write(0, "from sys import stderr")
+        self.write(0, "import sys")
+        self.write(0, "from threading import Thread")
+        self.write(0, "from unittest.mock import MagicMock")
+        self.writePrint(0, '"import %s"' % self.module_name)
+        self.write(0, "import %s" % self.module_name)
         self.emptyLine()
-        self.write(0, u"def %s(*args, **kw):" % ERRBACK_NAME)
-        self.write(1, u"raise ValueError('error')")
+        self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
+        self.write(1, "raise ValueError('error')")
         self.emptyLine()
 
-        self.write(0, u"alive = []")
-        self.write(0, u"lst = list(range(10))")
-        self.write(0, u"lst.append(lst)")
-        self.write(0, u"class Liar1:")
-        self.write(1, u"def __eq__(self, other):")
-        self.write(2, u"return True")
+        self.write(0, "alive = []")
+        self.write(0, "lst = list(range(10))")
+        self.write(0, "lst.append(lst)")
+        self.write(0, "class Liar1:")
+        self.write(1, "def __eq__(self, other):")
+        self.write(2, "return True")
         self.emptyLine()
-        self.write(0, u"class Liar2:")
-        self.write(1, u"def __eq__(self, other):")
-        self.write(2, u"return False")
+        self.write(0, "class Liar2:")
+        self.write(1, "def __eq__(self, other):")
+        self.write(2, "return False")
         self.emptyLine()
-        self.write(0, u"liar1, liar2 = Liar1(), Liar2()")
+        self.write(0, "liar1, liar2 = Liar1(), Liar2()")
         self.emptyLine()
-        self.write(0, u'\n\nclass Evil:\n    def __eq__(self, other):\n'
-                   '        for attr in dir(other):\n'
-                   '            try:\n'
-                   '                other.__dict__[attr] = %s\n'
-                   '            except:\n'
-                   '                pass\n'
-                   'evil = Evil()' % ERRBACK_NAME
-                   )
+        self.write(
+            0,
+            "\n\nclass Evil:\n    def __eq__(self, other):\n"
+            "        for attr in dir(other):\n"
+            "            try:\n"
+            "                other.__dict__[attr] = %s\n"
+            "            except:\n"
+            "                pass\n"
+            "evil = Evil()" % ERRBACK_NAME,
+        )
         self.emptyLine()
         self.emptyLine()
         self.write(0, "def callMethod(prefix, object, name, *arguments):")
@@ -856,10 +993,14 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         self.write(0, "def callFunc(prefix, name, *arguments):")
-        self.write(1, "return callMethod(prefix, %s, name, *arguments)" % self.module_name)
+        self.write(
+            1, "return callMethod(prefix, %s, name, *arguments)" % self.module_name
+        )
         self.emptyLine()
 
-        self.writeCode(u'', self.module, self.functions, self.classes, self.objects, 1, NB_CALL)
+        self.writeCode(
+            "", self.module, self.functions, self.classes, self.objects, 1, NB_CALL
+        )
         self.emptyLine()
         self.write(0, "for obj in alive:")
         self.write(1, "try:")
@@ -877,33 +1018,36 @@ class WritePythonCode(WriteCode):
         self.close()
 
     def writeCallMethod(self):
-        self.write(0, u'funcname = "%s.%%s()" %% name' % self.module_name)
-        self.write(0, u'message = "[%s] %s" % (prefix, funcname)')
-        self.writePrint(0, u'message')
-        self.write(0, u'try:')
-        self.write(1, u'func = getattr(object, name)')
-        self.write(1, u'for x in range(2):')
-        self.write(2, u'result = [func(*arguments) for y in range(20)][0]')
+        self.write(0, 'funcname = "%s.%%s()" %% name' % self.module_name)
+        self.write(0, 'message = "[%s] %s" % (prefix, funcname)')
+        self.writePrint(0, "message")
+        self.write(0, "try:")
+        self.write(1, "func = getattr(object, name)")
+        self.write(1, "for x in range(2):")
+        self.write(2, "result = [func(*arguments) for y in range(20)][0]")
 
-        exceptions = u'(Exception, SystemExit, KeyboardInterrupt)'
+        exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
         if RUNNING_PYTHON3:
-            self.write(0, u'except %s as err:' % exceptions)
+            self.write(0, "except %s as err:" % exceptions)
         else:
-            self.write(0, u'except %s, err:' % exceptions)
-        self.write(1, u'errmsg = repr(err)')
+            self.write(0, "except %s, err:" % exceptions)
+        self.write(1, "errmsg = repr(err)")
         if RUNNING_PYTHON3:
-            self.write(1, u"errmsg = errmsg.encode('ASCII', 'replace')")
-        self.writePrint(1, u'"[%s] %s => %s: %s" % (prefix, funcname, err.__class__.__name__, errmsg)')
-        self.write(1, u'result = None')
+            self.write(1, "errmsg = errmsg.encode('ASCII', 'replace')")
+        self.writePrint(
+            1,
+            '"[%s] %s => %s: %s" % (prefix, funcname, err.__class__.__name__, errmsg)',
+        )
+        self.write(1, "result = None")
 
-        self.writePrint(0, u'"[%s] -garbage collector-" % prefix')
-        self.write(0, u'collect()   # explicit call to the garbage collector')
-        self.write(0, u'try:')
-        self.write(1, u'if result:')
-        self.write(2, u'alive.append(Thread(target=func, args=arguments))')
-        self.write(0, u'except:')
-        self.write(1, u'pass')
-        self.write(0, u'return result')
+        self.writePrint(0, '"[%s] -garbage collector-" % prefix')
+        self.write(0, "collect()   # explicit call to the garbage collector")
+        self.write(0, "try:")
+        self.write(1, "if result:")
+        self.write(2, "alive.append(Thread(target=func, args=arguments))")
+        self.write(0, "except:")
+        self.write(1, "pass")
+        self.write(0, "return result")
 
     def getFunctions(self):
         classes = []
@@ -938,7 +1082,7 @@ class WritePythonCode(WriteCode):
         except KeyError:
             blacklist = set()
         methods = {}
-        if type (object) in {int, str}:
+        if type(object) in {int, str}:
             return methods
         for name in dir(object):
             if name in blacklist:
@@ -1007,7 +1151,7 @@ class WritePythonCode(WriteCode):
                 return args
         return min_arg, MAX_ARG
 
-    def callFunction(self, prefix, func_index, func_name, func, min_arg, obj_name = None):
+    def callFunction(self, prefix, func_index, func_name, func, min_arg, obj_name=None):
         if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
             return
         min_arg, max_arg = self.getNbArg(func, func_name, min_arg)
@@ -1024,46 +1168,61 @@ class WritePythonCode(WriteCode):
             nb_arg = randint(min_arg, max_arg)
 
         if prefix:
-            prefix += str(1+func_index)
-            first_line = u'res = callMethod("%s", obj, "%s"' % (prefix, func_name)
+            prefix += str(1 + func_index)
+            first_line = 'res = callMethod("%s", obj, "%s"' % (prefix, func_name)
         else:
-            prefix = "f%s" % (1+func_index)
-            first_line = u'res = callFunc("%s", "%s"' % (prefix, func_name)
+            prefix = "f%s" % (1 + func_index)
+            first_line = 'res = callFunc("%s", "%s"' % (prefix, func_name)
         if nb_arg:
-            self.write(0, first_line + u',')
+            self.write(0, first_line + ",")
             level = self.addLevel(1)
-            last_char = u','
+            last_char = ","
             for index in xrange(nb_arg):
-                if index == nb_arg-1:
-                    last_char = u')'
+                if index == nb_arg - 1:
+                    last_char = ")"
                 self.writeArgument(1, last_char)
             self.restoreLevel(level)
         else:
-            self.write(0, first_line + ')')
+            self.write(0, first_line + ")")
         if obj_name:
-            first_line = "alive.append(Thread(target=%s.%s.%s, args=(" % (self.module_name, obj_name, func_name)
+            first_line = "alive.append(Thread(target=%s.%s.%s, args=(" % (
+                self.module_name,
+                obj_name,
+                func_name,
+            )
         else:
-            first_line = "alive.append(Thread(target=%s.%s, args=(" % (self.module_name, func_name)
+            first_line = "alive.append(Thread(target=%s.%s, args=(" % (
+                self.module_name,
+                func_name,
+            )
         if nb_arg:
             if obj_name:
-                self.write(0, "if hasattr(%s.%s, '%s'):" % (self.module_name, obj_name, func_name))
+                self.write(
+                    0,
+                    "if hasattr(%s.%s, '%s'):"
+                    % (self.module_name, obj_name, func_name),
+                )
             else:
                 self.write(0, "if hasattr(%s, '%s'):" % (self.module_name, func_name))
             self.write(1, first_line)
-            last_char = u','
+            last_char = ","
             for index in xrange(nb_arg):
                 if index == nb_arg - 1:
-                    last_char = u',)))'
+                    last_char = ",)))"
                 self.writeArgument(1, last_char)
         else:
             if obj_name:
-                self.write(0, "if hasattr(%s.%s, '%s'):" % (self.module_name, obj_name, func_name))
+                self.write(
+                    0,
+                    "if hasattr(%s.%s, '%s'):"
+                    % (self.module_name, obj_name, func_name),
+                )
             else:
                 self.write(0, "if hasattr(%s, '%s'):" % (self.module_name, func_name))
-            self.write(1, first_line + ')))')
+            self.write(1, first_line + ")))")
         self.emptyLine()
 
-    def writeArgument(self, level, last_char=u','):
+    def writeArgument(self, level, last_char=","):
         lines = self.createComplexArgument()
         lines[-1] += last_char
         for line in lines:
@@ -1071,52 +1230,77 @@ class WritePythonCode(WriteCode):
 
     def useClass(self, cls_index, cls, class_name):
         import inspect
+
         argspec = inspect.getfullargspec(cls.__init__)
         args = len(argspec.args) - 1 if argspec.args else 0
         defaults = len(argspec.defaults) if argspec.defaults else 0
         nb_arg = randint(args - defaults, args)
 
-        prefix = 'o%s' % (1 + cls_index)
-        self.writePrint(0, u'"[%s] Create object %s"' % (prefix, 1 + cls_index))
+        prefix = "o%s" % (1 + cls_index)
+        self.writePrint(0, '"[%s] Create object %s"' % (prefix, 1 + cls_index))
 
-        obj_name = u'obj'
-        self.write(0, u'%s = callFunc("%s", "%s",' % (obj_name, prefix, class_name))
+        obj_name = "obj"
+        self.write(0, '%s = callFunc("%s", "%s",' % (obj_name, prefix, class_name))
         for index in xrange(nb_arg):
-            self.write(2, u'# argument %s/%s' % (1+index, nb_arg))
+            self.write(2, "# argument %s/%s" % (1 + index, nb_arg))
             self.writeArgument(2)
-        self.write(1, u')')
+        self.write(1, ")")
 
         methods = sorted(self.getMethods(cls, class_name).keys())
         if methods:
-            self.write(0, u'if obj is not None:')
+            self.write(0, "if obj is not None:")
             level = self.addLevel(1)
-            self.writeCode(prefix+'m', cls, methods, tuple(), tuple(),0, NB_METHOD)
-            self.write(0, u'del %s' % obj_name)
-            self.writePrint(0, u'"[%s] -garbage collector -"' % prefix)
-            self.write(0, u'collect()   # explicit call to the garbage collector')
+            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, NB_METHOD)
+            self.write(0, "del %s" % obj_name)
+            self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
+            self.write(0, "collect()   # explicit call to the garbage collector")
             self.restoreLevel(level)
         self.emptyLine()
 
     def useObject(self, obj_index, obj, obj_name):
-        prefix = 'obj%s' % (1 + obj_index)
-        self.writePrint(0, u'"[%s] Call methods on object %s (%s)"' % (prefix, 1 + obj_index, obj_name))
-        self.write(0, u'obj = %s.%s' % (self.module_name, obj_name))
+        prefix = "obj%s" % (1 + obj_index)
+        self.writePrint(
+            0,
+            '"[%s] Call methods on object %s (%s)"' % (prefix, 1 + obj_index, obj_name),
+        )
+        self.write(0, "obj = %s.%s" % (self.module_name, obj_name))
         methods = self.getMethods(obj, obj_name)
         if methods:
-            self.write(0, u'if obj is not None:')
+            self.write(0, "if obj is not None:")
             level = self.addLevel(1)
-            self.writeCode(prefix+'m', obj, sorted(methods.keys()), tuple(), tuple(),0, NB_METHOD, obj_name)
-            self.writePrint(0, u'"[%s] -garbage collector -"' % prefix)
-            self.write(0, u'collect()   # explicit call to the garbage collector')
+            self.writeCode(
+                prefix + "m",
+                obj,
+                sorted(methods.keys()),
+                tuple(),
+                tuple(),
+                0,
+                NB_METHOD,
+                obj_name,
+            )
+            self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
+            self.write(0, "collect()   # explicit call to the garbage collector")
             self.restoreLevel(level)
         self.emptyLine()
 
-    def writeCode(self, prefix, object, functions, classes, objects, func_min_arg, nb_call, obj_name=None):
+    def writeCode(
+        self,
+        prefix,
+        object,
+        functions,
+        classes,
+        objects,
+        func_min_arg,
+        nb_call,
+        obj_name=None,
+    ):
         if functions:
             for index in xrange(nb_call):
                 func_name = choice(functions)
                 func = getattr(object, func_name)
-                self.callFunction(prefix, index, func_name, func, func_min_arg, obj_name)
+                self.callFunction(
+                    prefix, index, func_name, func, func_min_arg, obj_name
+                )
         if classes:
             self.nb_class = NB_CLASS
             for index in xrange(self.nb_class):
@@ -1132,22 +1316,33 @@ class WritePythonCode(WriteCode):
                 self.useObject(index, obj, object_name)
 
     def genNone(self):
-        return [u'None']
+        return ["None"]
 
     def genTricky(self):
-        return [choice(["liar1", "liar2", "lst","lambda *args, **kwargs: 1/0", "int",
-                        "type", "object()", "[[[[[[[[[[[[[[]]]]]]]]]]]]]]",
-                        "choice(alive) if alive else None",
-                        "sample(alive, (len(alive)//2) + 1) if alive else None",
-                        "MagicMock()", "Evil()",
-                        ])
+        return [
+            choice(
+                [
+                    "liar1",
+                    "liar2",
+                    "lst",
+                    "lambda *args, **kwargs: 1/0",
+                    "int",
+                    "type",
+                    "object()",
+                    "[[[[[[[[[[[[[[]]]]]]]]]]]]]]",
+                    "choice(alive) if alive else None",
+                    "sample(alive, (len(alive)//2) + 1) if alive else None",
+                    "MagicMock()",
+                    "Evil()",
                 ]
+            )
+        ]
 
     def genBool(self):
         if randint(0, 1) == 1:
-            return [u'True']
+            return ["True"]
         else:
-            return [u'False']
+            return ["False"]
 
     def genSmallUint(self):
         return [self.smallint_generator.createValue()]
@@ -1159,25 +1354,25 @@ class WritePythonCode(WriteCode):
         # Bytes string
         bytes = self.bytes_generator.createValue()
         if RUNNING_PYTHON3:
-            text = ''.join( u"\\x%02X" % byte for byte in bytes)
+            text = "".join("\\x%02X" % byte for byte in bytes)
             text = 'b"%s"' % text
         else:
-            text = u''.join( u"\\x%02X" % ord(byte) for byte in bytes)
-            text = u'"%s"' % text
+            text = "".join("\\x%02X" % ord(byte) for byte in bytes)
+            text = '"%s"' % text
         return [text]
 
     def genUnixPath(self):
         path = self.unix_path_generator.createValue()
-        return [u'"%s"' % path]
+        return ['"%s"' % path]
 
     def _genUnicode(self, generator):
         # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
         if RUNNING_PYTHON3:
-            text = u'"%s"' % text
+            text = '"%s"' % text
         else:
-            text = u'u"%s"' % text
+            text = 'u"%s"' % text
         return [text]
 
     def genLetterDigit(self):
@@ -1187,9 +1382,11 @@ class WritePythonCode(WriteCode):
         return self._genUnicode(self.unicode_generator)
 
     def genRawString(self):
-        sequences = [
-                        r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"
-                    ] + sorted(LETTERS) + ["."] * 10
+        sequences = (
+            [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
+            + sorted(LETTERS)
+            + ["."] * 10
+        )
         special = ["+", "?", "*"]
         result = []
         for x in range(randint(3, 20)):
@@ -1216,11 +1413,11 @@ class WritePythonCode(WriteCode):
     def genFloat(self):
         int_part = self.float_int_generator.createValue()
         float_part = self.float_float_generator.createValue()
-        return [u"%s.%s" % (int_part, float_part)]
+        return ["%s.%s" % (int_part, float_part)]
 
     def genExistingFilename(self):
         filename = choice(self.filenames)
-        return [u"'%s'" % filename]
+        return ["'%s'" % filename]
 
     def genErrback(self):
         return ["%s" % ERRBACK_NAME]
@@ -1238,7 +1435,7 @@ class WritePythonCode(WriteCode):
 
     def _genList(self, open_text, close_text, empty, is_dict=False):
         # 90% of the time generate values of the same type
-        same_type = (randint(0, 9) != 0)
+        same_type = randint(0, 9) != 0
         nb_item = randint(0, 9)
         if not nb_item:
             return [empty]
@@ -1263,13 +1460,13 @@ class WritePythonCode(WriteCode):
         lines = []
         for item_index, item_lines in enumerate(items):
             if item_index:
-                lines[-1] += u","
+                lines[-1] += ","
                 for index, line in enumerate(item_lines):
                     # Add ' ' suffix to all lines
-                    item_lines[index] = u' ' + line
+                    item_lines[index] = " " + line
             lines.extend(item_lines)
-        if nb_item == 1 and empty == u'tuple()':
-            lines[-1] += u','
+        if nb_item == 1 and empty == "tuple()":
+            lines[-1] += ","
         lines[0] = open_text + lines[0]
         lines[-1] += close_text
         return lines
@@ -1283,18 +1480,19 @@ class WritePythonCode(WriteCode):
             value = value_callback()
         else:
             value = self.createArgument()
-        key[-1] += u": " + value[0]
+        key[-1] += ": " + value[0]
         key.extend(value[1:])
         return key
 
     def genList(self):
-        return self._genList(u'[', u']', u'[]')
+        return self._genList("[", "]", "[]")
 
     def genTuple(self):
-        return self._genList(u'(', u')', u'tuple()')
+        return self._genList("(", ")", "tuple()")
 
     def genDict(self):
-        return self._genList(u'{', u'}', u'{}', True)
+        return self._genList("{", "}", "{}", True)
+
 
 def parseArguments(arguments, defaults):
     for arg in arguments.split(","):
@@ -1305,6 +1503,7 @@ def parseArguments(arguments, defaults):
             arg, value = arg.split("=", 1)
             defaults[arg] = value
         yield arg
+
 
 def parsePrototype(doc):
     r"""
@@ -1331,7 +1530,7 @@ def parsePrototype(doc):
     if not match:
         return None
     arguments = match.group(1)
-    if arguments == '...':
+    if arguments == "...":
         return None
     defaults = {}
     vararg = None
@@ -1345,7 +1544,7 @@ def parsePrototype(doc):
 
     # Argument with default value? => varkw
     move = None
-    for index in xrange(len(arguments)-1, -1, -1):
+    for index in xrange(len(arguments) - 1, -1, -1):
         arg = arguments[index]
         if arg not in defaults:
             break
@@ -1358,6 +1557,7 @@ def parsePrototype(doc):
         vararg = arguments[-1]
         arguments = arguments[:-1]
     return (arguments, vararg, varkw, defaults)
+
 
 def parseDocumentation(doc, max_var_arg):
     """
@@ -1377,6 +1577,6 @@ def parseDocumentation(doc, max_var_arg):
         max_arg += max_var_arg
     return min_arg, max_arg
 
+
 if __name__ == "__main__":
     Fuzzer().main()
-
