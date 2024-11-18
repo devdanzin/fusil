@@ -12,14 +12,9 @@ import pkgutil
 import re
 import sys
 import warnings
-from inspect import isclass
 from optparse import OptionGroup
-from os.path import exists as path_exists
-from os.path import isabs
-from os.path import sep as path_sep
+from os.path import exists as path_exists, isabs, sep as path_sep
 from random import choice, randint, sample
-from sys import executable
-from sys import version as PYTHON_VERSION
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
@@ -57,11 +52,11 @@ DEBUG = False
 
 xrange = range
 
-print(PYTHON_VERSION)
+print(sys.version)
 
 # Constants
 TIMEOUT = 60.0
-PYTHON = executable
+PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
 PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
@@ -652,7 +647,7 @@ class Fuzzer(Application):
         project = self.project
 
         project.error("Use python interpreter: %s" % self.options.python)
-        version = " -- ".join(line.strip() for line in PYTHON_VERSION.splitlines())
+        version = " -- ".join(line.strip() for line in sys.version.splitlines())
         project.error("Python version: %s" % version)
         PythonSource(project, self.options)
         process = PythonProcess(
@@ -1069,7 +1064,7 @@ class WritePythonCode(WriteCode):
                 continue
             if isinstance(attr, (FunctionType, BuiltinFunctionType)):
                 functions.append(name)
-            elif isinstance(attr, type) or isclass(attr):
+            elif isinstance(attr, type) or inspect.isclass(attr):
                 classes.append(name)
             else:
                 objects.append(name)
