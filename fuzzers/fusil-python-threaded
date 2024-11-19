@@ -923,7 +923,10 @@ class WritePythonCode(WriteCode):
             self.write(0, "except %s as err:" % exceptions)
         else:
             self.write(0, "except %s, err:" % exceptions)
-        self.write(1, "errmsg = repr(err)")
+        self.write(1, "try:")
+        self.write(2, "errmsg = repr(err)")
+        self.write(1, "except ValueError as e:")
+        self.write(2, "errmsg = repr(e)")
         if RUNNING_PYTHON3:
             self.write(1, "errmsg = errmsg.encode('ASCII', 'replace')")
         self.writePrint(
