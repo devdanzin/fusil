@@ -3,7 +3,7 @@
 Generate Python source code: random function calls with random arguments.
 Use "python" command line program.
 
-Interresting modules: all modules written in C or having some code written
+Interesting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
 
@@ -61,136 +61,95 @@ FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
 PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
 
-MODULE_BLACKLIST = set(
-    (
-        # wait keystroke from the keyboard
-        "getpass",
-        # execute child processes
-        "commands",
-        "subprocess",
-        # run a webbrowser
-        "antigravity",
-        # too slow, search for .py in the whole hard drive
-        "compileall",
-        # nothing to fuzz
-        "user",
-        "this",
-        # module dedicated to tests, not used in real world project, but it's build
-        # by default
-        "_testcapi",
-        "_testlimitedcapi",
-        "_testinternalcapi",
-        # ignore the whole CPython test suite
-        "test",
-        # read/write from/to arbitrary memory (eg. ctypes.string_at())
-        "ctypes",
-        "_ctypes",
-        # don't fuzz fusil nor python-ptrace
-        "fusil",
-        "ptrace",
-        # bad stuff
-        "pip",
-        "setuptools",
-        "distutils",
-        "_signal",
-        "signal",
-        # "builtins",
-        "__builtin__",
-    )
-)
+MODULE_BLACKLIST = {
+    "getpass",
+    "commands",
+    "subprocess",
+    "antigravity",
+    "compileall",
+    "user",
+    "this",
+    "_testcapi",
+    "_testlimitedcapi",
+    "_testinternalcapi",
+    "test",
+    "ctypes",
+    "_ctypes",
+    "fusil",
+    "ptrace",
+    "pip",
+    "setuptools",
+    "distutils",
+    "_signal",
+    "signal",
+    "__builtin__",
+}
 
-CTYPES = set(
-    (
-        # Read/write arbitrary memory
-        "PyObj_FromPtr",
-        "string_at",
-        "wstring_at",
-        "call_function",
-        "call_cdeclfunction",
-        "Py_INCREF",
-        "Py_DECREF",
-        "dlsym",
-        "dlclose",
-        "_string_at_addr",
-        "_wstring_at_addr",
-        # _ctypes.dlopen("/bin/sh", -5):
-        # Inconsistency detected by ld.so: dl-open.c: 652:
-        # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
-        # The bug is specific to Python (not reproductible outside Python)
-        "dlopen",
-    )
-)
+CTYPES = {
+    "PyObj_FromPtr",
+    "string_at",
+    "wstring_at",
+    "call_function",
+    "call_cdeclfunction",
+    "Py_INCREF",
+    "Py_DECREF",
+    "dlsym",
+    "dlclose",
+    "_string_at_addr",
+    "_wstring_at_addr",
+    "dlopen",
+}
 
-SOCKET = set(
-    (
-        # Avoid DNS request (timeout)
-        "gethostbyname",
-        "gethostbyname_ex",
-        "gethostbyaddr",
-        "getnameinfo",
-        "getaddrinfo",
-        # network objects having blocking operations like accept() or recv()
-        "socket",
-        "SocketType",
-    )
-)
+SOCKET = {
+    "gethostbyname",
+    "gethostbyname_ex",
+    "gethostbyaddr",
+    "getnameinfo",
+    "getaddrinfo",
+    "socket",
+    "SocketType",
+}
 
-POSIX = set(
-    (
-        # exit python
-        "_exit",
-        "abort",
-        # read -> timeout
-        "read",
-        # truncate file, remove directory, remove file
-        "ftruncate",
-        "rmdir",
-        "unlink",
-        # send a signal to the current process or a process group
-        "kill",
-        "killpg",
-        # create child process
-        "fork",
-        "forkpty",
-        "system",
-        "popen",
-        "popen2",
-        "popen3",
-        "popen4",
-        "spawnl",
-        "spawnle",
-        "spawnlp",
-        "spawnlpe",
-        "spawnv",
-        "spawnve",
-        "spawnvp",
-        "spawnvpe",
-        "execl",
-        "execle",
-        "execlp",
-        "execlpe",
-        "execv",
-        "execve",
-        "execvp",
-        "execvpe",
-        # wait process exit (-> timeout)
-        "wait",
-        "wait3",
-        "waitpid",
-        # break the terminal?
-        "tcsetpgrp",
-        # long loop
-        "closerange",
-    )
-)
+POSIX = {
+    "_exit",
+    "abort",
+    "read",
+    "ftruncate",
+    "rmdir",
+    "unlink",
+    "kill",
+    "killpg",
+    "fork",
+    "forkpty",
+    "system",
+    "popen",
+    "popen2",
+    "popen3",
+    "popen4",
+    "spawnl",
+    "spawnle",
+    "spawnlp",
+    "spawnlpe",
+    "spawnv",
+    "spawnve",
+    "spawnvp",
+    "spawnvpe",
+    "execl",
+    "execle",
+    "execlp",
+    "execlpe",
+    "execv",
+    "execve",
+    "execvp",
+    "execvpe",
+    "wait",
+    "wait3",
+    "waitpid",
+    "tcsetpgrp",
+    "closerange",
+}
 
-BUILTINS = set(
-    (
-        # Create huge integer, very long string or list
-        "pow",
-        "round",
-    )
-)
+BUILTINS = {"pow", "round"}
 
 # Functions and methods blacklist. Format:
 #   module name => function and class names
@@ -200,148 +159,86 @@ BLACKLIST = {
     # Dangerous module: ctypes
     "ctypes": CTYPES,
     "_ctypes": CTYPES,
-    # Eat lot of CPU with large arguments
-    "itertools": set(("tee",)),
-    "math": set(("factorial",)),
-    "operator": set(
-        (
-            # Create huge integer, very long string or list
-            "pow",
-            "__pow__",
-            "ipow",
-            "__ipow__",
-            "mul",
-            "__mul__",
-            "repeat",
-            "__repeat__",
-        )
-    ),
+    # Eat a lot of CPU with large arguments
+    "itertools": {"tee"},
+    "math": {"factorial"},
+    "operator": {
+        "pow",
+        "__pow__",
+        "ipow",
+        "__ipow__",
+        "mul",
+        "__mul__",
+        "repeat",
+        "__repeat__",
+    },
     "__builtin__": BUILTINS,
     "builtins": BUILTINS,
     # Don't raise SystemError
-    "_builtin__:set": set(("test_c_api",)),
-    "builtins:set": set(("test_c_api",)),
+    "_builtin__:set": {"test_c_api"},
+    "builtins:set": {"test_c_api"},
     # Sleep
-    "time": set(("sleep", "pthread_getcpuclockid")),
-    "select": set(("epoll", "poll", "select")),
-    "signal": set(("pause", "alarm", "setitimer", "pthread_kill")),
-    "_signal": set(("pause", "alarm", "setitimer", "pthread_kill")),
+    "time": {"sleep", "pthread_getcpuclockid"},
+    "select": {"epoll", "poll", "select"},
+    "signal": {"pause", "alarm", "setitimer", "pthread_kill"},
+    "_signal": {"pause", "alarm", "setitimer", "pthread_kill"},
     "_socket": SOCKET,
     "socket": SOCKET,
     "posix": POSIX,
     "os": POSIX,
-    "_fileio:_FileIO": set(
-        (
-            # timeout
-            "read",
-            "readall",
-        )
-    ),
+    "_fileio:_FileIO": {"read", "readall"},
     # timeout
-    "multiprocessing": set(("Pool",)),
-    "_multiprocessing:SemLock": set(
-        (
-            # deadlock
-            "acquire",
-        )
-    ),
-    "_multiprocessing:Connection": set(
-        (
-            # timeout
-            "recv",
-            "recv_bytes",
-            "poll",
-        )
-    ),
-    "_tkinter": set(
-        (
-            # timeout
-            "dooneevent",
-            "create",
-            # no window -> no event -> loop on select()
-            "mainloop",
-        )
-    ),
-    "termios": set(
-        (
-            # tcflow(0, False) suspend output to stdout
-            "tcflow",
-        )
-    ),
-    "dl": set(
-        (
-            # dl.open("/bin/sh", -5):
-            # Inconsistency detected by ld.so: dl-open.c: 652:
-            # _dl_open: Assertion `_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT' failed!
-            # The bug is specific to Python (not reproductible outside Python)
-            "open",
-        )
-    ),
-    "pydoc": set(
-        (
-            # listen to a socket and wait for requests
-            "serve",
-            # avoid false positive with pattern (eg. "memory") on stdout
-            "doc",
-            "apropos",
-        )
-    ),
+    "multiprocessing": {"Pool"},
+    "_multiprocessing:SemLock": {"acquire"},
+    "_multiprocessing:Connection": {"recv", "recv_bytes", "poll"},
+    "_tkinter": {"dooneevent", "create", "mainloop"},
+    "termios": {"tcflow"},
+    "dl": {"open"},
+    "pydoc": {"serve", "doc", "apropos"},
     # listen to a socket and wait for requests
-    "BaseHTTPServer": set(("test",)),
-    "CGIHTTPServer": set(("test",)),
-    "SimpleHTTPServer": set(("test",)),
-    "pprint": set(("_perfcheck",)),  # timeout (unlimited loop?)
-    "tabnanny": set(("check",)),  # python 2.5.2 implementation is just slow
+    "BaseHTTPServer": {"test"},
+    "CGIHTTPServer": {"test"},
+    "SimpleHTTPServer": {"test"},
+    "pprint": {"_perfcheck"},  # timeout (unlimited loop?)
+    "tabnanny": {"check"},  # python 2.5.2 implementation is just slow
     # create child process
-    "popen2": set(("popen2", "popen3", "popen4", "Popen3", "Popen4")),
-    "pty": set(("fork", "spawn")),
-    "platform": set(("_syscmd_uname",)),
+    "popen2": {"popen2", "popen3", "popen4", "Popen3", "Popen4"},
+    "pty": {"fork", "spawn"},
+    "platform": {"_syscmd_uname"},
     # avoid false positive with pattern on stdout
-    "logging": set(("warning", "error", "fatal", "critical")),
-    "formatter": set(("test",)),
+    "logging": {"warning", "error", "fatal", "critical"},
+    "formatter": {"test"},
     # Create huge integer, very long string or list
-    "fpformat": set(("fix",)),
+    "fpformat": {"fix"},
     # remove directory
-    "shutil": set(("copytree", "rmtree")),
+    "shutil": {"copytree", "rmtree"},
     # open a network connection (timeout)
     # FIXME: only blacklist the blocking methods, not the whole class?
-    "imaplib": set(
-        (
-            "IMAP4",
-            "IMAP4_stream",
-        )
-    ),
-    "telnetlib": set(("Telnet",)),
-    "nntplib": set(("NNTP",)),
-    "smtplib": set(("SMTP", "SMTP_SSL")),
+    "imaplib": {"IMAP4", "IMAP4_stream"},
+    "telnetlib": {"Telnet"},
+    "nntplib": {"NNTP"},
+    "smtplib": {"SMTP", "SMTP_SSL"},
     # open a network connection (timeout),
     # the constructor opens directly a connection
-    "poplib": set(
-        (
-            "POP3",
-            "POP3_SSL",
-        )
-    ),
-    "ftplib": set(("FTP", "FTP_TLS")),
+    "poplib": {"POP3", "POP3_SSL"},
+    "ftplib": {"FTP", "FTP_TLS"},
     # set resource limit, may stop the process:
     # setrlimit(RLIMIT_CPU, (0, 0)) kills the process with a SIGKILL signal
-    "resource": set(("setrlimit",)),
-    "xmllib": set(("test",)),  # timeout
-    "urllib2": set(("randombytes",)),  # unlimited loop
-    "py_compile": set(("compile",)),
-    "runpy": set(("run_path",)),
-    "faulthandler": set(
-        (
-            "_fatal_error",
-            "_read_null",
-            "_sigabrt",
-            "_sigbus",
-            "_sigfpe",
-            "_sigill",
-            "_sigsegv",
-            "_stack_overflow",
-        )
-    ),
+    "resource": {"setrlimit"},
+    "xmllib": {"test"},  # timeout
+    "urllib2": {"randombytes"},  # unlimited loop
+    "py_compile": {"compile"},
+    "runpy": {"run_path"},
+    "faulthandler": {
+        "_fatal_error",
+        "_read_null",
+        "_sigabrt",
+        "_sigbus",
+        "_sigfpe",
+        "_sigill",
+        "_sigsegv",
+        "_stack_overflow",
+    },
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
@@ -437,7 +334,7 @@ INTERESTING = (
     '"𝒜"',  # Surrogate pair in UTF-16
     r'"\x00" * 10',  # Null byte sequence
     '"A" * (2 ** 16)',  # Large string boundary (typical buffer size)
-    '"💻" * 2**10',  # Large string with multi-byte Unicode characters
+    '"💻" * 2**10',  # Large string with multibyte Unicode characters
     # Boolean and None values
     "True",  # Basic boolean value
     "False",  # Basic boolean value
@@ -478,7 +375,7 @@ class ListAllModules:
         self.only_c = only_c
         self.site_package = site_package
         self.blacklist = blacklist
-        self.names = set(sys.builtin_module_names) - set(("__main__",))
+        self.names = set(sys.builtin_module_names) - {"__main__"}
 
     def matchModule(self, is_package, name, filename):
         if filename is not None and not self.filter_filename(filename):
@@ -551,7 +448,7 @@ class ListAllModules:
             ):
                 if name.endswith("_d"):
                     # Ignore Debian debug modules
-                    # (eg. ignore "_bisect_d", the real module is "_bisect)
+                    # (e.g. ignore "_bisect_d", the real module is "_bisect)
                     continue
                 if (
                     name in self.blacklist
@@ -853,11 +750,11 @@ class PythonProcess(CreateProcess):
 
 
 # >'<, >"<, >\<
-ESCAPE_CHARARACTERS = "'" + '"' + "\\"
+ESCAPE_CHARACTERS = "'" + '"' + "\\"
 
 
 def formatCharacter(char):
-    if char in ESCAPE_CHARARACTERS:
+    if char in ESCAPE_CHARACTERS:
         # >\"<
         return "\\" + char
     code = ord(char)
@@ -1054,7 +951,7 @@ class WritePythonCode(WriteCode):
             blacklist = set()
 
         names = set(dir(self.module))
-        names -= set(("__builtins__", "__doc__", "__file__", "__name__"))
+        names -= {"__builtins__", "__doc__", "__file__", "__name__"}
         names -= blacklist
         for name in names:
             try:
@@ -1551,7 +1448,7 @@ def parsePrototype(doc):
     if arguments and arguments[-1].startswith("*"):
         vararg = arguments[-1]
         arguments = arguments[:-1]
-    return (arguments, vararg, varkw, defaults)
+    return arguments, vararg, varkw, defaults
 
 
 def parseDocumentation(doc, max_var_arg):
