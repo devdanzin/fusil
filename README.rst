@@ -1,10 +1,12 @@
-Fusil is back
-=============
+Fusil is back, sorta
+====================
 
-This is a republishing of Victor Stinner's fusil project. While some
-development is planned for fuzzing Python, many other aspects of the
-library and other fuzzers are currently out of scope for this repository.
-A general updating of the code to Python 3 is also expected.
+This is a republishing of Victor Stinner's fusil project. It's probable
+that much of the code doesn't work, as only the Python fuzzing code is
+being tested and worked on. While some development is planned for
+fuzzing Python, many other aspects of the library and other fuzzers
+are currently out of scope for this repository.
+
 
 However, code contributions to any parts of fusil will be accepted. Just
 don't expect that new features will be worked on absent corresponding
