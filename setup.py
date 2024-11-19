@@ -60,7 +60,7 @@ def main():
     for name in MODULES:
         PACKAGES[name] = name.replace(".", "/")
 
-    with open('README') as fp:
+    with open('README.rst') as fp:
         long_description = fp.read()
     with open('ChangeLog') as fp:
         long_description += fp.read()
