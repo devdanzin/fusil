@@ -890,6 +890,8 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
+        self.write(0, "obj = %s" % self.module_name)
+
         self.writeCode(
             "", self.module, self.functions, self.classes, self.objects, 1, NB_CALL
         )
