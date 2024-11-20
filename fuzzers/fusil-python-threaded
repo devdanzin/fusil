@@ -1080,15 +1080,8 @@ class WritePythonCode(WriteCode):
         else:
             self.write(0, first_line + ")")
         first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
+        self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
         if nb_arg:
-            if obj_name:
-                self.write(
-                    0,
-                    "if hasattr(%s.%s, '%s'):"
-                    % (self.module_name, obj_name, func_name),
-                )
-            else:
-                self.write(0, "if hasattr(%s, '%s'):" % (self.module_name, func_name))
             self.write(1, first_line)
             last_char = ","
             for index in xrange(nb_arg):
@@ -1096,14 +1089,6 @@ class WritePythonCode(WriteCode):
                     last_char = ",)))"
                 self.writeArgument(1, last_char)
         else:
-            if obj_name:
-                self.write(
-                    0,
-                    "if hasattr(%s.%s, '%s'):"
-                    % (self.module_name, obj_name, func_name),
-                )
-            else:
-                self.write(0, "if hasattr(%s, '%s'):" % (self.module_name, func_name))
             self.write(1, first_line + ")))")
         self.emptyLine()
 
