@@ -1,6 +1,16 @@
 Changelog
 =========
 
+Fusil 1.6 (Unreleased)
+----------------------
+
+ * added the fusil-python-threaded fuzzer, where new development will
+   happen.
+ * fusil-python-threaded: added threading in generated code.
+ * fusil-python-threaded: added new kinds of tricky objects and
+   interesting values.
+ * moved six.py from ptrace into fusil.
+
 Fusil 1.5 (2013-03-05)
 ----------------------
 
