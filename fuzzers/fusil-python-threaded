@@ -1079,17 +1079,7 @@ class WritePythonCode(WriteCode):
             self.restoreLevel(level)
         else:
             self.write(0, first_line + ")")
-        if obj_name:
-            first_line = "alive.append(Thread(target=%s.%s.%s, args=(" % (
-                self.module_name,
-                obj_name,
-                func_name,
-            )
-        else:
-            first_line = "alive.append(Thread(target=%s.%s, args=(" % (
-                self.module_name,
-                func_name,
-            )
+        first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
         if nb_arg:
             if obj_name:
                 self.write(
