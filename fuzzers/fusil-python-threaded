@@ -257,9 +257,9 @@ if DEBUG:
     NB_METHOD = 1
     NB_CLASS = 5
 else:
-    NB_CALL = 150
+    NB_CALL = 100
     NB_METHOD = 10
-    NB_CLASS = 30
+    NB_CLASS = 15
 MAX_ARG = 6
 MAX_VAR_ARG = 5
 
