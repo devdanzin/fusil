@@ -33,7 +33,7 @@ class FusilConfig:
 
         # Process options
         self.use_cpu_probe = self.getbool('process', 'use_cpu_probe', True)
-        self.process_max_memory = self.getint('process', 'max_memory', 0)
+        self.process_max_memory = self.getint('process', 'max_memory',  2000 * 1024 * 1024)
         self.process_core_dump = self.getbool('process', 'core_dump', True)
         self.process_max_user_process = self.getint('process', 'max_user_process', 1000)
 

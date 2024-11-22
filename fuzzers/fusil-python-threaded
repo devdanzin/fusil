@@ -552,6 +552,7 @@ class Fuzzer(Application):
             [self.options.python, "-u", "<source.py>"],
             timeout=self.options.timeout,
         )
+        process.max_memory = 4000 * 1024 * 1024
         options = {"exitcode_score": 0}
         if IGNORE_TIMEOUT:
             options["timeout_score"] = 0
