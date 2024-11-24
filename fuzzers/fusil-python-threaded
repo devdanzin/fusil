@@ -778,11 +778,12 @@ def escapeUnicode(text):
 
 
 class WritePythonCode(WriteCode):
-    def __init__(self, parent, filename, module, module_name):
+    def __init__(self, parent, filename, module, module_name, threads=True):
         WriteCode.__init__(self)
         self.filename = filename
         self.filenames = parent.filenames
         self.options = parent.options
+        self.threads = threads
         self.hashable_argument_generators = (
             self.genNone,
             self.genBool,
@@ -853,8 +854,8 @@ class WritePythonCode(WriteCode):
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
         self.write(1, "raise ValueError('error')")
         self.emptyLine()
-
-        self.write(0, "alive = []")
+        if self.threads:
+            self.write(0, "alive = []")
         self.write(0, "lst = list(range(10))")
         self.write(0, "lst.append(lst)")
         self.write(0, "class Liar1:")
@@ -897,19 +898,20 @@ class WritePythonCode(WriteCode):
             "", self.module, self.functions, self.classes, self.objects, 1, NB_CALL
         )
         self.emptyLine()
-        self.write(0, "for obj in alive:")
-        self.write(1, "try:")
-        self.write(2, "print('START', obj)")
-        self.write(2, "obj.start()")
-        self.write(1, "except Exception:")
-        self.write(2, "pass")
-        self.write(0, "for obj in alive:")
-        self.write(1, "try:")
-        self.write(2, "print('JOIN', obj)")
-        self.write(2, "obj.join()")
-        self.write(1, "except Exception:")
-        self.write(2, "pass")
-        self.emptyLine()
+        if self.threads:
+            self.write(0, "for obj in alive:")
+            self.write(1, "try:")
+            self.write(2, "print('START', obj)")
+            self.write(2, "obj.start()")
+            self.write(1, "except Exception:")
+            self.write(2, "pass")
+            self.write(0, "for obj in alive:")
+            self.write(1, "try:")
+            self.write(2, "print('JOIN', obj)")
+            self.write(2, "obj.join()")
+            self.write(1, "except Exception:")
+            self.write(2, "pass")
+            self.emptyLine()
         self.close()
 
     def writeCallMethod(self):
@@ -940,11 +942,12 @@ class WritePythonCode(WriteCode):
 
         self.writePrint(0, '"[%s] -garbage collector-" % prefix')
         self.write(0, "collect()   # explicit call to the garbage collector")
-        self.write(0, "try:")
-        self.write(1, "if result:")
-        self.write(2, "alive.append(Thread(target=func, args=arguments))")
-        self.write(0, "except:")
-        self.write(1, "pass")
+        if self.threads:
+            self.write(0, "try:")
+            self.write(1, "if result:")
+            self.write(2, "alive.append(Thread(target=func, args=arguments))")
+            self.write(0, "except:")
+            self.write(1, "pass")
         self.write(0, "return result")
 
     def getFunctions(self):
@@ -1082,17 +1085,18 @@ class WritePythonCode(WriteCode):
             self.restoreLevel(level)
         else:
             self.write(0, first_line + ")")
-        first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
-        self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
-        if nb_arg:
-            self.write(1, first_line)
-            last_char = ","
-            for index in xrange(nb_arg):
-                if index == nb_arg - 1:
-                    last_char = ",)))"
-                self.writeArgument(1, last_char)
-        else:
-            self.write(1, first_line + ")))")
+        if self.threads:
+            first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
+            self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
+            if nb_arg:
+                self.write(1, first_line)
+                last_char = ","
+                for index in xrange(nb_arg):
+                    if index == nb_arg - 1:
+                        last_char = ",)))"
+                    self.writeArgument(1, last_char)
+            else:
+                self.write(1, first_line + ")))")
         self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
