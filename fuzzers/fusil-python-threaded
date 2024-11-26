@@ -1111,7 +1111,7 @@ class WritePythonCode(WriteCode):
                 self.write(1, first_line + ")))")
         if self._async:
             self.emptyLine()
-            self.write(0, "async def '%s_%s'():" % (prefix, func_name))
+            self.write(0, "async def %s_%s():" % (prefix, func_name))
             self.write(1, "print('async calling %s_%s')" % (prefix, func_name))
             first_line = '%s(' % func_name
             if nb_arg:
@@ -1126,7 +1126,7 @@ class WritePythonCode(WriteCode):
             else:
                 self.write(1, first_line + ")")
 
-            self.write(0, "_async.append('%s_%s')" % (prefix, func_name))
+            self.write(0, "_async.append(%s_%s)" % (prefix, func_name))
 
 
         self.emptyLine()
