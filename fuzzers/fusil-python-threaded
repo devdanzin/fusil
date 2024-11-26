@@ -846,7 +846,6 @@ class WritePythonCode(WriteCode):
     def writeSource(self):
         self.createFile(self.filename)
         self.write(0, "from gc import collect")
-        self.write(0, "from random import choice, sample")
         self.write(0, "from sys import stderr")
         self.write(0, "import sys")
         self.write(0, "from threading import Thread")
@@ -1239,8 +1238,6 @@ class WritePythonCode(WriteCode):
                     "type",
                     "object()",
                     "[[[[[[[[[[[[[[]]]]]]]]]]]]]]",
-                    "choice(alive) if alive else None",
-                    "sample(alive, (len(alive)//2) + 1) if alive else None",
                     "MagicMock()",
                     "Evil()",
                 ]
