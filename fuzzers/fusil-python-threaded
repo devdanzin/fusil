@@ -1112,7 +1112,7 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
             self.write(0, "async def %s_%s():" % (prefix, func_name))
             self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
-            first_line = '%s(' % func_name
+            first_line = 'obj.%s(' % func_name
             if nb_arg:
                 self.write(1, first_line)
                 level = self.addLevel(1)
