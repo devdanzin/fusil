@@ -9,6 +9,7 @@ in C, see Modules/*.c in Python source code.
 
 import inspect
 import pkgutil
+import random
 import re
 import sys
 import warnings
@@ -850,6 +851,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "import sys")
         self.write(0, "from threading import Thread")
         self.write(0, "from unittest.mock import MagicMock")
+        self.write(0, "import asyncio")
         self.writePrint(0, '"import %s"' % self.module_name)
         self.write(0, "import %s" % self.module_name)
         self.emptyLine()
@@ -917,7 +919,6 @@ class WritePythonCode(WriteCode):
             self.write(2, "pass")
             self.emptyLine()
         if self._async:
-            self.write(0, "import asyncio")
             self.write(0, "async def main_async():")
             self.write(1, "await asyncio.gather(*_async, return_exceptions=True)")
             self.emptyLine()
@@ -1115,6 +1116,7 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
             self.write(0, "async def %s_%s():" % (prefix, func_name))
             self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
+            self.write(1, "await asyncio.sleep(%s)" % (random.random() / 100))
             first_line = 'obj.%s(' % func_name
             if nb_arg:
                 self.write(1, first_line)
