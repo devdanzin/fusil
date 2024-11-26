@@ -918,9 +918,6 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
         if self._async:
             self.write(0, "import asyncio")
-            self.write(0, "import pprint")
-            self.write(0, "pprint.pp(_async)")
-
             self.write(0, "async def main_async():")
             self.write(1, "await asyncio.gather(*_async, return_exceptions=True)")
             self.emptyLine()
@@ -1114,7 +1111,7 @@ class WritePythonCode(WriteCode):
         if self._async:
             self.emptyLine()
             self.write(0, "async def %s_%s():" % (prefix, func_name))
-            self.write(1, "print('async calling %s_%s')" % (prefix, func_name))
+            self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
             first_line = '%s(' % func_name
             if nb_arg:
                 self.write(1, first_line)
@@ -1127,6 +1124,7 @@ class WritePythonCode(WriteCode):
                 self.restoreLevel(level)
             else:
                 self.write(1, first_line + ")")
+            self.write(1, "print('End async calling %s_%s')" % (prefix, func_name))
 
             self.write(0, "_async.append(%s_%s())" % (prefix, func_name))
 
