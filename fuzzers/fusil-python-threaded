@@ -921,7 +921,10 @@ class WritePythonCode(WriteCode):
             self.write(0, "async def main_async():")
             self.write(1, "await asyncio.gather(*_async, return_exceptions=True)")
             self.emptyLine()
-            self.write(0, "asyncio.run(main_async(), loop_factory=asyncio.eager_task_factory)")
+            self.write(0, "runner = asyncio.Runner()")
+            self.write(0, "loop = runner.get_loop()")
+            self.write(0, "loop.set_task_factory(asyncio.eager_task_factory)")
+            self.write(0, "runner.run(main_async())")
             self.emptyLine()
         self.close()
 
