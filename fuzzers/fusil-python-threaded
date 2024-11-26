@@ -710,7 +710,9 @@ class PythonSource(ProjectAgent):
             self.warning("Module filename: %s" % self.module.__file__)
         except AttributeError:
             pass
-        self.write = WritePythonCode(self, self.filename, self.module, self.module_name)
+        self.write = WritePythonCode(self, self.filename, self.module,
+                                     self.module_name, threads=False,
+                                     _async=True)
 
     def on_session_start(self):
         self.filename = self.session().createFilename("source.py")
@@ -778,12 +780,13 @@ def escapeUnicode(text):
 
 
 class WritePythonCode(WriteCode):
-    def __init__(self, parent, filename, module, module_name, threads=True):
+    def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
         WriteCode.__init__(self)
         self.filename = filename
         self.filenames = parent.filenames
         self.options = parent.options
         self.threads = threads
+        self._async = _async
         self.hashable_argument_generators = (
             self.genNone,
             self.genBool,
@@ -856,6 +859,8 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         if self.threads:
             self.write(0, "alive = []")
+        if self._async:
+            self.write(0, "_async = []")
         self.write(0, "lst = list(range(10))")
         self.write(0, "lst.append(lst)")
         self.write(0, "class Liar1:")
@@ -911,6 +916,13 @@ class WritePythonCode(WriteCode):
             self.write(2, "obj.join()")
             self.write(1, "except Exception:")
             self.write(2, "pass")
+            self.emptyLine()
+        if self._async:
+            self.write(0, "import asyncio")
+            self.write(0, "async def main_async():")
+            self.write(1, "await asyncio.gather(*_async, return_exceptions=True)")
+            self.emptyLine()
+            self.write(0, "asyncio.run(main_async())")
             self.emptyLine()
         self.close()
 
@@ -1097,6 +1109,26 @@ class WritePythonCode(WriteCode):
                     self.writeArgument(1, last_char)
             else:
                 self.write(1, first_line + ")))")
+        if self._async:
+            self.emptyLine()
+            self.write(0, "async def '%s_%s'():" % (prefix, func_name))
+            self.write(1, "print('async calling %s_%s')" % (prefix, func_name))
+            first_line = '%s(' % func_name
+            if nb_arg:
+                self.write(1, first_line)
+                level = self.addLevel(1)
+                last_char = ","
+                for index in xrange(nb_arg):
+                    if index == nb_arg - 1:
+                        last_char = ")"
+                    self.writeArgument(1, last_char)
+                self.restoreLevel(level)
+            else:
+                self.write(1, first_line + ")")
+
+            self.write(0, "_async.append('%s_%s')" % (prefix, func_name))
+
+
         self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
