@@ -712,7 +712,7 @@ class PythonSource(ProjectAgent):
         except AttributeError:
             pass
         self.write = WritePythonCode(self, self.filename, self.module,
-                                     self.module_name, threads=False,
+                                     self.module_name, threads=True,
                                      _async=True)
 
     def on_session_start(self):
