@@ -780,6 +780,61 @@ def escapeUnicode(text):
     return "".join(formatCharacter(char) for char in text)
 
 
+
+mangle_obj = """def mangle_obj(instance, method, *args):
+    print(f'Mangling {instance} with MagicMock()s, leaving {method} intact.', file=stderr)
+    real_instance_dict = instance.__dict__.copy()
+    real_class_dict = instance.__class__.__dict__.copy()
+
+    func = getattr(instance, method)
+
+    try:
+        for key, value in instance.__dict__.items():
+            if key.startswith('__') or key == func.__name__:
+                continue
+            try:
+                setattr(instance, key, MagicMock())
+            except Exception:
+                pass
+
+        for key, value in instance.__class__.__dict__.items():
+            if key.startswith('__') or key == func.__name__:
+                continue
+            try:
+                setattr(instance.__class__, key, MagicMock())
+            except Exception:
+                pass
+        print(f'Calling {instance}.{method}...', file=stderr)
+        func(*args)
+
+    except Exception as err:
+        try:
+            errmsg = repr(err)
+        except ValueError as e:
+            errmsg = repr(e)
+        errmsg = errmsg.encode('ASCII', 'replace')
+        print ('[%s] %s => %s: %s' % (instance, func.__name__, err.__class__.__name__, errmsg), file=stderr)
+
+    finally:
+        instance.__dict__.update(real_instance_dict)
+        for key, value in real_class_dict.items():
+            if key.startswith('__') or key == func.__name__:
+                continue
+            try:
+                setattr(instance.__class__, key, value)
+            except Exception:
+                pass
+"""
+
+mangle_loop = """for key, attr in obj.__class__.__dict__.items():
+    if key.startswith('__'):
+        continue
+    try:
+        mangle_obj(obj, key, (1,) * len(inspect.getfullargspec(attr).args))
+    except Exception as err:
+        print(err, file=stderr)
+"""
+
 class WritePythonCode(WriteCode):
     def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
         WriteCode.__init__(self)
@@ -876,7 +931,7 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(
             0,
-            "\n\nclass Evil:\n    def __eq__(self, other):\n"
+            "\nclass Evil:\n    def __eq__(self, other):\n"
             "        for attr in dir(other):\n"
             "            try:\n"
             "                other.__dict__[attr] = %s\n"
@@ -885,6 +940,8 @@ class WritePythonCode(WriteCode):
             "evil = Evil()" % ERRBACK_NAME,
         )
         self.emptyLine()
+        self.emptyLine()
+        self.write(0, mangle_obj)
         self.emptyLine()
         self.write(0, "def callMethod(prefix, object, name, *arguments):")
         level = self.addLevel(1)
@@ -1101,6 +1158,7 @@ class WritePythonCode(WriteCode):
         else:
             self.write(0, first_line + ")")
         if self.threads:
+            self.emptyLine()
             first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
             self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
             if nb_arg:
@@ -1132,8 +1190,8 @@ class WritePythonCode(WriteCode):
             self.write(1, "print('End async calling %s_%s')" % (prefix, func_name))
 
             self.write(0, "_async.append(%s_%s())" % (prefix, func_name))
-
-
+        self.emptyLine()
+        self.write(0, mangle_loop)
         self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
