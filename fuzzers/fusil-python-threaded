@@ -827,12 +827,17 @@ mangle_obj = """def mangle_obj(instance, method, *args):
 """
 
 mangle_loop = """for key, attr in obj.__class__.__dict__.items():
-        if key.startswith('__'):
-            continue
-        try:
-            mangle_obj(obj, key, (1,) * len(inspect.getfullargspec(attr).args))
-        except Exception as err:
-            print(err, file=stderr)
+    args = %s
+    try:
+        args = len(inspect.getfullargspec(attr).args)
+    except Exception:
+        pass
+    if key.startswith('__'):
+        continue
+    try:
+        mangle_obj(obj, key, (1,) * args)
+    except Exception as err:
+        print(err, file=stderr)
 """
 
 class WritePythonCode(WriteCode):
@@ -1192,7 +1197,7 @@ class WritePythonCode(WriteCode):
 
             self.write(0, "_async.append(%s_%s())" % (prefix, func_name))
         self.emptyLine()
-        self.write(0, mangle_loop)
+        self.write(0, mangle_loop % nb_arg)
         self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
