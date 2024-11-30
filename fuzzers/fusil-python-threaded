@@ -827,12 +827,12 @@ mangle_obj = """def mangle_obj(instance, method, *args):
 """
 
 mangle_loop = """for key, attr in obj.__class__.__dict__.items():
-    if key.startswith('__'):
-        continue
-    try:
-        mangle_obj(obj, key, (1,) * len(inspect.getfullargspec(attr).args))
-    except Exception as err:
-        print(err, file=stderr)
+        if key.startswith('__'):
+            continue
+        try:
+            mangle_obj(obj, key, (1,) * len(inspect.getfullargspec(attr).args))
+        except Exception as err:
+            print(err, file=stderr)
 """
 
 class WritePythonCode(WriteCode):
