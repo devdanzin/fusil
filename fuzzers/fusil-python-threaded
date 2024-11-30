@@ -827,18 +827,19 @@ mangle_obj = """def mangle_obj(instance, method, *args):
 """
 
 # The weird indentation is necessary because we write this in two levels
-mangle_loop = """for key, attr in obj.__class__.__dict__.items():
-        args = %s
-        try:
-            args = len(inspect.getfullargspec(attr).args)
-        except Exception:
-            pass
-        if key.startswith('__'):
-            continue
-        try:
-            mangle_obj(obj, key, (1,) * args)
-        except Exception as err:
-            print(err, file=stderr)
+mangle_loop = """if hasattr(obj.__class__, '__dict__'):
+        for key, attr in obj.__class__.__dict__.items():
+            args = %s
+            try:
+                args = len(inspect.getfullargspec(attr).args)
+            except Exception:
+                pass
+            if key.startswith('__'):
+                continue
+            try:
+                mangle_obj(obj, key, (1,) * args)
+            except Exception as err:
+                print(err, file=stderr)
 """
 
 class WritePythonCode(WriteCode):
@@ -1198,8 +1199,6 @@ class WritePythonCode(WriteCode):
 
             self.write(0, "_async.append(%s_%s())" % (prefix, func_name))
         self.emptyLine()
-        self.write(0, mangle_loop % nb_arg)
-        self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
         lines = self.createComplexArgument()
@@ -1224,7 +1223,7 @@ class WritePythonCode(WriteCode):
             self.write(2, "# argument %s/%s" % (1 + index, nb_arg))
             self.writeArgument(2)
         self.write(1, ")")
-
+        self.write(0, mangle_loop % nb_arg)
         methods = sorted(self.getMethods(cls, class_name).keys())
         if methods:
             self.write(0, "if obj is not None:")
