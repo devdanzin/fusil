@@ -903,6 +903,7 @@ class WritePythonCode(WriteCode):
         self.createFile(self.filename)
         self.write(0, "from gc import collect")
         self.write(0, "from sys import stderr")
+        self.write(0, "import inspect")
         self.write(0, "import sys")
         self.write(0, "from threading import Thread")
         self.write(0, "from unittest.mock import MagicMock")
