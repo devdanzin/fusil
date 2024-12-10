@@ -84,6 +84,9 @@ MODULE_BLACKLIST = {
     "_signal",
     "signal",
     "__builtin__",
+    "xxlimited",
+    "xxlimited_35",
+    "xxsubtype",
 }
 
 CTYPES = {
