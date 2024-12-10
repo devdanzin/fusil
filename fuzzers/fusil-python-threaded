@@ -239,6 +239,7 @@ BLACKLIST = {
         "_sigill",
         "_sigsegv",
         "_stack_overflow",
+        "_fatal_error_c_thread",
     },
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
@@ -569,7 +570,7 @@ class Fuzzer(Application):
             "oops": 0.30,
             "bug": 0.10,
             "fatal": 0.1,
-            "assert": 0.025,
+            # "assert": 0.025,
             "assertion": 1.0,
             "critical": 1.0,
             "panic": 1.0,
