@@ -56,7 +56,7 @@ xrange = range
 print(sys.version)
 
 # Constants
-TIMEOUT = 100.0
+TIMEOUT = 720.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
