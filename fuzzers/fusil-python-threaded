@@ -1004,8 +1004,8 @@ class WritePythonCode(WriteCode):
         self.writePrint(0, "message")
         self.write(0, "try:")
         self.write(1, "func = getattr(object, name)")
-        self.write(1, "for x in range(2):")
-        self.write(2, "result = [func(*arguments) for y in range(20)][0]")
+        self.write(1, "for x in range(5000):")
+        self.write(2, "result = func(*arguments)")
 
         exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
         if RUNNING_PYTHON3:
