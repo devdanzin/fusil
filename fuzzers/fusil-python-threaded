@@ -56,7 +56,7 @@ xrange = range
 print(sys.version)
 
 # Constants
-TIMEOUT = 720.0
+TIMEOUT = 100.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
@@ -1004,7 +1004,7 @@ class WritePythonCode(WriteCode):
         self.writePrint(0, "message")
         self.write(0, "try:")
         self.write(1, "func = getattr(object, name)")
-        self.write(1, "for x in range(5000):")
+        self.write(1, "for x in range(3):")
         self.write(2, "result = func(*arguments)")
 
         exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
