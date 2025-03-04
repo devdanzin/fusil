@@ -1557,6 +1557,18 @@ def parseDocumentation(doc, max_var_arg):
         max_arg += max_var_arg
     return min_arg, max_arg
 
+def remove_logging_pycache():
+    """Remove stale logging __pycache__ that causes logging errors."""
+    import importlib
+    import logging
+    import pathlib
+
+    pycache = pathlib.Path(logging.__file__).parent / "__pycache__"
+    for entry in pycache.iterdir():
+        entry.unlink()
+    pycache.rmdir()
+    importlib.reload(logging)
 
 if __name__ == "__main__":
+    remove_logging_pycache()
     Fuzzer().main()
