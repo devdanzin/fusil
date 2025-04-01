@@ -1098,6 +1098,7 @@ class WritePythonCode(WriteCode):
             blacklist = BLACKLIST[self.module_name]
         except KeyError:
             blacklist = set()
+        blacklist |= {"__mul__", "__imul__", "acquire", "_acquire_lock"}
 
         names = set(dir(self.module))
         names -= {"__builtins__", "__doc__", "__file__", "__name__"}
@@ -1122,6 +1123,7 @@ class WritePythonCode(WriteCode):
             blacklist = BLACKLIST[key]
         except KeyError:
             blacklist = set()
+        blacklist |= {"__mul__", "__imul__", "acquire", "_acquire_lock"}
         methods = {}
         if type(object) in {int, str}:
             return methods
