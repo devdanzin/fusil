@@ -946,9 +946,9 @@ class WritePythonCode(WriteCode):
         self.module_name = module_name
 
         self.functions, self.classes, self.objects = self.getFunctions()
-        if not self.functions and not self.classes:
+        if not self.functions and not self.classes and not self.objects:
             raise PythonFuzzerError(
-                "Module %s has no function and no class!" % self.module_name
+                "Module %s has no function, no class and no object!" % self.module_name
             )
 
     def writePrint(self, level, arguments):
