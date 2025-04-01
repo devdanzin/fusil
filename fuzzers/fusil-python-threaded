@@ -1376,6 +1376,10 @@ class WritePythonCode(WriteCode):
                     "[[[[[[[[[[[[[[]]]]]]]]]]]]]]",
                     "MagicMock()",
                     "Evil()",
+                    "MagicMock",
+                    "Evil",
+                    "Liar1",
+                    "Liar2",
                 ]
             )
         ]
