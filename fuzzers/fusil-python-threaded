@@ -874,6 +874,7 @@ bases = [bytearray, bytes, complex, dict, float, frozenset, int, list,
 object, set, str, tuple]
 bases += [Decimal, OrderedDict, Queue, deque]
 
+weird_instances = dict()
 weird_classes = dict()
 for cls in bases:
     class weird_cls(cls):
@@ -891,7 +892,8 @@ for cls in bases:
             pass
 
     weird_cls.__name__ = f"weird_{cls.__name__}"
-    weird_classes[f"weird_{cls.__name__}"] = weird_cls()
+    weird_instances[f"weird_{cls.__name__}"] = weird_cls()
+    weird_classes[f"weird_{cls.__name__}"] = weird_cls
 
 """
 
@@ -925,7 +927,8 @@ class WritePythonCode(WriteCode):
             self.genBufferObject,
             self.genInterestingValues,
             self.genWeirdClass,
-            self.genWeirdClass,
+            self.genWeirdInstance,
+            self.genWeirdInstance,
         )
         self.complex_argument_generators = (
             self.genList,
@@ -934,8 +937,9 @@ class WritePythonCode(WriteCode):
             self.genTricky,
             self.genInterestingValues,
             self.genWeirdClass,
-            self.genWeirdClass,
-            self.genWeirdClass,
+            self.genWeirdInstance,
+            self.genWeirdInstance,
+            self.genWeirdInstance,
         )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
@@ -1444,6 +1448,10 @@ class WritePythonCode(WriteCode):
     def genWeirdClass(self):
         weird_class_name = choice(weird_names)
         return [f"weird_classes['{weird_class_name}']"]
+
+    def genWeirdInstance(self):
+        weird_class_name = choice(weird_names)
+        return [f"weird_instances['{weird_class_name}']"]
 
     def genBufferObject(self):
         text = choice(BUFFER_OBJECTS)
