@@ -63,6 +63,8 @@ PARSE_PROTOTYPE = True
 PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
 
 MODULE_BLACKLIST = {
+    "logging",
+    "pydoc",
     "getpass",
     "commands",
     "subprocess",
@@ -417,6 +419,8 @@ class ListAllModules:
             if (
                 "test" in info.name
                 or "pip" in info.name
+                or "logging" in info.name
+                or "pydoc" in info.name
                 or (path is not None and any("site-packages" in p for p in path))
                 or (package is not None and "pip" in package)
             ):
@@ -462,6 +466,8 @@ class ListAllModules:
                     or name.split(".")[0] in self.blacklist
                     or "test" in name
                     or "idlelib" in name
+                    or "pydoc" in name
+                    or "logging" in name
                 ):
                     # Ignore the module and all of its submodules
                     self.logger.error(f"IGNORED {prefix}:{name}")
