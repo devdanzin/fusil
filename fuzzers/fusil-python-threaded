@@ -726,7 +726,30 @@ METHODS_NB_ARG = {
     "__truediv__": 1,
     "__trunc__": 0,
     "__xor__": 1,
+    "add": 1,
+    "append": 0,
+    "clear": 0,
+    "close": 0,
+    "decode": 0,
+    "encode": 0,
     "exec": 3,
+    "format": 1,
+    "get": 1,
+    "getvalue": 0,
+    "items": 0,
+    "join": 1,
+    "keys": 0,
+    "match": 1,
+    "open": 2,
+    "pop": 1,
+    "read": 0,
+    "replace": 2,
+    "sort": 0,
+    "split": 1,
+    "strip": 1,
+    "update": 1,
+    "values": 0,
+    "write": 1,
 }
 
 
@@ -952,15 +975,53 @@ for cls in bases:
     class weird_cls(cls):
         def __eq__(self, other):
             return True
-        def open(self):
-            return self
-        def write(self):
+        def add(self, item):
             pass
-        def read(self):
-            return ""
-        def readlines(self):
-            return [""]
+        def append(self, item):
+            pass
+        def clear(self):
+            pass
         def close(self):
+            pass
+        def decode(self, *args, **kwargs):
+            return ""
+        def encode(self, *args, **kwargs):
+            return b""
+        def format(self, *args, **kwargs):
+            return ""
+        def get(self, *args, **kwargs):
+            return self
+        def getvalue(self):
+            return ""
+        def items(self):
+            return {}.items()
+        def join(self, *args, **kwargs):
+            return ""
+        def keys(self):
+            return {}.keys()
+        def join(self, *args, **kwargs):
+            return ""
+        def open(self, *args, **kwargs):
+            return self
+        def pop(self, *args, **kwargs):
+            return self
+        def read(self, *args, **kwargs):
+            return ""
+        def replace(self, *args, **kwargs):
+            return ""
+        def readlines(self, *args, **kwargs):
+            return [""]
+        def sort(self, *args, **kwargs):
+            pass
+        def split(self, *args, **kwargs):
+            return [""]
+        def strip(self, *args, **kwargs):
+            return ""
+        def update(self, *args, **kwargs):
+            return self
+        def values(self):
+            return {}.values()
+        def write(self, *args, **kwargs):
             pass
 
     weird_cls.__name__ = f"weird_{cls.__name__}"
