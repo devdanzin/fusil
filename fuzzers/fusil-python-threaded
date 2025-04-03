@@ -635,7 +635,7 @@ METHODS_NB_ARG = {
     "__delattr__": 1,
     "__delete__": 1,
     "__delitem__": 1,
-    "__dir__": 1,
+    "__dir__": 0,
     "__div__": 1,
     "__divmod__": 1,
     "__enter__": 0,
