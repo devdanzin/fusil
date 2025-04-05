@@ -947,11 +947,9 @@ mangle_loop = """if hasattr(obj.__class__, '__dict__'):
                 print(err, file=stderr)
 """
 
-from _collections import deque, defaultdict, OrderedDict
-from array import array
+from _collections import deque, OrderedDict
 from decimal import Decimal
 from queue import Queue
-from struct import Struct
 
 bases = [bytearray, bytes, complex, dict, float, frozenset, int, list,
 object, set, str, tuple]
@@ -959,11 +957,9 @@ bases += [Decimal, OrderedDict, Queue, deque]
 weird_names = [f"weird_{cls.__name__}" for cls in bases]
 
 weird_classes = """
-from _collections import deque, defaultdict, OrderedDict
-from array import array
+from _collections import deque, OrderedDict
 from decimal import Decimal
 from queue import Queue
-from struct import Struct
 
 bases = [bytearray, bytes, complex, dict, float, frozenset, int, list,
 object, set, str, tuple]
