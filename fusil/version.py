@@ -1,4 +1,4 @@
 PACKAGE = "fusil"
 VERSION = "1.5"
-WEBSITE = "http://bitbucket.org/haypo/fusil/wiki/Home"
+WEBSITE = "https://github.com/devdanzin/fusil"
 LICENSE = "GNU GPL v2"
