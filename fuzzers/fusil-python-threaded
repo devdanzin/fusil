@@ -172,14 +172,18 @@ BLACKLIST = {
     "_ctypes": CTYPES,
     # Eat a lot of CPU with large arguments
     "itertools": {"tee"},
-    "math": {"factorial"},
+    "math": {"factorial", "perm", "comb"},
     "operator": {
         "pow",
         "__pow__",
         "ipow",
         "__ipow__",
         "mul",
+        "rmul",
+        "imul",
         "__mul__",
+        "__rmul__",
+        "__imul__",
         "repeat",
         "__repeat__",
     },
@@ -274,12 +278,48 @@ BLACKLIST = {
     "queue:PriorityQueue": {"get"},
     "queue:Queue": {"get"},
     "queue:SimpleQueue": {"get"},
+    "queue:_PySimpleQueue": {"get"},
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
 
 OBJECT_BLACKLIST = {
+    "_PyRLock",
+    "BoundedSemaphore",
     "LockType",
+    "Lock",
+    "RLock",
+    "Semaphore",
+}
+
+METHOD_BLACKLIST = {
+    "__enter__",
+    "__imul__",
+    "__ipow__",
+    "__mul__",
+    "__pow__",
+    "__rmul__",
+    "_acquire_lock",
+    "_acquire_restore",
+    "_randbelow",
+    "_randbelow_with_getrandbits",
+    "_read",
+    "_run_once",
+    "_shutdown",
+    "accept",
+    "acquire",
+    "acquire_lock",
+    "cmdloop",
+    "get_request",
+    "raise_signal",
+    "run_forever",
+    "select",
+    "serve_forever",
+    "shutdown",
+    "sleep",
+    "test",
+    "wait",
+    "zfill",
 }
 
 # Currently we have to import all C modules before running the fuzzer.
@@ -725,7 +765,6 @@ METHODS_NB_ARG = {
     "__missing__": 1,
     "__mod__": 1,
     "__mro_entries__": 0,
-    "__mul__": 1,
     "__ne__": 1,
     "__neg__": 0,
     "__new__": 3,
@@ -1274,7 +1313,7 @@ class WritePythonCode(WriteCode):
             blacklist = BLACKLIST[self.module_name]
         except KeyError:
             blacklist = set()
-        blacklist |= {"__mul__", "__imul__", "acquire", "_acquire_lock", "acquire_lock", "wait"}
+        blacklist |= METHOD_BLACKLIST
 
         names = set(dir(self.module))
         names -= {"__builtins__", "__doc__", "__file__", "__name__"}
@@ -1299,7 +1338,7 @@ class WritePythonCode(WriteCode):
             blacklist = BLACKLIST[key]
         except KeyError:
             blacklist = set()
-        blacklist |= {"__mul__", "__imul__", "acquire", "_acquire_lock", "acquire_lock", "wait"}
+        blacklist |= METHOD_BLACKLIST
         methods = {}
         if type(object) in {int, str}:
             return methods
