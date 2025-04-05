@@ -1827,7 +1827,7 @@ def print_running_time():
     raw_utime = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     user_time = str(datetime.timedelta(0, round(raw_utime, 2)))
     total_time = str(datetime.timedelta(0, round(time.time() - time_start, 2)))
-    return f"\nRunning time: {total_time}\nUser time: {user_time}"
+    return f"\nRunning time: {total_time[:-4]}\nUser time:    {user_time[:-4]}"
 
 if __name__ == "__main__":
     time_start = time.time()
