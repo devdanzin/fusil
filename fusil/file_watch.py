@@ -72,6 +72,8 @@ class FileWatch(ProjectAgent):
             u'segfault': 1.0,
             u'segmentation fault': 1.0,
         }
+        # Matches that should make the whole session ignored
+        self.kill_words = set()
 
     @staticmethod
     def fromFilename(project, filename, start=None):
@@ -103,6 +105,15 @@ class FileWatch(ProjectAgent):
             regex = b(r'(?:^|\W)') + regex + b(r'(?:$|\W)')
             match = re.compile(regex, re.IGNORECASE).search
             yield (text, score, match)
+
+        for text in self.kill_words:
+            text = text.lower()
+            if isinstance(text, text_type):
+                text = text.encode("ASCII")
+            regex = re.escape(text)
+            regex = b(r'(?:^|\W)') + regex + b(r'(?:$|\W)')
+            match = re.compile(regex, re.IGNORECASE).search
+            yield (text, 100, match)
 
     def setFileObject(self, file_obj):
         self.file_obj = file_obj
@@ -177,6 +188,8 @@ class FileWatch(ProjectAgent):
             if not match(line):
                 continue
             found = (pattern, score)
+            if pattern in self.kill_words:
+                break
         if not found:
             message = "Not matching line: %r" % line
             if self.show_not_matching:
@@ -186,6 +199,10 @@ class FileWatch(ProjectAgent):
             return
 
         pattern, score = found
+        if pattern in self.kill_words:
+            self.error(f"Ignoring session due to kill word: {pattern}.")
+            return "KILL"
+
         if self.show_matching:
             log = self.error
         else:
@@ -238,7 +255,10 @@ class FileWatch(ProjectAgent):
         for line in self.readlines():
             if 1.0 <= abs(self.score):
                 break
-            self.processLine(line)
+            res = self.processLine(line)
+            if res == "KILL":
+                break
+
 
     def getScore(self):
         return self.score
