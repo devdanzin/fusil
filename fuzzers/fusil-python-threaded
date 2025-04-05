@@ -189,7 +189,7 @@ BLACKLIST = {
     "time": {"sleep", "pthread_getcpuclockid"},
     "select": {"epoll", "poll", "select"},
     "signal": {"pause", "alarm", "setitimer", "pthread_kill"},
-    "_signal": {"pause", "alarm", "setitimer", "pthread_kill"},
+    "_signal": {"pause", "alarm", "setitimer", "pthread_kill", "sigwait", "sigtimedwait"},
     "_socket": SOCKET,
     "socket": SOCKET,
     "posix": POSIX,
@@ -250,6 +250,10 @@ BLACKLIST = {
     },
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
+}
+
+OBJECT_BLACKLIST = {
+    "LockType",
 }
 
 # Currently we have to import all C modules before running the fuzzer.
@@ -1488,7 +1492,7 @@ class WritePythonCode(WriteCode):
             for index in xrange(len(objects) * 2):
                 object_name = choice(objects)
                 obj = getattr(object, object_name)
-                if isinstance(obj, ModuleType):
+                if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):
                     continue
                 self.useObject(index, obj, object_name)
 
