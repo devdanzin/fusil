@@ -1566,7 +1566,7 @@ class WritePythonCode(WriteCode):
                 cls = getattr(object, class_name)
                 self.useClass(index, cls, class_name)
         if objects:
-            for index in xrange(len(objects) * 2):
+            for index in xrange(min(len(objects) * 2, 100)):
                 object_name = choice(objects)
                 obj = getattr(object, object_name)
                 if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):
