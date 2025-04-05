@@ -199,7 +199,7 @@ class FileWatch(ProjectAgent):
             return
 
         pattern, score = found
-        if pattern in self.kill_words:
+        if pattern.decode() in self.kill_words:
             self.error(f"Ignoring session due to kill word: {pattern}.")
             return "KILL"
 
