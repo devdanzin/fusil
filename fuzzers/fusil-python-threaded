@@ -46,7 +46,7 @@ if not RUNNING_PYTHON3:
 
 
 # Fuzzer options
-IGNORE_TIMEOUT = True
+IGNORE_TIMEOUT = False
 IGNORE_CPU = True
 SHOW_STDOUT = False
 DEBUG = False
@@ -162,6 +162,8 @@ BUILTINS = {"pow", "round"}
 # and
 #    module name:class name => method names
 BLACKLIST = {
+    # sys tracing that will cause an error in fuzzing
+    "sys": {"settrace", "setprofile"},
     # Dangerous module: ctypes
     "ctypes": CTYPES,
     "_ctypes": CTYPES,
@@ -403,6 +405,8 @@ class ListAllModules:
         if not self.site_package:
             if "site-packages" in filename.split(path_sep):
                 return False
+        if name in self.blacklist:
+            return False
         return True
 
     def walk_packages(self, path=None, prefix="", onerror=None):
