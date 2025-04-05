@@ -101,9 +101,12 @@ class SystemCpuLoad(CpuLoad):
 class ProcessCpuLoadValue(CpuLoadValue):
     def __init__(self, pid):
         CpuLoadValue.__init__(self)
-        stat = readProcessStat(pid)
-        self.start_time = stat.starttime
-        self.tics = stat.utime + stat.stime
+        try:
+            stat = readProcessStat(pid)
+            self.start_time = stat.starttime
+            self.tics = stat.utime + stat.stime
+        except UnicodeDecodeError:
+            pass
 
 class ProcessCpuLoad(CpuLoad):
     """
