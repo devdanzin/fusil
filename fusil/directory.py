@@ -34,13 +34,18 @@ class Directory:
         umask(old_umask)
 
     def isEmpty(self, ignore_generated=False):
-        for entry in scandir(self.directory):
-            if entry.name in ('.', '..'):
-                continue
-            if entry.name in self.files and ignore_generated:
-                continue
+        try:
+            for entry in scandir(self.directory):
+                if entry.name in ('.', '..'):
+                    continue
+                if entry.name in self.files and ignore_generated:
+                    continue
+                return False
+            return True
+        except OSError as e:
+            print(e)
             return False
-        return True
+
 
     def rmtree(self):
         filename = self.directory
