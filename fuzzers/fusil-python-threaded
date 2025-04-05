@@ -7,11 +7,14 @@ Interesting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
 
+import datetime
 import inspect
 import pkgutil
 import random
 import re
+import resource
 import sys
+import time
 import warnings
 from optparse import OptionGroup
 from os.path import exists as path_exists, isabs, sep as path_sep
@@ -585,6 +588,7 @@ class Fuzzer(Application):
     def setupProject(self):
         project = self.project
 
+        project.error(f"Start time: {time.asctime()}")
         project.error("Use python interpreter: %s" % self.options.python)
         version = " -- ".join(line.strip() for line in sys.version.splitlines())
         project.error("Python version: %s" % version)
@@ -620,6 +624,8 @@ class Fuzzer(Application):
             "SystemError": 1.0,
         }
 
+        stdout.kill_words = {"MemoryError", "mimalloc"}
+
         # CPython critical messages
         stdout.addRegex("^XXX undetected error", 1.0)
         stdout.addRegex("Fatal Python error", 1.0)
@@ -641,6 +647,10 @@ class Fuzzer(Application):
 
         # Hide Python warnings on import
         warnings.simplefilter("ignore")
+
+    def exit(self, keep_log=True):
+        super().exit(keep_log=keep_log)
+        self.error(print_running_time())
 
 
 ERRBACK_NAME = "errback"
@@ -836,6 +846,7 @@ class PythonSource(ProjectAgent):
                     % filename
                 )
         project.error("Use filenames: %s" % ", ".join(self.filenames))
+        self.error(print_running_time())
 
     def loadModule(self, module_name):
         self.module_name = module_name
@@ -873,6 +884,7 @@ class PythonSource(ProjectAgent):
             self.send("project_stop")
             return
         self.error("Test module %s" % name)
+        self.error(print_running_time())
         self.send("session_rename", name)
 
         self.write.writeSource()
@@ -1791,6 +1803,7 @@ def parseDocumentation(doc, max_var_arg):
         max_arg += max_var_arg
     return min_arg, max_arg
 
+
 def remove_logging_pycache():
     """Remove stale logging __pycache__ that causes logging errors."""
     import importlib
@@ -1799,10 +1812,24 @@ def remove_logging_pycache():
 
     pycache = pathlib.Path(logging.__file__).parent / "__pycache__"
     for entry in pycache.iterdir():
-        entry.unlink()
-    pycache.rmdir()
+        try:
+            entry.unlink()
+        except Exception:
+            pass
+    try:
+        pycache.rmdir()
+    except Exception:
+        pass
     importlib.reload(logging)
 
+
+def print_running_time():
+    raw_utime = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+    user_time = str(datetime.timedelta(0, round(raw_utime, 2)))
+    total_time = str(datetime.timedelta(0, round(time.time() - time_start, 2)))
+    return f"\nRunning time: {total_time}\nUser time: {user_time}"
+
 if __name__ == "__main__":
+    time_start = time.time()
     remove_logging_pycache()
     Fuzzer().main()
