@@ -182,13 +182,14 @@ class FileWatch(ProjectAgent):
 
         # Search the matching pattern with the highest score
         found = None
+        self.kill_patterns = {word.lower().encode() for word in self.kill_words}
         for pattern, score, match in self.compiled_patterns:
             if found and abs(score) < abs(found[1]):
                 continue
             if not match(line):
                 continue
             found = (pattern, score)
-            if pattern in self.kill_words:
+            if pattern in self.kill_patterns:
                 break
         if not found:
             message = "Not matching line: %r" % line
@@ -199,7 +200,7 @@ class FileWatch(ProjectAgent):
             return
 
         pattern, score = found
-        if pattern.decode() in self.kill_words:
+        if pattern in self.kill_patterns:
             self.error(f"Ignoring session due to kill word: {pattern}.")
             return "KILL"
 
