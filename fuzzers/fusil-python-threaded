@@ -248,6 +248,20 @@ BLACKLIST = {
         "_stack_overflow",
         "_fatal_error_c_thread",
     },
+    "_thread": {
+        "LockType",
+        "interrupt_main",
+        "exit",
+        "lock",
+        "allocate_lock",
+        "allocate",
+        "_exit_thread",
+    },
+    "_queue:SimpleQueue": {"get"},
+    "queue:LifoQueue": {"get"},
+    "queue:PriorityQueue": {"get"},
+    "queue:Queue": {"get"},
+    "queue:SimpleQueue": {"get"},
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
