@@ -293,7 +293,7 @@ OBJECT_BLACKLIST = {
 }
 
 METHOD_BLACKLIST = {
-    "__enter__",
+    "__enter__",  # Damn locks
     "__imul__",
     "__ipow__",
     "__mul__",
@@ -310,7 +310,10 @@ METHOD_BLACKLIST = {
     "acquire",
     "acquire_lock",
     "cmdloop",
+    "copyfileobj",
+    "get",  # Damn queues
     "get_request",
+    "handle_request",
     "raise_signal",
     "run_forever",
     "select",
