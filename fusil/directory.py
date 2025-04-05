@@ -1,6 +1,6 @@
 import grp
 import pwd
-from os import chmod, chown, listdir, mkdir, umask
+from os import chmod, chown, mkdir, scandir, umask
 from os.path import basename
 from os.path import exists as path_exists
 from os.path import join as path_join
@@ -34,10 +34,10 @@ class Directory:
         umask(old_umask)
 
     def isEmpty(self, ignore_generated=False):
-        for filename in listdir(self.directory):
-            if filename in ('.', '..'):
+        for entry in scandir(self.directory):
+            if entry.name in ('.', '..'):
                 continue
-            if filename in self.files and ignore_generated:
+            if entry.name in self.files and ignore_generated:
                 continue
             return False
         return True
