@@ -314,6 +314,7 @@ METHOD_BLACKLIST = {
     "get",  # Damn queues
     "get_request",
     "handle_request",
+    "prefix",
     "raise_signal",
     "run_forever",
     "select",
