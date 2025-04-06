@@ -305,6 +305,7 @@ METHOD_BLACKLIST = {
     "_randbelow_with_getrandbits",
     "_read",
     "_run_once",
+    "_serve",
     "_shutdown",
     "accept",
     "acquire",
@@ -314,6 +315,7 @@ METHOD_BLACKLIST = {
     "get",  # Damn queues
     "get_request",
     "handle_request",
+    "handle_request_noblock",
     "prefix",
     "raise_signal",
     "run_forever",
