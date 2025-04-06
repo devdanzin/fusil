@@ -1,9 +1,9 @@
-import grp
 import pwd
 from os import chmod, chown, mkdir, scandir, umask
 from os.path import basename
 from os.path import exists as path_exists
 from os.path import join as path_join
+import resource
 from shutil import rmtree
 from sys import getfilesystemencoding
 
@@ -44,6 +44,7 @@ class Directory:
             return True
         except OSError as e:
             print(e)
+            print(resource.getrusage(resource.RUSAGE_SELF))
             return False
 
 
