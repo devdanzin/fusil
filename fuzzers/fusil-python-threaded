@@ -7,6 +7,7 @@ Interesting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
 
+import builtins
 import datetime
 import inspect
 import pkgutil
@@ -301,6 +302,7 @@ METHOD_BLACKLIST = {
     "__rmul__",
     "_acquire_lock",
     "_acquire_restore",
+    "_handle_request_noblock",
     "_randbelow",
     "_randbelow_with_getrandbits",
     "_read",
@@ -347,6 +349,13 @@ else:
     NB_CLASS = 50
 MAX_ARG = 6
 MAX_VAR_ARG = 5
+
+EXCLUDE_EXCEPTIONS = True
+EXCEPTION_NAMES = {
+    cls.__name__ for cls in builtins.__dict__.values()
+    if isinstance(cls, type) and issubclass(cls, Exception)
+}
+
 
 if RUNNING_PYTHON3:
     SURROGATES = (
@@ -1323,6 +1332,9 @@ class WritePythonCode(WriteCode):
 
         names = set(dir(self.module))
         names -= {"__builtins__", "__doc__", "__file__", "__name__"}
+        names -= {"True", "None", "False"}
+        if EXCLUDE_EXCEPTIONS:
+            names -= EXCEPTION_NAMES
         names -= blacklist
         for name in names:
             try:
