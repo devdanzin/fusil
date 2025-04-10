@@ -821,32 +821,90 @@ METHODS_NB_ARG = {
     "__truediv__": 1,
     "__trunc__": 0,
     "__xor__": 1,
+    "abs": 1,
     "add": 1,
-    "append": 0,
+    "all": 1,
+    "any": 1,
+    "append": 1,
+    "ascii": 1,
+    "bin": 1,
+    "callable": 1,
+    "chr": 1,
     "clear": 0,
     "close": 0,
+    "compile": (3, 6),
     "decode": 0,
+    "delattr": 2,
+    "dir": 1,
+    "divmod": 2,
     "encode": 0,
+    "eval": (1, 3),
     "exec": 3,
-    "format": 1,
-    "get": 1,
+    "format": (1, 2),
+    "get": (1, 2),
+    "getattr": (2, 3),
     "getvalue": 0,
+    "hasattr": 2,
+    "hash": 1,
+    "hex": 1,
+    "isinstance": 2,
+    "issubclass": 2,
     "items": 0,
+    "iter": (1, 2),
     "join": 1,
     "keys": 0,
+    "len": 1,
     "match": 1,
-    "open": 2,
-    "pop": 1,
-    "read": 0,
+    "max": (1, 4),
+    "min": (1, 4),
+    "next": (1, 2),
+    "oct": 1,
+    "open": (1, 8),
+    "ord": 1,
+    "pop": (0, 1),
+    "read": (0, 1),
     "replace": 2,
+    "repr": 1,
+    "round": (1, 2),
+    "setattr": 3,
     "sort": 0,
+    "sorted": 1,
     "split": 1,
-    "strip": 1,
+    "strip": (0, 1),
+    "sum": (1, 2),
     "update": 1,
     "values": 0,
     "write": 1,
 }
 
+CLASS_NB_ARG = {
+    "bool": (1, 1),
+    "bytearray": (0, 3),
+    "bytes": (0, 3),
+    "classmethod": (1, 1),
+    "complex": (0, 2),
+    "dict": (0, 1),
+    "enumerate": (1, 2),
+    "filter": (2, 2),
+    "float": (1, 1),
+    "frozenset": (0, 1),
+    "int": (0, 2),
+    "list": (0, 1),
+    "map": (2, 5),
+    "memoryview": (1, 1),
+    "object": (0, 0),
+    "property": (1, 4),
+    "range": (1, 3),
+    "reversed": (1, 1),
+    "set": (1, 1),
+    "slice": (1, 3),
+    "staticmethod": (1, 1),
+    "str": (0, 3),
+    "super": (1, 2),
+    "tuple": (0, 1),
+    "type": (0, 3),
+    "zip": (1, 3),
+}
 
 class PythonFuzzerError(Exception):
     pass
@@ -1052,6 +1110,7 @@ bases = [bytearray, bytes, complex, dict, float, frozenset, int, list,
 object, set, str, tuple]
 bases += [Decimal, OrderedDict, Queue, deque]
 weird_names = [f"weird_{cls.__name__}" for cls in bases]
+weird_instance_names = weird_names + ["weird_tuple_instance"] * 20
 
 weird_classes = """
 from _collections import deque, OrderedDict
@@ -1121,6 +1180,7 @@ for cls in bases:
     weird_instances[f"weird_{cls.__name__}"] = weird_cls()
     weird_classes[f"weird_{cls.__name__}"] = weird_cls
 
+weird_instances["weird_tuple_instance"] = weird_classes["weird_tuple"]((int,))
 """
 
 class WritePythonCode(WriteCode):
@@ -1290,7 +1350,7 @@ class WritePythonCode(WriteCode):
         self.writePrint(0, "message")
         self.write(0, "try:")
         self.write(1, "func = getattr(object, name)")
-        self.write(1, "for x in range(3):")
+        self.write(1, "for x in range(5):")
         self.write(2, "result = func(*arguments)")
 
         exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
@@ -1504,10 +1564,14 @@ class WritePythonCode(WriteCode):
     def useClass(self, cls_index, cls, class_name):
         import inspect
 
-        argspec = inspect.getfullargspec(cls.__init__)
-        args = len(argspec.args) - 1 if argspec.args else 0
-        defaults = len(argspec.defaults) if argspec.defaults else 0
-        nb_arg = randint(args - defaults, args)
+        if class_name in CLASS_NB_ARG:
+            min_args, max_args = CLASS_NB_ARG[class_name]
+            nb_arg = randint(min_args, max_args)
+        else:
+            argspec = inspect.getfullargspec(cls.__init__)
+            args = len(argspec.args) - 1 if argspec.args else 0
+            defaults = len(argspec.defaults) if argspec.defaults else 0
+            nb_arg = randint(args - defaults, args)
 
         prefix = "o%s" % (1 + cls_index)
         self.writePrint(0, '"[%s] Create object %s"' % (prefix, 1 + cls_index))
@@ -1683,7 +1747,7 @@ class WritePythonCode(WriteCode):
         return [f"weird_classes['{weird_class_name}']"]
 
     def genWeirdInstance(self):
-        weird_class_name = choice(weird_names)
+        weird_class_name = choice(weird_instance_names)
         return [f"weird_instances['{weird_class_name}']"]
 
     def genBufferObject(self):
