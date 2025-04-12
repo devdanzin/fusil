@@ -681,7 +681,7 @@ class Fuzzer(Application):
             "SystemError": 1.0,
         }
 
-        stdout.kill_words = {"mimalloc"}
+        stdout.kill_words = {"MemoryError", "mimalloc"}
 
         # CPython critical messages
         stdout.addRegex("^XXX undetected error", 1.0)
@@ -1257,7 +1257,8 @@ types_types = [cls for cls in types.__dict__.values() if isinstance(cls, type)]
 typing_types = [cls for cls in typing.__dict__.values() if isinstance(cls, type)]
 
 all_types = (abc_types + builtins_types + collections_abc_types + collections_types + itertools_types
-             + types_types + typing_types) 
+             + types_types + typing_types)
+all_types = [t for t in all_types if not issubclass(t, BaseException)]
 big_union = reduce(or_, all_types, int)
 """
 
