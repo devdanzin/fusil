@@ -93,6 +93,7 @@ MODULE_BLACKLIST = {
     "xxlimited",
     "xxlimited_35",
     "xxsubtype",
+    "tkinter",
 }
 
 CTYPES = {
@@ -510,6 +511,7 @@ class ListAllModules:
                 or "pip" in info.name
                 or "logging" in info.name
                 or "pydoc" in info.name
+                or "tkinter" in info.name
                 or (path is not None and any("site-packages" in p for p in path))
                 or (package is not None and "pip" in package)
             ):
@@ -1150,9 +1152,11 @@ for cls in numbers:
 
 weird_classes = """
 from _collections import OrderedDict, deque
+from abc import ABCMeta
 from collections import Counter
 from decimal import Decimal
 from queue import Queue
+from random import randint
 from string import printable
 
 sequences = [Queue, deque, frozenset, list, set, str, tuple] 
@@ -1161,60 +1165,39 @@ numbers = [Decimal, complex, float, int]
 dicts = [Counter, OrderedDict, dict]
 bases = sequences + bytes_ + numbers + dicts + [object]
 
+large_num = 2**64
+class WeirdBase(ABCMeta):
+  def __hash__(self):
+    return randint(0, large_num)
+
+  def __eq__(self, other):
+    return False
+
+
 weird_instances = dict()
 weird_classes = dict()
 for cls in bases:
-    class weird_cls(cls):
-        def __eq__(self, other):
-            return True
-        def add(self, item):
+    class weird_cls(cls, metaclass=WeirdBase):
+        def add(self, *args, **kwargs):
             pass
-        def append(self, item):
-            pass
-        def clear(self):
-            pass
-        def close(self):
-            pass
-        def decode(self, *args, **kwargs):
-            return ""
+        append = clear = close = write = sort = reversed = add 
         def encode(self, *args, **kwargs):
             return b""
-        def format(self, *args, **kwargs):
+        def decode(self, *args, **kwargs):
             return ""
+        format = getvalue = join = read = replace = strip = rstrip = decode
         def get(self, *args, **kwargs):
             return self
-        def getvalue(self):
-            return ""
-        def items(self):
-            return {}.items()
-        def join(self, *args, **kwargs):
-            return ""
-        def keys(self):
-            return {}.keys()
-        def join(self, *args, **kwargs):
-            return ""
-        def open(self, *args, **kwargs):
-            return self
-        def pop(self, *args, **kwargs):
-            return self
-        def read(self, *args, **kwargs):
-            return ""
-        def replace(self, *args, **kwargs):
-            return ""
+        open = pop = update = get 
         def readlines(self, *args, **kwargs):
             return [""]
-        def sort(self, *args, **kwargs):
-            pass
-        def split(self, *args, **kwargs):
-            return [""]
-        def strip(self, *args, **kwargs):
-            return ""
-        def update(self, *args, **kwargs):
-            return self
+        rsplit = split = partition = rpartition = readlines
+        def items(self):
+            return {}.items()
+        def keys(self):
+            return {}.keys()
         def values(self):
             return {}.values()
-        def write(self, *args, **kwargs):
-            pass
 
     weird_cls.__name__ = f"weird_{cls.__name__}"
     weird_instances[f"weird_{cls.__name__}_empty"] = weird_cls()
@@ -1255,6 +1238,31 @@ for cls in dicts:
 
 """
 
+tricky_typing = """
+import abc
+import builtins
+import collections.abc
+import itertools
+import types
+import typing
+from functools import reduce
+from operator import or_
+
+abc_types = [cls for cls in abc.__dict__.values() if isinstance(cls, type)]
+builtins_types = [cls for cls in builtins.__dict__.values() if isinstance(cls, type)]
+collections_abc_types = [cls for cls in collections.abc.__dict__.values() if isinstance(cls, type)]
+collections_types = [cls for cls in collections.__dict__.values() if isinstance(cls, type)]
+itertools_types = [cls for cls in itertools.__dict__.values() if isinstance(cls, type)]
+types_types = [cls for cls in types.__dict__.values() if isinstance(cls, type)]
+typing_types = [cls for cls in typing.__dict__.values() if isinstance(cls, type)]
+
+all_types = (abc_types + builtins_types + collections_abc_types + collections_types + itertools_types
+             + types_types + typing_types) 
+big_union = reduce(or_, all_types, int)
+"""
+
+type_names = ("list", "tuple", "dict")
+
 class WritePythonCode(WriteCode):
     def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
         WriteCode.__init__(self)
@@ -1280,6 +1288,9 @@ class WritePythonCode(WriteCode):
             #            self.genOpenFile,
             self.genException,
             self.genRawString,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
         )
         self.simple_argument_generators = self.hashable_argument_generators + (
             self.genBufferObject,
@@ -1287,6 +1298,17 @@ class WritePythonCode(WriteCode):
             self.genWeirdClass,
             self.genWeirdInstance,
             self.genWeirdInstance,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
         )
         self.complex_argument_generators = (
             self.genList,
@@ -1298,6 +1320,16 @@ class WritePythonCode(WriteCode):
             self.genWeirdInstance,
             self.genWeirdInstance,
             self.genWeirdInstance,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdType,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
+            self.genWeirdUnion,
         )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
@@ -1340,6 +1372,8 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, weird_classes)
         self.emptyLine()
+        self.write(0, tricky_typing)
+        self.emptyLine()
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
         self.write(1, "raise ValueError('error')")
         self.emptyLine()
@@ -1370,7 +1404,7 @@ class WritePythonCode(WriteCode):
             "evil = Evil()" % ERRBACK_NAME,
         )
         self.emptyLine()
-        self.emptyLine()
+        # self.emptyLine()
         # self.write(0, mangle_obj)
         self.emptyLine()
         self.write(0, "def callMethod(prefix, object, name, *arguments):")
@@ -1821,6 +1855,17 @@ class WritePythonCode(WriteCode):
     def genWeirdInstance(self):
         weird_class_name = choice(weird_instance_names)
         return [f"weird_instances['{weird_class_name}']"]
+
+    def genWeirdType(self):
+        weird_class_name = choice(weird_names)
+        type_name = choice(type_names)
+        return [f"{type_name}[weird_classes['{weird_class_name}']]"]
+
+    def genWeirdUnion(self):
+        weird_class_name1 = choice(weird_names)
+        weird_class_name2 = choice(weird_names)
+        type_name = choice(type_names)
+        return [f"{type_name}[weird_classes['{weird_class_name1}']] | weird_classes['{weird_class_name2}'] | big_union"]
 
     def genBufferObject(self):
         text = choice(BUFFER_OBJECTS)
