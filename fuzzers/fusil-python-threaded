@@ -681,7 +681,7 @@ class Fuzzer(Application):
             "SystemError": 1.0,
         }
 
-        stdout.kill_words = {"MemoryError", "mimalloc"}
+        stdout.kill_words = {"mimalloc"}
 
         # CPython critical messages
         stdout.addRegex("^XXX undetected error", 1.0)
