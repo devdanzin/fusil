@@ -101,6 +101,7 @@ class Environment(ProjectAgent):
         self.copies.append("PYTHON_GIL")
         self.copies.append("PYTHON_JIT")
         self.copies.append("LSAN_OPTIONS")
+        self.copies.append("ASAN_OPTIONS")
         if RUNNING_WINDOWS:
             self.copies.append('SYSTEMROOT')
 

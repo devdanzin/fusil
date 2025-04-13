@@ -655,7 +655,7 @@ class Fuzzer(Application):
             [self.options.python, "-u", "<source.py>"],
             timeout=self.options.timeout,
         )
-        process.max_memory = 4000 * 1024 * 1024
+        process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
         options = {"exitcode_score": 0}
         if IGNORE_TIMEOUT:
             options["timeout_score"] = 0
@@ -679,6 +679,7 @@ class Fuzzer(Application):
             "segfault": 1.0,
             "segmentation fault": 1.0,
             "SystemError": 1.0,
+            "AddressSanitizer": 1.0,
         }
 
         stdout.kill_words = {"MemoryError", "mimalloc"}
