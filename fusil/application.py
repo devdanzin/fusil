@@ -215,8 +215,8 @@ class Application(ApplicationAgent):
         if not self.options.fast:
             beNice(True)
         if 0 < self.config.fusil_max_memory:
-            self.info("Limit memory to %s bytes" % self.config.fusil_max_memory)
-            limitMemory(self.config.fusil_max_memory)
+            self.error("Skip limiting memory to %s bytes" % self.config.fusil_max_memory)
+            # limitMemory(self.config.fusil_max_memory)
 
         # Create multi agent system
         self.createMAS()
