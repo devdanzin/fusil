@@ -50,7 +50,7 @@ if not RUNNING_PYTHON3:
 
 
 # Fuzzer options
-IGNORE_TIMEOUT = False
+IGNORE_TIMEOUT = True
 IGNORE_CPU = True
 SHOW_STDOUT = False
 DEBUG = False
