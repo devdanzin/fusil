@@ -128,8 +128,11 @@ class ProcessCpuLoad(CpuLoad):
         self.start = boot + start
 
     def isValid(self, item, current):
-        return (self.min_cycles <= current.tics - item.tics) \
-            and (self.min_duration < current.timestamp - item.timestamp)
+        try:
+            return (self.min_cycles <= current.tics - item.tics) \
+                and (self.min_duration < current.timestamp - item.timestamp)
+        except AttributeError:
+            return False
 
     def get(self, estimate=True):
         current = ProcessCpuLoadValue(self.pid)
