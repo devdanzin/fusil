@@ -1528,10 +1528,13 @@ class WritePythonCode(WriteCode):
         methods = {}
         if type(object) in {int, str}:
             return methods
+        is_exception = issubclass(object, BaseException) or isinstance(object, BaseException)
         for name in dir(object):
             if name in blacklist:
                 continue
             if (not self.options.test_private) and name.startswith("__"):
+                continue
+            if is_exception and name == "__init__":
                 continue
             try:
                 attr = getattr(object, name, None)
