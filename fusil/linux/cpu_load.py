@@ -138,15 +138,18 @@ class ProcessCpuLoad(CpuLoad):
         current = ProcessCpuLoadValue(self.pid)
         previous = self.searchLast(current)
         self.datas.append(current)
-        tics = current.tics
-        if previous:
-            time = current.timestamp - previous.timestamp
-            tics -= previous.tics
-        else:
-            if not estimate:
-                return None
-            time = current.timestamp - self.start
-        time = timedeltaSeconds(time)
-        load = tics / (HERTZ * time)
+        try:
+            tics = current.tics
+            if previous:
+                time = current.timestamp - previous.timestamp
+                tics -= previous.tics
+            else:
+                if not estimate:
+                    return None
+                time = current.timestamp - self.start
+            time = timedeltaSeconds(time)
+            load = tics / (HERTZ * time)
+        except AttributeError:
+            load = 0.5
         return minmax(0.0, load, 1.0)
 
