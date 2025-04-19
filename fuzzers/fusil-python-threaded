@@ -296,6 +296,7 @@ OBJECT_BLACKLIST = {
 }
 
 METHOD_BLACKLIST = {
+    "__class__",
     "__enter__",  # Damn locks
     "__imul__",
     "__ipow__",
@@ -328,6 +329,8 @@ METHOD_BLACKLIST = {
     "shutdown",
     "sleep",
     "test",
+    "tri",
+    "tril_indices",
     "wait",
     "zfill",
 }
@@ -1114,7 +1117,8 @@ from queue import Queue
 sequences = [Queue, deque, frozenset, list, set, str, tuple] 
 bytes_ = [bytearray, bytes]
 numbers = [Decimal, complex, float, int]
-dicts = [Counter, OrderedDict, dict]
+# dicts = [Counter, OrderedDict, dict]
+dicts = [OrderedDict, dict]
 bases = sequences + bytes_ + numbers + dicts + [object]
 weird_names = [f"weird_{cls.__name__}" for cls in bases]
 weird_instance_names = [f"{name}_empty" for name in weird_names]
@@ -1164,7 +1168,8 @@ from string import printable
 sequences = [Queue, deque, frozenset, list, set, str, tuple] 
 bytes_ = [bytearray, bytes]
 numbers = [Decimal, complex, float, int]
-dicts = [Counter, OrderedDict, dict]
+# dicts = [Counter, OrderedDict, dict]
+dicts = [OrderedDict, dict]
 bases = sequences + bytes_ + numbers + dicts + [object]
 
 large_num = 2**64
@@ -1484,7 +1489,7 @@ class WritePythonCode(WriteCode):
         if self.threads:
             self.write(0, "try:")
             self.write(1, "if result:")
-            self.write(2, "alive.append(Thread(target=func, args=arguments))")
+            self.write(2, "alive.append(Thread(target=func, args=arguments, name=message))")
             self.write(0, "except:")
             self.write(1, "pass")
         self.write(0, "return result")
@@ -1635,7 +1640,7 @@ class WritePythonCode(WriteCode):
             self.write(0, first_line + ")")
         if self.threads:
             self.emptyLine()
-            first_line = "alive.append(Thread(target=obj.%s, args=(" % (func_name,)
+            first_line = "alive.append(Thread(target=obj.%s, name='%s', args=(" % (func_name, f"{prefix}:{func_name}")
             self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
             if nb_arg:
                 self.write(1, first_line)
