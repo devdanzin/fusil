@@ -281,6 +281,7 @@ BLACKLIST = {
     "queue:Queue": {"get"},
     "queue:SimpleQueue": {"get"},
     "queue:_PySimpleQueue": {"get"},
+    "gc": {"get_objects"},
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
