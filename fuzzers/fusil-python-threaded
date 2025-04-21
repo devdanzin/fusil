@@ -1269,6 +1269,110 @@ all_types = [t for t in all_types if not issubclass(t, BaseException)]
 big_union = reduce(or_, all_types, int)
 """
 
+tricky_objects_names = [
+    "TrickyDescriptor()",
+    "TrickyMeta",
+    "tricky_capsule",
+    "tricky_cell",
+    "tricky_classmethod",
+    "tricky_classmethod_descriptor",
+    "tricky_closure",
+    "tricky_code",
+    "tricky_dict",
+    "tricky_frame",
+    "tricky_function",
+    "tricky_generator",
+    "tricky_genericalias",
+    "tricky_instance",
+    "tricky_lambda",
+    "tricky_list",
+    "tricky_mappingproxy",
+    "tricky_module",
+    "tricky_module2",
+    "tricky_property",
+    "tricky_simplenamespace",
+    "tricky_staticmethod",
+    "tricky_traceback",
+]
+
+tricky_objects = """
+import types
+import inspect
+import itertools
+tricky_cell = types.CellType(None)
+tricky_simplenamespace = types.SimpleNamespace(dummy=None, cell=tricky_cell)
+tricky_simplenamespace.dummy = tricky_simplenamespace
+tricky_capsule = types.CapsuleType
+tricky_module = types.ModuleType("tricky_module", "docs")
+tricky_module2 = types.ModuleType("tricky_module2\\x00", "docs\\x00")
+tricky_genericalias = types.GenericAlias(tricky_capsule, (tricky_cell,))
+tricky_dict = {tricky_capsule: tricky_cell, tricky_module: tricky_genericalias}
+tricky_dict["tricky_dict"] = tricky_dict
+tricky_mappingproxy = types.MappingProxyType(tricky_dict)
+
+
+def tricky_function(*args, **kwargs):
+    return tricky_function(*args, **kwargs)
+
+
+tricky_lambda = lambda *args, **kwargs: tricky_lambda(*args, **kwargs)
+tricky_classmethod = classmethod(tricky_lambda)
+tricky_staticmethod = staticmethod(tricky_lambda)
+tricky_property = property(tricky_lambda)
+tricky_code = tricky_lambda.__code__
+tricky_closure = tricky_code.co_freevars
+tricky_classmethod_descriptor = types.ClassMethodDescriptorType
+
+
+class TrickyDescriptor:
+    def __get__(self, obj, objtype=None):
+        return self
+
+    def __set__(self, obj, value):
+        obj.__dict__["_value"] = value
+
+    def __delete__(self, obj):
+        del obj.__dict__["_value"]
+
+
+class TrickyMeta(type):
+    @property
+    def __signature__(self):
+        raise AttributeError("Signature denied")
+
+
+class TrickyClass(metaclass=TrickyMeta):
+    tricky_descriptor = TrickyDescriptor()
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)
+
+    def __init__(self, *args, **kwargs):
+        self._value = None
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+tricky_instance = TrickyClass()
+tricky_frame = inspect.currentframe()
+tricky_frame.f_builtins.update(tricky_dict)
+tricky_frame.f_globals.update(tricky_dict)
+tricky_frame.f_locals.update(tricky_dict)
+
+try:
+    1 / 0
+except ZeroDivisionError as e:
+    tricky_traceback = e.__traceback__
+
+tricky_generator = (x for x in itertools.count())
+tricky_list = [[]] * 6 + []
+tricky_list[0].append(tricky_list)
+tricky_list[-1].append(tricky_list)
+tricky_list.append(tricky_list)
+tricky_list[0][0].append(tricky_list)
+"""
+
 type_names = ("list", "tuple", "dict")
 
 class WritePythonCode(WriteCode):
@@ -1308,15 +1412,11 @@ class WritePythonCode(WriteCode):
             self.genWeirdInstance,
             self.genWeirdType,
             self.genWeirdType,
-            self.genWeirdType,
-            self.genWeirdType,
-            self.genWeirdType,
             self.genWeirdUnion,
             self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
+            self.genTrickyObjects,
+            self.genTrickyObjects,
+            self.genTrickyObjects,
         )
         self.complex_argument_generators = (
             self.genList,
@@ -1327,17 +1427,13 @@ class WritePythonCode(WriteCode):
             self.genWeirdClass,
             self.genWeirdInstance,
             self.genWeirdInstance,
-            self.genWeirdInstance,
-            self.genWeirdType,
-            self.genWeirdType,
             self.genWeirdType,
             self.genWeirdType,
             self.genWeirdUnion,
             self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
-            self.genWeirdUnion,
+            self.genTrickyObjects,
+            self.genTrickyObjects,
+            self.genTrickyObjects,
         )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
@@ -1381,6 +1477,8 @@ class WritePythonCode(WriteCode):
         self.write(0, weird_classes)
         self.emptyLine()
         self.write(0, tricky_typing)
+        self.emptyLine()
+        self.write(0, tricky_objects)
         self.emptyLine()
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
         self.write(1, "raise ValueError('error')")
@@ -1859,6 +1957,10 @@ class WritePythonCode(WriteCode):
     def genInterestingValues(self):
         interesting = choice(INTERESTING)
         return [interesting]
+
+    def genTrickyObjects(self):
+        tricky = choice(tricky_objects_names)
+        return [tricky]
 
     def genWeirdClass(self):
         weird_class_name = choice(weird_names)
