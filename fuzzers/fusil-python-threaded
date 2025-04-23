@@ -23,6 +23,13 @@ from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
+try:
+    # import numpy
+    print("Numpy is available, using it to build tricky arrays.")
+    USE_NUMPY = True
+except ImportError:
+    print("Numpy is not available.")
+    USE_NUMPY = False
 
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
@@ -60,7 +67,7 @@ xrange = range
 print(sys.version)
 
 # Constants
-TIMEOUT = 150.0
+TIMEOUT = 350.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
@@ -1375,6 +1382,29 @@ tricky_list[0][0].append(tricky_list)
 
 type_names = ("list", "tuple", "dict")
 
+tricky_numpy_names = [
+    "numpy_zeros",
+    "numpy_nan",
+    "numpy_very_large_int",
+    "numpy_very_large_float",
+    "numpy_sys_max_float",
+    "numpy_sys_min_float",
+]
+
+tricky_numpy = """
+import sys
+from math import factorial
+
+import numpy
+
+numpy_zeros = numpy.zeros((2000, 2000))
+numpy_nan = numpy.array([[numpy.nan] * 1000 for n in range(1000)])
+numpy_very_large_int = numpy.array([factorial(x) for x in range(150, 250)])
+numpy_very_large_float = numpy.array([factorial(x) for x in range(250, 350)], dtype=numpy.float128)
+numpy_sys_max_float =  numpy.array([sys.float_info.max] * 100)
+numpy_sys_min_float =  numpy.array([sys.float_info.min] * 100)
+"""
+
 class WritePythonCode(WriteCode):
     def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
         WriteCode.__init__(self)
@@ -1435,6 +1465,13 @@ class WritePythonCode(WriteCode):
             self.genTrickyObjects,
             self.genTrickyObjects,
         )
+        if USE_NUMPY:
+            self.complex_argument_generators += (
+                self.genTrickyNumpy,
+                self.genTrickyNumpy,
+                self.genTrickyNumpy,
+                self.genTrickyNumpy,
+            )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
         self.bytes_generator = BytesGenerator(0, 20)
@@ -1480,6 +1517,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, tricky_objects)
         self.emptyLine()
+        if USE_NUMPY:
+            self.write(0, tricky_numpy)
+            self.emptyLine()
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
         self.write(1, "raise ValueError('error')")
         self.emptyLine()
@@ -1960,6 +2000,10 @@ class WritePythonCode(WriteCode):
 
     def genTrickyObjects(self):
         tricky = choice(tricky_objects_names)
+        return [tricky]
+
+    def genTrickyNumpy(self):
+        tricky = choice(tricky_numpy_names)
         return [tricky]
 
     def genWeirdClass(self):
