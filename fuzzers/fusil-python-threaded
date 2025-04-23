@@ -1281,7 +1281,7 @@ tricky_objects_names = [
     "tricky_dict",
     "tricky_frame",
     "tricky_function",
-    "tricky_generator",
+    # "tricky_generator",  # Triggers too many free-threading segfaults
     "tricky_genericalias",
     "tricky_instance",
     "tricky_lambda",
@@ -1365,7 +1365,7 @@ try:
 except ZeroDivisionError as e:
     tricky_traceback = e.__traceback__
 
-tricky_generator = (x for x in itertools.count())
+# tricky_generator = (x for x in itertools.count())  # Triggers too many free-threading segfaults
 tricky_list = [[]] * 6 + []
 tricky_list[0].append(tricky_list)
 tricky_list[-1].append(tricky_list)
