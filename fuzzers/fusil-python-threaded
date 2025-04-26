@@ -476,12 +476,13 @@ INTERESTING = (
 
 
 class ListAllModules:
-    def __init__(self, logger, only_c, site_package, blacklist):
+    def __init__(self, logger, only_c, site_package, blacklist, skip_test):
         self.logger = logger
         self.only_c = only_c
         self.site_package = site_package
         self.blacklist = blacklist
         self.names = set(sys.builtin_module_names) - {"__main__"}
+        self.skip_test = skip_test
 
     def matchModule(self, is_package, name, filename):
         if filename is not None and not self.filter_filename(filename):
@@ -518,12 +519,12 @@ class ListAllModules:
                 path = getattr(sys.modules[info.name], "__path__", None)
                 package = getattr(sys.modules[info.name], "__package__", None)
             if (
-                "test" in info.name
+                (self.skip_test and "test" in info.name)
                 or "pip" in info.name
                 or "logging" in info.name
                 or "pydoc" in info.name
                 or "tkinter" in info.name
-                or (path is not None and any("site-packages" in p for p in path))
+                or (not self.site_package and path is not None and any("site-packages" in p for p in path))
                 or (package is not None and "pip" in package)
             ):
                 print("SKIPPED", info, file=sys.stderr)
@@ -611,6 +612,17 @@ class Fuzzer(Application):
             help="Tested Python module names separated by commas (default: test all modules)",
             type="str",
             default="*",
+        )
+        options.add_option(
+            "--packages",
+            help="Tested Python packages names separated by commas (default: test all packages)",
+            type="str",
+            default="*",
+        )
+        options.add_option(
+            "--skip-test",
+            help="Skip modules with 'test' in the name (default: False)",
+            action="store_true",
         )
         options.add_option(
             "--blacklist",
@@ -942,7 +954,28 @@ class PythonSource(ProjectAgent):
                 self.options.only_c,
                 not self.options.no_site_packages,
                 MODULE_BLACKLIST,
+                self.options.skip_test,
             ).search()
+        if self.options.packages != "*":
+            print("\nAdding packages...")
+            all_modules = ListAllModules(
+                self,
+                self.options.only_c,
+                not self.options.no_site_packages,
+                MODULE_BLACKLIST,
+                self.options.skip_test,
+            )
+            for package in self.options.packages.split(","):
+                package = package.strip().strip("/")
+                if not len(package):
+                    continue
+                pack = __import__(package)
+                path = pack.__path__[0]
+                print(f"Adding package: {package} ({path})")
+                package_walker = all_modules.walk_packages([path], package + ".")
+                self.modules |= set(mod.name for mod in package_walker)
+            print(f"\nKnow modules ({len(self.modules)}): {",".join(sorted(self.modules))}")
+
         blacklist = self.options.blacklist
         if blacklist:
             blacklist = set(blacklist.split(","))
