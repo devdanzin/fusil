@@ -24,7 +24,7 @@ from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
 try:
-    # import numpy
+    import numpy
     print("Numpy is available, using it to build tricky arrays.")
     USE_NUMPY = True
 except ImportError:
@@ -1857,10 +1857,13 @@ class WritePythonCode(WriteCode):
             min_args, max_args = CLASS_NB_ARG[class_name]
             nb_arg = randint(min_args, max_args)
         else:
-            argspec = inspect.getfullargspec(cls.__init__)
-            args = len(argspec.args) - 1 if argspec.args else 0
-            defaults = len(argspec.defaults) if argspec.defaults else 0
-            nb_arg = randint(args - defaults, args)
+            try:
+                argspec = inspect.getfullargspec(cls.__init__)
+                args = len(argspec.args) - 1 if argspec.args else 0
+                defaults = len(argspec.defaults) if argspec.defaults else 0
+                nb_arg = randint(args - defaults, args)
+            except TypeError:
+                nb_arg = randint(0, 3)
 
         prefix = "o%s" % (1 + cls_index)
         self.writePrint(0, '"[%s] Create object %s"' % (prefix, 1 + cls_index))
