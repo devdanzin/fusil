@@ -529,6 +529,9 @@ class ListAllModules:
             ):
                 print("SKIPPED", info, file=sys.stderr)
                 continue
+            print(f"CHECKING {info.name=} {package=} {path=}")
+            if not self.is_module_c(info.name, ""):
+                continue
             yield info
 
             if info.ispkg:
@@ -575,27 +578,42 @@ class ListAllModules:
                     # Ignore the module and all of its submodules
                     self.logger.error(f"IGNORED {prefix}:{name}")
                     continue
+                if not self.is_module_c(name, prefix):
+                    continue
                 fullname = prefix + name
-                if self.only_c:
-                    module = None
-                    if fullname in sys.modules:
-                        module = sys.modules[fullname]
-                    elif name in sys.modules:
-                        module = sys.modules[name]
-                    elif name.split(".")[0] in sys.modules:
-                        module = sys.modules[name.split(".")[0]]
-                    elif prefix in sys.modules:
-                        module = sys.modules[prefix]
-                    elif prefix.split(".")[0] in sys.modules:
-                        module = sys.modules[prefix.split(".")[0]]
-                    if module and hasattr(module, "__file__"):
-                        if module.__file__.endswith(("py", "pyo", "pyc", "pyw")):
-                            self.logger.error(f"SKIP PYTHON MODULE {fullname}")
-                            continue
                 self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
                 self.names.add(fullname)
         except:
             raise
+
+    def is_module_c(self, name, prefix):
+        is_c = True
+        fullname = prefix + name
+        print(f"TESTING {fullname}")
+        if self.only_c:
+            module = None
+            if fullname in sys.modules:
+                module = sys.modules[fullname]
+            elif name in sys.modules:
+                module = sys.modules[name]
+            elif name.split(".")[0] in sys.modules:
+                module = sys.modules[name.split(".")[0]]
+            elif prefix in sys.modules:
+                module = sys.modules[prefix]
+            elif prefix.split(".")[0] in sys.modules:
+                module = sys.modules[prefix.split(".")[0]]
+            else:
+                try:
+                    module = __import__(fullname)
+                except ImportError as e:
+                    print(e)
+                    pass
+            if module and hasattr(module, "__file__"):
+                if module.__file__.endswith(("py", "pyo", "pyc", "pyw")):
+                    if "__init__" not in module.__file__:
+                        is_c = False
+                        self.logger.error(f"SKIP PYTHON MODULE {fullname}")
+        return is_c
 
     def search(self):
         self.search_modules(None, "")
@@ -1325,7 +1343,7 @@ tricky_objects_names = [
     "tricky_genericalias",
     "tricky_instance",
     "tricky_lambda",
-    "tricky_list",
+    # "tricky_list",
     "tricky_mappingproxy",
     "tricky_module",
     "tricky_module2",
@@ -1953,7 +1971,7 @@ class WritePythonCode(WriteCode):
                 [
                     "liar1",
                     "liar2",
-                    "lst",
+                    # "lst",
                     "lambda *args, **kwargs: 1/0",
                     "int",
                     "type",
