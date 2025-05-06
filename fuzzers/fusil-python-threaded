@@ -31,6 +31,15 @@ except ImportError:
     print("Numpy is not available.")
     USE_NUMPY = False
 
+try:
+    from fusil.python.template_strings import TEMPLATES
+    print("Template strings available.")
+    USE_TEMPLATE_STRINGS = True
+except ImportError:
+    print("Template strings not available.")
+    USE_TEMPLATE_STRINGS = False
+
+
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
 from fusil.process.create import CreateProcess
@@ -802,6 +811,18 @@ class WritePythonCode(WriteCode):
                 self.genTrickyNumpy,
                 self.genTrickyNumpy,
             )
+        if USE_TEMPLATE_STRINGS:
+            self.complex_argument_generators += (
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+                self.genTrickyTemplate,
+            )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
         self.bytes_generator = BytesGenerator(0, 20)
@@ -838,6 +859,8 @@ class WritePythonCode(WriteCode):
         self.write(0, "from threading import Thread")
         self.write(0, "from unittest.mock import MagicMock")
         self.write(0, "import asyncio")
+        if USE_TEMPLATE_STRINGS:
+            self.write(0, "from string.templatelib import Interpolation, Template")
         self.writePrint(0, '"import %s"' % self.module_name)
         self.write(0, "import %s" % self.module_name)
         self.emptyLine()
@@ -1339,6 +1362,10 @@ class WritePythonCode(WriteCode):
 
     def genTrickyNumpy(self):
         tricky = choice(tricky_numpy_names)
+        return [tricky]
+
+    def genTrickyTemplate(self):
+        tricky = choice(TEMPLATES)
         return [tricky]
 
     def genWeirdClass(self):
