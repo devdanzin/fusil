@@ -132,10 +132,11 @@ class ListAllModules:
         return True
 
     def filter_filename(self, filename):
+        name_parts = filename.split(path_sep)
         if not self.site_package:
-            if "site-packages" in filename.split(path_sep):
+            if "site-packages" in name_parts:
                 return False
-        if name in self.blacklist:
+        if name_parts[-1] in self.blacklist:
             return False
         return True
 
