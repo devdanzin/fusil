@@ -77,7 +77,6 @@ SHOW_STDOUT = False
 DEBUG = False
 USE_MANGLE = False
 TIMEOUT = 900.0
-EXCLUDE_EXCEPTIONS = True
 
 xrange = range
 
@@ -87,7 +86,8 @@ FILENAMES = "/etc/machine-id,/bin/sh"
 DEFAULT_NB_CALL = 250
 DEFAULT_NB_METHOD = 15
 DEFAULT_NB_CLASS = 50
-DEFAULT_MAX_OBJECTS = 100
+DEFAULT_NB_OBJ = 100
+ERRBACK_NAME = "errback"
 
 EXCEPTION_NAMES = {
     cls.__name__ for cls in builtins.__dict__.values()
@@ -104,6 +104,10 @@ def import_all():
                 sys.modules[name] = __import__(name)
             except ImportError as e:
                 print("Failed to import module %s\n" % name, e)
+
+
+class PythonFuzzerError(Exception):
+    pass
 
 
 class ListAllModules:
@@ -313,6 +317,75 @@ class Fuzzer(Application):
             help="Don't search modules in site-packages directory",
             action="store_true",
         )
+        options.add_option(
+            "--record-timeouts",
+            help="Consider timeouts as errors (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--record-high-cpu",
+            help="Consider high CPU usage an error (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--show-stdout",
+            help="Consider display STDOUT (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--functions-number",
+            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_CALL,
+            type="int",
+            default=DEFAULT_NB_CALL,
+        )
+        options.add_option(
+            "--methods-number",
+            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_METHOD,
+            type="int",
+            default=DEFAULT_NB_METHOD,
+        )
+        options.add_option(
+            "--classes-number",
+            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_CLASS,
+            type="int",
+            default=DEFAULT_NB_CLASS,
+        )
+        options.add_option(
+            "--objects-number",
+            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_OBJ,
+            type="int",
+            default=DEFAULT_NB_OBJ,
+        )
+        # options.add_option(
+        #     "--no-mangle",
+        #     help="Don't mangle objects (default: False)",
+        #     action="store_true",
+        # )
+        options.add_option(
+            "--fuzz-exceptions",
+            help="Include basic Exceptions in fuzzing (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--no-async",
+            help="Don't run code asynchronously (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--no-threads",
+            help="Don't run code in threads (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--no-numpy",
+            help="Don't use Numpy (default: False)",
+            action="store_true",
+        )
+        options.add_option(
+            "--no-tstrings",
+            help="Don't use template strings (default: False)",
+            action="store_true",
+        )
         return options
 
     def setupProject(self):
@@ -330,10 +403,10 @@ class Fuzzer(Application):
         )
         process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
         options = {"exitcode_score": 0}
-        if IGNORE_TIMEOUT:
+        if not self.options.record_timeouts:
             options["timeout_score"] = 0
         watch = WatchProcess(process, **options)
-        if watch.cpu and IGNORE_CPU:
+        if watch.cpu and not self.options.record_high_cpu:
             watch.cpu.max_score = 0
 
         stdout = WatchStdout(process)
@@ -366,7 +439,7 @@ class Fuzzer(Application):
         # PyPy messages
         stdout.addRegex("Fatal RPython error", 1.0)
 
-        if SHOW_STDOUT or DEBUG:
+        if self.options.show_stdout or self.options.debug:
             stdout.show_matching = True
             stdout.show_not_matching = True
 
@@ -383,13 +456,6 @@ class Fuzzer(Application):
     def exit(self, keep_log=True):
         super().exit(keep_log=keep_log)
         self.error(print_running_time())
-
-
-ERRBACK_NAME = "errback"
-
-
-class PythonFuzzerError(Exception):
-    pass
 
 
 class PythonSource(ProjectAgent):
@@ -474,8 +540,8 @@ class PythonSource(ProjectAgent):
         except AttributeError:
             pass
         self.write = WritePythonCode(self, self.filename, self.module,
-                                     self.module_name, threads=True,
-                                     _async=True)
+                                     self.module_name, threads=not self.options.no_threads,
+                                     _async=not self.options.no_async)
 
     def on_session_start(self):
         self.filename = self.session().createFilename("source.py")
@@ -529,34 +595,8 @@ class WritePythonCode(WriteCode):
             self.genNone,
             self.genBool,
             self.genSmallUint,
-            self.genSmallUint,
-            self.genSmallUint,
-            self.genSmallUint,
-            self.genSmallUint,
-            self.genInt,
-            self.genInt,
-            self.genInt,
-            self.genInt,
-            self.genInt,
-            self.genInt,
-            self.genInt,
             self.genInt,
             self.genLetterDigit,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
-            self.genBytes,
             self.genBytes,
             self.genString,
             self.genSurrogates,
@@ -569,21 +609,14 @@ class WritePythonCode(WriteCode):
             self.genException,
             self.genRawString,
             self.genWeirdType,
-            # self.genWeirdType,
-            # self.genWeirdType,
         )
         self.simple_argument_generators = self.hashable_argument_generators + (
             self.genBufferObject,
             self.genInterestingValues,
             self.genWeirdClass,
-            # self.genWeirdInstance,
             self.genWeirdInstance,
             self.genWeirdType,
-            # self.genWeirdType,
-            # self.genWeirdUnion,
             self.genWeirdUnion,
-            # self.genTrickyObjects,
-            # self.genTrickyObjects,
             self.genTrickyObjects,
         )
         self.complex_argument_generators = (
@@ -594,33 +627,17 @@ class WritePythonCode(WriteCode):
             self.genInterestingValues,
             self.genWeirdClass,
             self.genWeirdInstance,
-            # self.genWeirdInstance,
             self.genWeirdType,
-            # self.genWeirdType,
             self.genWeirdUnion,
-            # self.genWeirdUnion,
             self.genTrickyObjects,
-            # self.genTrickyObjects,
-            # self.genTrickyObjects,
         )
-        if USE_NUMPY:
+        if not self.options.no_numpy and USE_NUMPY:
             self.complex_argument_generators += (
                 self.genTrickyNumpy,
-                # self.genTrickyNumpy,
-                # self.genTrickyNumpy,
-                # self.genTrickyNumpy,
             )
-        if USE_TEMPLATE_STRINGS:
+        if not self.options.no_tstrings and USE_TEMPLATE_STRINGS:
             self.complex_argument_generators += (
                 self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
-                # self.genTrickyTemplate,
             )
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
@@ -659,7 +676,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "from threading import Thread")
         self.write(0, "from unittest.mock import MagicMock")
         self.write(0, "import asyncio")
-        if USE_TEMPLATE_STRINGS:
+        if not self.options.no_tstrings and USE_TEMPLATE_STRINGS:
             self.write(0, "from string.templatelib import Interpolation, Template")
         self.writePrint(0, '"import %s"' % self.module_name)
         self.write(0, "import %s" % self.module_name)
@@ -670,7 +687,7 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, fusil.python.tricky_weird.tricky_objects)
         self.emptyLine()
-        if USE_NUMPY:
+        if not self.options.no_numpy and USE_NUMPY:
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
             self.emptyLine()
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
@@ -722,7 +739,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "obj = %s" % self.module_name)
 
         self.writeCode(
-            "", self.module, self.functions, self.classes, self.objects, 1, DEFAULT_NB_CALL
+            "", self.module, self.functions, self.classes, self.objects, 1, self.options.functions_number,
         )
         self.emptyLine()
         if self.threads:
@@ -799,7 +816,7 @@ class WritePythonCode(WriteCode):
         names = set(dir(self.module))
         names -= {"__builtins__", "__doc__", "__file__", "__name__"}
         names -= {"True", "None", "False"}
-        if EXCLUDE_EXCEPTIONS:
+        if not self.options.fuzz_exceptions:
             # We could filter all Exception subclasses and instances from the set
             names -= EXCEPTION_NAMES
         names -= blacklist
@@ -964,7 +981,7 @@ class WritePythonCode(WriteCode):
         if methods:
             self.write(0, "if obj is not None:")
             level = self.addLevel(1)
-            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, DEFAULT_NB_METHOD)
+            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, self.options.methods_number)
             self.write(0, "del %s" % obj_name)
             self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
             self.write(0, "collect()   # explicit call to the garbage collector")
@@ -989,7 +1006,7 @@ class WritePythonCode(WriteCode):
                 tuple(),
                 tuple(),
                 0,
-                DEFAULT_NB_METHOD,
+                self.options.methods_number,
                 obj_name,
             )
             self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
@@ -1016,13 +1033,13 @@ class WritePythonCode(WriteCode):
                     prefix, index, func_name, func, func_min_arg, obj_name
                 )
         if classes:
-            self.nb_class = DEFAULT_NB_CLASS
+            self.nb_class = self.options.classes_number
             for index in xrange(self.nb_class):
                 class_name = choice(classes)
                 cls = getattr(object, class_name)
                 self.useClass(index, cls, class_name)
         if objects:
-            for index in xrange(min(len(objects) * 2, DEFAULT_MAX_OBJECTS)):
+            for index in xrange(self.options.objects_number):
                 object_name = choice(objects)
                 obj = getattr(object, object_name)
                 if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):

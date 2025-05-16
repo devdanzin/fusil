@@ -377,7 +377,7 @@ class Application(ApplicationAgent):
         except KeyboardInterrupt:
             self.interrupt("Application cleanup interrupted!")
         except PTRACE_ERRORS as error:
-            writeError(None, error, "AGENT DEINIT ERRORT")
+            writeError(None, error, "AGENT DEINIT ERROR")
             self.exitcode = 1
         self.deinitX11()
         self.config = None
