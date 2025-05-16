@@ -12,7 +12,6 @@ import datetime
 import inspect
 import pkgutil
 import random
-import re
 import resource
 import sys
 import time
@@ -24,16 +23,16 @@ from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
 
+import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
 from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
 from fusil.project_agent import ProjectAgent
-from python.arg_numbers import get_arg_number, class_arg_number
+from fusil.python.arg_numbers import get_arg_number, class_arg_number
 from fusil.python.blacklists import BLACKLIST, METHOD_BLACKLIST, MODULE_BLACKLIST, OBJECT_BLACKLIST
 from fusil.python.mangle import mangle_loop, mangle_obj
-import fusil.python.tricky_weird
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 from fusil.six import text_type
