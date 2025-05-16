@@ -76,20 +76,19 @@ IGNORE_CPU = True
 SHOW_STDOUT = False
 DEBUG = False
 USE_MANGLE = False
+TIMEOUT = 900.0
+EXCLUDE_EXCEPTIONS = True
 
 xrange = range
 
 # Constants
-TIMEOUT = 900.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
-
 DEFAULT_NB_CALL = 250
 DEFAULT_NB_METHOD = 15
 DEFAULT_NB_CLASS = 50
 DEFAULT_MAX_OBJECTS = 100
 
-EXCLUDE_EXCEPTIONS = True
 EXCEPTION_NAMES = {
     cls.__name__ for cls in builtins.__dict__.values()
     if isinstance(cls, type) and issubclass(cls, Exception)
@@ -162,7 +161,7 @@ class ListAllModules:
             ):
                 print("SKIPPED", info, file=sys.stderr)
                 continue
-            print(f"CHECKING {info.name=} {package=} {path=}")
+            # print(f"CHECKING {info.name=} {package=} {path=}")
             if not self.is_module_c(info.name, ""):
                 continue
             yield info
@@ -222,7 +221,7 @@ class ListAllModules:
     def is_module_c(self, name, prefix):
         is_c = True
         fullname = prefix + name
-        print(f"TESTING {fullname}")
+        # print(f"TESTING {fullname}")
         if self.only_c:
             module = None
             if fullname in sys.modules:
@@ -484,6 +483,7 @@ class PythonSource(ProjectAgent):
         # copy sys.modules
         old_sys_modules = sys.modules.copy()
 
+        name = "NO_MODULES!"
         while self.modules:
             name = choice(self.modules)
             try:
@@ -496,7 +496,7 @@ class PythonSource(ProjectAgent):
                 )
                 self.modules.remove(name)
         if not self.modules:
-            self.error("There is no more modules!")
+            self.error("There are no more modules!")
             self.send("project_stop")
             return
         self.error("Test module %s" % name)
@@ -800,13 +800,14 @@ class WritePythonCode(WriteCode):
         names -= {"__builtins__", "__doc__", "__file__", "__name__"}
         names -= {"True", "None", "False"}
         if EXCLUDE_EXCEPTIONS:
+            # We could filter all Exception subclasses and instances from the set
             names -= EXCEPTION_NAMES
         names -= blacklist
         for name in names:
             try:
                 attr = getattr(self.module, name)
             except AttributeError:
-                # attribute declared in __all__, but no declared?
+                # attribute listed in __all__, but not declared in the module?
                 continue
             if isinstance(attr, (FunctionType, BuiltinFunctionType)):
                 functions.append(name)
