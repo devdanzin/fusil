@@ -23,22 +23,6 @@ from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
-try:
-    import numpy
-    print("Numpy is available, using it to build tricky arrays.")
-    USE_NUMPY = True
-except ImportError:
-    print("Numpy is not available.")
-    USE_NUMPY = False
-
-try:
-    from fusil.python.template_strings import TEMPLATES
-    print("Template strings available.")
-    USE_TEMPLATE_STRINGS = True
-except ImportError:
-    print("Template strings not available.")
-    USE_TEMPLATE_STRINGS = False
-
 
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
@@ -46,12 +30,13 @@ from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
 from fusil.project_agent import ProjectAgent
+from python.arg_numbers import get_arg_number, class_arg_number
 from fusil.python.blacklists import BLACKLIST, METHOD_BLACKLIST, MODULE_BLACKLIST, OBJECT_BLACKLIST
 from fusil.python.mangle import mangle_loop, mangle_obj
-from fusil.python.tricky_weird import (weird_names, weird_instance_names, weird_classes,
-    tricky_typing, tricky_objects_names, tricky_objects, type_names, tricky_numpy_names, tricky_numpy)
+import fusil.python.tricky_weird
+from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
-from fusil.six import string_types, text_type
+from fusil.six import text_type
 from fusil.unicode_generator import (
     ASCII8,
     DECIMAL_DIGITS,
@@ -68,49 +53,59 @@ from fusil.write_code import WriteCode
 if not RUNNING_PYTHON3:
     from sys import getfilesystemencoding
 
+try:
+    import numpy
+    print("Numpy is available, using it to build tricky arrays.")
+    USE_NUMPY = True
+except ImportError:
+    print("Numpy is not available.")
+    USE_NUMPY = False
+
+try:
+    from fusil.python.template_strings import TEMPLATES
+    print("Template strings available.")
+    USE_TEMPLATE_STRINGS = True
+except ImportError:
+    print("Template strings not available.")
+    USE_TEMPLATE_STRINGS = False
+
+print(sys.version)
 
 # Fuzzer options
 IGNORE_TIMEOUT = True
 IGNORE_CPU = True
 SHOW_STDOUT = False
 DEBUG = False
+USE_MANGLE = False
 
 xrange = range
-
-print(sys.version)
 
 # Constants
 TIMEOUT = 900.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
-PARSE_PROTOTYPE = True
-PROTOTYPE_REGEX = re.compile(r"[A-Za-z]+[A-Za-z_0-9]*\(([^)]*)\)", re.MULTILINE)
 
-# Currently we have to import all C modules before running the fuzzer.
-# TODO: figure out why and fix it properly.
-for name in sys.stdlib_module_names:
-    if name not in MODULE_BLACKLIST and "test" not in name:
-        try:
-            sys.modules[name] = __import__(name)
-        except ImportError as e:
-            print("Failed to import module %s\n" % name, e)
-
-if DEBUG:
-    NB_CALL = 5
-    NB_METHOD = 1
-    NB_CLASS = 5
-else:
-    NB_CALL = 250
-    NB_METHOD = 15
-    NB_CLASS = 50
-MAX_ARG = 6
-MAX_VAR_ARG = 5
+DEFAULT_NB_CALL = 250
+DEFAULT_NB_METHOD = 15
+DEFAULT_NB_CLASS = 50
+DEFAULT_MAX_OBJECTS = 100
 
 EXCLUDE_EXCEPTIONS = True
 EXCEPTION_NAMES = {
     cls.__name__ for cls in builtins.__dict__.values()
     if isinstance(cls, type) and issubclass(cls, Exception)
 }
+
+
+def import_all():
+    # Currently we have to import all C modules before running the fuzzer.
+    # TODO: figure out why and fix it properly.
+    for name in sys.stdlib_module_names:
+        if name not in MODULE_BLACKLIST and "test" not in name:
+            try:
+                sys.modules[name] = __import__(name)
+            except ImportError as e:
+                print("Failed to import module %s\n" % name, e)
 
 
 class ListAllModules:
@@ -354,6 +349,7 @@ class Fuzzer(Application):
             "assertion": 1.0,
             "critical": 1.0,
             "panic": 1.0,
+            "panicked": 1.0,  # For Rust errors
             "glibc detected": 1.0,
             "segfault": 1.0,
             "segmentation fault": 1.0,
@@ -392,201 +388,6 @@ class Fuzzer(Application):
 
 ERRBACK_NAME = "errback"
 
-METHODS_NB_ARG = {
-    "__abs__": 0,
-    "__add__": 1,
-    "__aenter__": 0,
-    "__aexit__": 0,
-    "__aiter__": 0,
-    "__and__": 1,
-    "__anext__": 0,
-    "__await__": 0,
-    "__bool__": 0,
-    "__buffer__": 1,
-    "__bytes__": 0,
-    "__ceil__": 0,
-    "__class_getitem__": 1,
-    "__complex__": 0,
-    "__contains__": 1,
-    "__copy__": 0,
-    "__deepcopy__": 1,
-    "__delattr__": 1,
-    "__delete__": 1,
-    "__delitem__": 1,
-    "__dir__": 0,
-    "__div__": 1,
-    "__divmod__": 1,
-    "__enter__": 0,
-    "__eq__": 1,
-    "__exit__": 3,
-    "__float__": 0,
-    "__floor__": 1,
-    "__floordiv__": 0,
-    "__format__": 1,
-    "__fspath__": 0,
-    "__ge__": 1,
-    "__get__": 2,
-    "__getattr__": 1,
-    "__getattribute__": 1,
-    "__getitem__": 1,
-    "__getnewargs__": 0,
-    "__getnewargs_ex__": 0,
-    "__getslice__": 2,
-    "__getstate__": 0,
-    "__gt__": 1,
-    "__hash__": 0,
-    "__iadd__": 1,
-    "__iand__": 1,
-    "__idiv__": 1,
-    "__ifloordiv__": 0,
-    "__ilshift__": 1,
-    "__imatmul__": 1,
-    "__imod__": 1,
-    "__index__": 0,
-    "__init_subclass__": 1,
-    "__instancecheck__": 1,
-    "__int__": 0,
-    "__invert__": 0,
-    "__ior__": 1,
-    "__irshift__": 1,
-    "__isub__": 1,
-    "__iter__": 0,
-    "__itruediv__": 1,
-    "__ixor__": 1,
-    "__le__": 1,
-    "__len__": 0,
-    "__length_hint__": 0,
-    "__lshift__": 1,
-    "__lt__": 1,
-    "__matmul__": 1,
-    "__missing__": 1,
-    "__mod__": 1,
-    "__mro_entries__": 0,
-    "__ne__": 1,
-    "__neg__": 0,
-    "__new__": 3,
-    "__next__": 1,
-    "__or__": 1,
-    "__pos__": 0,
-    "__post_init__": 2,
-    "__prepare__": 0,
-    "__radd__": 1,
-    "__rand__": 1,
-    "__rdivmod__": 1,
-    "__reduce__": 0,
-    "__reduce_ex__": (0, 1),
-    "__release_buffer__": 1,
-    "__replace__": 1,
-    "__repr__": 0,
-    "__reversed__": 0,
-    "__rfloordiv__": 0,
-    "__rlshift__": 1,
-    "__rmatmul__": 1,
-    "__rmod__": 1,
-    "__ror__": 1,
-    "__round__": 0,
-    "__rrshift__": 1,
-    "__rshift__": 1,
-    "__rsub__": 1,
-    "__rtruediv__": 1,
-    "__rxor__": 1,
-    "__set__": 2,
-    "__set_name__": 2,
-    "__setattr__": 2,
-    "__setitem__": 2,
-    "__setstate__": 1,
-    "__sizeof__": 0,
-    "__str__": 0,
-    "__sub__": 1,
-    "__subclasscheck__": 1,
-    "__subclasshook__": 1,
-    "__truediv__": 1,
-    "__trunc__": 0,
-    "__xor__": 1,
-    "abs": 1,
-    "add": 1,
-    "all": 1,
-    "any": 1,
-    "append": 1,
-    "ascii": 1,
-    "bin": 1,
-    "callable": 1,
-    "chr": 1,
-    "clear": 0,
-    "close": 0,
-    "compile": (3, 6),
-    "decode": 0,
-    "delattr": 2,
-    "dir": 1,
-    "divmod": 2,
-    "encode": 0,
-    "eval": (1, 3),
-    "exec": 3,
-    "format": (1, 2),
-    "get": (1, 2),
-    "getattr": (2, 3),
-    "getvalue": 0,
-    "hasattr": 2,
-    "hash": 1,
-    "hex": 1,
-    "isinstance": 2,
-    "issubclass": 2,
-    "items": 0,
-    "iter": (1, 2),
-    "join": 1,
-    "keys": 0,
-    "len": 1,
-    "match": 1,
-    "max": (1, 4),
-    "min": (1, 4),
-    "next": (1, 2),
-    "oct": 1,
-    "open": (1, 8),
-    "ord": 1,
-    "pop": (0, 1),
-    "read": (0, 1),
-    "replace": 2,
-    "repr": 1,
-    "round": (1, 2),
-    "setattr": 3,
-    "sort": 0,
-    "sorted": 1,
-    "split": 1,
-    "strip": (0, 1),
-    "sum": (1, 2),
-    "update": 1,
-    "values": 0,
-    "write": 1,
-}
-
-CLASS_NB_ARG = {
-    "bool": (1, 1),
-    "bytearray": (0, 3),
-    "bytes": (0, 3),
-    "classmethod": (1, 1),
-    "complex": (0, 2),
-    "dict": (0, 1),
-    "enumerate": (1, 2),
-    "filter": (2, 2),
-    "float": (1, 1),
-    "frozenset": (0, 1),
-    "int": (0, 2),
-    "list": (0, 1),
-    "map": (2, 5),
-    "memoryview": (1, 1),
-    "object": (0, 0),
-    "property": (1, 4),
-    "range": (1, 3),
-    "reversed": (1, 1),
-    "set": (1, 1),
-    "slice": (1, 3),
-    "staticmethod": (1, 1),
-    "str": (0, 3),
-    "super": (1, 2),
-    "tuple": (0, 1),
-    "type": (0, 3),
-    "zip": (1, 3),
-}
 
 class PythonFuzzerError(Exception):
     pass
@@ -715,34 +516,6 @@ class PythonProcess(CreateProcess):
         self.cmdline.arguments[-1] = filename
         self.createProcess()
 
-
-# >'<, >"<, >\<
-ESCAPE_CHARACTERS = "'" + '"' + "\\"
-
-
-def formatCharacter(char):
-    if char in ESCAPE_CHARACTERS:
-        # >\"<
-        return "\\" + char
-    code = ord(char)
-    if 32 <= code <= 126:
-        # >a<
-        return char
-    elif code <= 255:
-        # >\xEF<
-        return "\\x%02X" % code
-    elif code <= 65535:
-        # >\u0101<
-        return "\\u%04X" % code
-    else:
-        # >\U00010FA3<
-        return "\\U%08X" % code
-
-
-def escapeUnicode(text):
-    return "".join(formatCharacter(char) for char in text)
-
-USE_MANGLE = False
 
 class WritePythonCode(WriteCode):
     def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
@@ -891,14 +664,14 @@ class WritePythonCode(WriteCode):
         self.writePrint(0, '"import %s"' % self.module_name)
         self.write(0, "import %s" % self.module_name)
         self.emptyLine()
-        self.write(0, weird_classes)
+        self.write(0, fusil.python.tricky_weird.weird_classes)
         self.emptyLine()
-        self.write(0, tricky_typing)
+        self.write(0, fusil.python.tricky_weird.tricky_typing)
         self.emptyLine()
-        self.write(0, tricky_objects)
+        self.write(0, fusil.python.tricky_weird.tricky_objects)
         self.emptyLine()
         if USE_NUMPY:
-            self.write(0, tricky_numpy)
+            self.write(0, fusil.python.tricky_weird.tricky_numpy)
             self.emptyLine()
         self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
         self.write(1, "raise ValueError('error')")
@@ -949,7 +722,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "obj = %s" % self.module_name)
 
         self.writeCode(
-            "", self.module, self.functions, self.classes, self.objects, 1, NB_CALL
+            "", self.module, self.functions, self.classes, self.objects, 1, DEFAULT_NB_CALL
         )
         self.emptyLine()
         if self.threads:
@@ -1096,38 +869,10 @@ class WritePythonCode(WriteCode):
             generators = self.simple_argument_generators
         return self._createArgument(generators)
 
-    def getNbArg(self, func, func_name, min_arg):
-        try:
-            # Known method of arguments?
-            value = METHODS_NB_ARG[func_name]
-            if isinstance(value, tuple):
-                min_arg, max_arg = value
-            else:
-                min_arg = max_arg = value
-            return min_arg, max_arg
-        except KeyError:
-            pass
-
-        try:
-            argspec = inspect.getfullargspec(func)
-            has_self = 1 if "self" in argspec.args or "cls" in argspec.args else 0
-            args = (len(argspec.args) - has_self) if argspec.args else 0
-            defaults = (len(argspec.defaults) - has_self) if argspec.defaults else 0
-            return args - defaults, args
-        except TypeError:
-            pass
-
-        if PARSE_PROTOTYPE:
-            # Try using the documentation
-            args = parseDocumentation(func.__doc__, MAX_VAR_ARG)
-            if args:
-                return args
-        return min_arg, MAX_ARG
-
     def callFunction(self, prefix, func_index, func_name, func, min_arg, obj_name=None):
         if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
             return
-        min_arg, max_arg = self.getNbArg(func, func_name, min_arg)
+        min_arg, max_arg = get_arg_number(func, func_name, min_arg)
 
         if randint(0, 19) < 1:
             nb_arg = 0
@@ -1201,19 +946,7 @@ class WritePythonCode(WriteCode):
             self.write(level, line)
 
     def useClass(self, cls_index, cls, class_name):
-        import inspect
-
-        if class_name in CLASS_NB_ARG:
-            min_args, max_args = CLASS_NB_ARG[class_name]
-            nb_arg = randint(min_args, max_args)
-        else:
-            try:
-                argspec = inspect.getfullargspec(cls.__init__)
-                args = len(argspec.args) - 1 if argspec.args else 0
-                defaults = len(argspec.defaults) if argspec.defaults else 0
-                nb_arg = randint(args - defaults, args)
-            except TypeError:
-                nb_arg = randint(0, 3)
+        nb_arg = class_arg_number(class_name, cls)
 
         prefix = "o%s" % (1 + cls_index)
         self.writePrint(0, '"[%s] Create object %s"' % (prefix, 1 + cls_index))
@@ -1230,7 +963,7 @@ class WritePythonCode(WriteCode):
         if methods:
             self.write(0, "if obj is not None:")
             level = self.addLevel(1)
-            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, NB_METHOD)
+            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, DEFAULT_NB_METHOD)
             self.write(0, "del %s" % obj_name)
             self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
             self.write(0, "collect()   # explicit call to the garbage collector")
@@ -1255,7 +988,7 @@ class WritePythonCode(WriteCode):
                 tuple(),
                 tuple(),
                 0,
-                NB_METHOD,
+                DEFAULT_NB_METHOD,
                 obj_name,
             )
             self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
@@ -1282,13 +1015,13 @@ class WritePythonCode(WriteCode):
                     prefix, index, func_name, func, func_min_arg, obj_name
                 )
         if classes:
-            self.nb_class = NB_CLASS
+            self.nb_class = DEFAULT_NB_CLASS
             for index in xrange(self.nb_class):
                 class_name = choice(classes)
                 cls = getattr(object, class_name)
                 self.useClass(index, cls, class_name)
         if objects:
-            for index in xrange(min(len(objects) * 2, 100)):
+            for index in xrange(min(len(objects) * 2, DEFAULT_MAX_OBJECTS)):
                 object_name = choice(objects)
                 obj = getattr(object, object_name)
                 if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):
@@ -1386,11 +1119,11 @@ class WritePythonCode(WriteCode):
         return [interesting]
 
     def genTrickyObjects(self):
-        tricky = choice(tricky_objects_names)
+        tricky = choice(fusil.python.tricky_weird.tricky_objects_names)
         return [tricky]
 
     def genTrickyNumpy(self):
-        tricky = choice(tricky_numpy_names)
+        tricky = choice(fusil.python.tricky_weird.tricky_numpy_names)
         return [tricky]
 
     def genTrickyTemplate(self):
@@ -1398,22 +1131,22 @@ class WritePythonCode(WriteCode):
         return [tricky]
 
     def genWeirdClass(self):
-        weird_class_name = choice(weird_names)
+        weird_class_name = choice(fusil.python.tricky_weird.weird_names)
         return [f"weird_classes['{weird_class_name}']"]
 
     def genWeirdInstance(self):
-        weird_class_name = choice(weird_instance_names)
+        weird_class_name = choice(fusil.python.tricky_weird.weird_instance_names)
         return [f"weird_instances['{weird_class_name}']"]
 
     def genWeirdType(self):
-        weird_class_name = choice(weird_names)
-        type_name = choice(type_names)
+        weird_class_name = choice(fusil.python.tricky_weird.weird_names)
+        type_name = choice(fusil.python.tricky_weird.type_names)
         return [f"{type_name}[weird_classes['{weird_class_name}']]"]
 
     def genWeirdUnion(self):
-        weird_class_name1 = choice(weird_names)
-        weird_class_name2 = choice(weird_names)
-        type_name = choice(type_names)
+        weird_class_name1 = choice(fusil.python.tricky_weird.weird_names)
+        weird_class_name2 = choice(fusil.python.tricky_weird.weird_names)
+        type_name = choice(fusil.python.tricky_weird.type_names)
         return [f"{type_name}[weird_classes['{weird_class_name1}']] | weird_classes['{weird_class_name2}'] | big_union"]
 
     def genBufferObject(self):
@@ -1507,90 +1240,6 @@ class WritePythonCode(WriteCode):
         return self._genList("{", "}", "{}", True)
 
 
-def parseArguments(arguments, defaults):
-    for arg in arguments.split(","):
-        arg = arg.strip(" \n[]")
-        if not arg:
-            continue
-        if "=" in arg:
-            arg, value = arg.split("=", 1)
-            defaults[arg] = value
-        yield arg
-
-
-def parsePrototype(doc):
-    r"""
-    >>> parsePrototype("test([x])")
-    ((), None, ('x',), {})
-    >>> parsePrototype('dump(obj, file, protocol=0)')
-    (('obj', 'file'), None, ('protocol',), {'protocol': '0'})
-    >>> parsePrototype('setitimer(which, seconds[, interval])')
-    (('which', 'seconds'), None, ('interval',), {})
-    >>> parsePrototype("decompress(string[, wbits[, bufsize]])")
-    (('string',), None, ('wbits', 'bufsize'), {})
-    >>> parsePrototype("decompress(string,\nwbits)")
-    (('string', 'wbits'), None, (), {})
-    >>> parsePrototype("get_referents(*objs)")
-    ((), '*objs', (), {})
-    >>> parsePrototype("nothing")
-    """
-    if not doc:
-        return None
-    if not isinstance(doc, string_types):
-        return None
-    doc = doc.strip()
-    match = PROTOTYPE_REGEX.match(doc)
-    if not match:
-        return None
-    arguments = match.group(1)
-    if arguments == "...":
-        return None
-    defaults = {}
-    vararg = None
-    varkw = tuple()
-    if "[" in arguments:
-        arguments, varkw = arguments.split("[", 1)
-        arguments = tuple(parseArguments(arguments, defaults))
-        varkw = tuple(parseArguments(varkw, defaults))
-    else:
-        arguments = tuple(parseArguments(arguments, defaults))
-
-    # Argument with default value? => varkw
-    move = None
-    for index in xrange(len(arguments) - 1, -1, -1):
-        arg = arguments[index]
-        if arg not in defaults:
-            break
-        move = index
-    if move is not None:
-        varkw = arguments[move:] + varkw
-        arguments = arguments[:move]
-
-    if arguments and arguments[-1].startswith("*"):
-        vararg = arguments[-1]
-        arguments = arguments[:-1]
-    return arguments, vararg, varkw, defaults
-
-
-def parseDocumentation(doc, max_var_arg):
-    """
-    Arguments:
-     - doc: documentation string
-     - max_var_arg: maximum number of arguments for variable argument,
-       eg. test(*args).
-    """
-    prototype = parsePrototype(doc)
-    if not prototype:
-        return None
-
-    args, varargs, varkw, defaults = prototype
-    min_arg = len(args)
-    max_arg = min_arg + len(varkw)
-    if varargs:
-        max_arg += max_var_arg
-    return min_arg, max_arg
-
-
 def remove_logging_pycache():
     """Remove stale logging __pycache__ that causes logging errors."""
     import importlib
@@ -1616,7 +1265,9 @@ def print_running_time():
     total_time = str(datetime.timedelta(0, round(time.time() - time_start, 2)))
     return f"\nRunning time: {total_time[:-4]}\nUser time:    {user_time[:-4]}"
 
+
 if __name__ == "__main__":
     time_start = time.time()
+    import_all()
     remove_logging_pycache()
     Fuzzer().main()
