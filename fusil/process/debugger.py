@@ -87,7 +87,10 @@ class Debugger(ProjectAgent):
     def useProcessEvent(self, event):
         if isinstance(event, ProcessSignal):
             self.processSignal(event)
-            event.process.cont(event.signum)
+            try:
+                event.process.cont(event.signum)
+            except PtraceError as err:
+                self.error("Process %s: %s" % (event.process.pid, err))
             return None
 
         if isinstance(event, ProcessExit):
