@@ -80,7 +80,7 @@ xrange = range
 print(sys.version)
 
 # Constants
-TIMEOUT = 350.0
+TIMEOUT = 900.0
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
 PARSE_PROTOTYPE = True
@@ -881,6 +881,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "from gc import collect")
         self.write(0, "from sys import stderr")
         self.write(0, "import inspect")
+        self.write(0, "import time")
         self.write(0, "import sys")
         self.write(0, "from threading import Thread")
         self.write(0, "from unittest.mock import MagicMock")
@@ -967,11 +968,11 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
         if self._async:
             self.write(0, "async def main_async():")
-            self.write(1, "await asyncio.gather(*_async, return_exceptions=True)")
+            self.write(1, "await asyncio.gather(*[asyncio.to_thread(x) for x in _async], return_exceptions=True)")
             self.emptyLine()
             self.write(0, "runner = asyncio.Runner()")
             self.write(0, "loop = runner.get_loop()")
-            self.write(0, "loop.set_task_factory(asyncio.eager_task_factory)")
+            # self.write(0, "loop.set_task_factory(asyncio.eager_task_factory)")
             self.write(0, "runner.run(main_async())")
             self.emptyLine()
         self.close()
@@ -982,7 +983,7 @@ class WritePythonCode(WriteCode):
         self.writePrint(0, "message")
         self.write(0, "try:")
         self.write(1, "func = getattr(object, name)")
-        self.write(1, "for x in range(5):")
+        self.write(1, "for x in range(65):")
         self.write(2, "result = func(*arguments)")
 
         exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
@@ -1171,10 +1172,11 @@ class WritePythonCode(WriteCode):
                 self.write(1, first_line + ")))")
         if self._async:
             self.emptyLine()
-            self.write(0, "async def %s_%s():" % (prefix, func_name))
+            self.write(0, "def %s_%s():" % (prefix, func_name))
             self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
-            self.write(1, "await asyncio.sleep(%s)" % (random.random() / 100))
-            first_line = 'obj.%s(' % func_name
+            self.write(1, "time.sleep(%s)" % (random.random() / 100))
+            # self.write(1, "await asyncio.sleep(%s)" % (random.random() / 100))
+            first_line = 'try: obj.%s(' % func_name
             if nb_arg:
                 self.write(1, first_line)
                 level = self.addLevel(1)
@@ -1186,9 +1188,10 @@ class WritePythonCode(WriteCode):
                 self.restoreLevel(level)
             else:
                 self.write(1, first_line + ")")
+            self.write(1, "except Exception: pass")
             self.write(1, "print('End async calling %s_%s')" % (prefix, func_name))
 
-            self.write(0, "_async.append(%s_%s())" % (prefix, func_name))
+            self.write(0, "_async.append(%s_%s)" % (prefix, func_name))
         self.emptyLine()
 
     def writeArgument(self, level, last_char=","):
