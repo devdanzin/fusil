@@ -35,7 +35,7 @@ class Debugger(ProjectAgent):
     def __init__(self, project):
         ProjectAgent.__init__(self, project, "dbg")
         self.debugger = None
-        self.enabled = (HAS_PTRACE and project.config.use_debugger)
+        self.enabled = (HAS_PTRACE and project.config.debugger_use_debugger)
         self.fusil_processes = {}
 
         if self.enabled:

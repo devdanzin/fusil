@@ -35,7 +35,7 @@ class AttachProcessPID(ProjectAgent):
         self.memory_score = 1.0
         self.debugger = project.debugger
         self.dbg_process = None
-        if HAS_PROC and project.config.use_cpu_probe:
+        if HAS_PROC and project.config.process_use_cpu_probe:
             self.cpu = CpuProbe(project, "%s:cpu" % self.name)
         else:
             self.warning("CpuProbe is not available on your OS")

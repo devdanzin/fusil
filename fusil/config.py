@@ -1,13 +1,30 @@
-try:
-    from configparser import NoOptionError, NoSectionError, RawConfigParser
-except ImportError:
-    # Python 2
-    from ConfigParser import RawConfigParser, NoSectionError, NoOptionError
-
+from configparser import NoOptionError, NoSectionError, RawConfigParser
 from os import getenv
 from os.path import exists as path_exists
 from os.path import join as path_join
 
+DEFAULTS = {
+    "fusil_max_memory": 500 * 1024 * 1024,
+    "fusil_success_score": 0.50,
+    "fusil_error_score": -0.50,
+    "fusil_success": 1,
+    "fusil_session": 0,
+    "fusil_normal_calm_load": 0.50,
+    "fusil_normal_calm_sleep": 0.5,
+    "fusil_slow_calm_load": 0.30,
+    "fusil_slow_calm_sleep": 3.0,
+    "fusil_xhost_program": 'xhost',
+    "process_use_cpu_probe": True,
+    "process_max_memory":  2000 * 1024 * 1024,
+    "process_core_dump": True,
+    "process_max_user_process": 1000,
+    "process_user": 'fusil',
+    "process_uid": None,
+    "process_group": 'fusil',
+    "process_gid": None,
+    "debugger_use_debugger": True,
+    "debugger_trace_forks": False,
+}
 
 class ConfigError(Exception):
     pass
@@ -20,34 +37,34 @@ class FusilConfig:
             self._parser.read([self.filename])
 
         # Fusil application options
-        self.fusil_max_memory = self.getint('fusil', 'max_memory', 500 * 1024 * 1024)
-        self.fusil_success_score = self.getfloat('fusil', 'success_score', 0.50)
-        self.fusil_error_score = self.getfloat('fusil', 'error_score', -0.50)
-        self.fusil_success = self.getint('fusil', 'success', 1)
-        self.fusil_session = self.getint('fusil', 'session', 0)
-        self.fusil_normal_calm_load = self.getfloat('fusil', 'normal_calm_load', 0.50)
-        self.fusil_normal_calm_sleep = self.getfloat('fusil', 'normal_calm_sleep', 0.5)
-        self.fusil_slow_calm_load = self.getfloat('fusil', 'slow_calm_load', 0.30)
-        self.fusil_slow_calm_sleep = self.getfloat('fusil', 'slow_calm_sleep', 3.0)
-        self.fusil_xhost_program = self.getstr('fusil', 'xhost_program', 'xhost')
+        self.fusil_max_memory = self.getint('fusil', 'max_memory', DEFAULTS['fusil_max_memory'])
+        self.fusil_success_score = self.getfloat('fusil', 'success_score', DEFAULTS['fusil_success_score'])
+        self.fusil_error_score = self.getfloat('fusil', 'error_score', DEFAULTS['fusil_error_score'])
+        self.fusil_success = self.getint('fusil', 'success', DEFAULTS['fusil_success'])
+        self.fusil_session = self.getint('fusil', 'session', DEFAULTS['fusil_session'])
+        self.fusil_normal_calm_load = self.getfloat('fusil', 'normal_calm_load', DEFAULTS['fusil_normal_calm_load'])
+        self.fusil_normal_calm_sleep = self.getfloat('fusil', 'normal_calm_sleep', DEFAULTS['fusil_normal_calm_sleep'])
+        self.fusil_slow_calm_load = self.getfloat('fusil', 'slow_calm_load', DEFAULTS['fusil_slow_calm_load'])
+        self.fusil_slow_calm_sleep = self.getfloat('fusil', 'slow_calm_sleep', DEFAULTS['fusil_slow_calm_sleep'])
+        self.fusil_xhost_program = self.getstr('fusil', 'xhost_program', DEFAULTS['fusil_xhost_program'])
 
         # Process options
-        self.use_cpu_probe = self.getbool('process', 'use_cpu_probe', True)
-        self.process_max_memory = self.getint('process', 'max_memory',  2000 * 1024 * 1024)
-        self.process_core_dump = self.getbool('process', 'core_dump', True)
-        self.process_max_user_process = self.getint('process', 'max_user_process', 1000)
+        self.process_use_cpu_probe = self.getbool('process', 'process_use_cpu_probe', DEFAULTS['process_use_cpu_probe'])
+        self.process_max_memory = self.getint('process', 'max_memory',  DEFAULTS['process_max_memory'])
+        self.process_core_dump = self.getbool('process', 'core_dump', DEFAULTS['process_core_dump'])
+        self.process_max_user_process = self.getint('process', 'max_user_process', DEFAULTS['process_max_user_process'])
 
         # User used for subprocess
-        self.process_user = self.getstr('process', 'user', 'fusil')
-        self.process_uid = None
+        self.process_user = self.getstr('process', 'user', DEFAULTS['process_user'])
+        self.process_uid = DEFAULTS['process_uid']
 
         # Group used for subprocess
-        self.process_group = self.getstr('process', 'group', 'fusil')
-        self.process_gid = None
+        self.process_group = self.getstr('process', 'group', DEFAULTS['process_group'])
+        self.process_gid = DEFAULTS['process_gid']
 
         # Debugger options
-        self.use_debugger = self.getbool('debugger', 'use_debugger', True)
-        self.debugger_trace_forks = self.getbool('debugger', 'trace_forks', False)
+        self.debugger_use_debugger = self.getbool('debugger', 'debugger_use_debugger', DEFAULTS['debugger_trace_forks'])
+        self.debugger_trace_forks = self.getbool('debugger', 'trace_forks', DEFAULTS['debugger_trace_forks'])
 
         self._parser = None
 
@@ -56,7 +73,7 @@ class FusilConfig:
         if not configdir:
             homedir = getenv("HOME")
             if not homedir:
-                raise ConfigError("Unable to retreive user home directory: empty HOME environment variable")
+                raise ConfigError("Unable to retrieve user home directory: empty HOME environment variable")
             configdir = path_join(homedir, ".config")
         return path_join(configdir, "fusil.conf")
 

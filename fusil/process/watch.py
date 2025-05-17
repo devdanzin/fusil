@@ -20,7 +20,7 @@ class WatchProcess(ProjectAgent):
         self.process = weakref_ref(process)
         project = process.project()
         ProjectAgent.__init__(self, project, "watch:%s" % process.name)
-        if RUNNING_LINUX and project.config.use_cpu_probe:
+        if RUNNING_LINUX and project.config.process_use_cpu_probe:
             self.cpu = CpuProbe(project, "%s:cpu" % self.name)
         else:
             self.cpu = None
