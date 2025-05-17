@@ -476,6 +476,8 @@ class Fuzzer(Application):
         # Hide Python warnings on import
         warnings.simplefilter("ignore")
 
+        import_all()
+
     def exit(self, keep_log=True):
         super().exit(keep_log=keep_log)
         self.error(print_running_time())
@@ -567,7 +569,7 @@ class PythonSource(ProjectAgent):
                                      _async=not self.options.no_async)
 
     def on_session_start(self):
-        self.filename = self.createFilename("source.py")
+        self.filename = self.session().createFilename("source.py")
 
         # copy sys.modules
         old_sys_modules = sys.modules.copy()
@@ -1309,6 +1311,5 @@ def print_running_time():
 
 if __name__ == "__main__":
     time_start = time.time()
-    import_all()
     remove_logging_pycache()
     Fuzzer().main()
