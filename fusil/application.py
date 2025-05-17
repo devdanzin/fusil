@@ -73,7 +73,7 @@ class Application(ApplicationAgent):
         """
         Create command line options specific to a fuzzer
         """
-        return None
+        return []
 
     def createOptionParser(self):
         """
@@ -86,30 +86,31 @@ class Application(ApplicationAgent):
 
         options = self.createFuzzerOptions(parser)
         if options:
-            parser.add_option_group(options)
+            for option in options:
+                parser.add_option_group(option)
 
         fuzzer = OptionGroup(parser, "Fuzzer")
         fuzzer.add_option("--success",
             help="Maximum number of success sessions (default: %s)" % formatLimit(self.config.fusil_success),
             type="int", default=self.config.fusil_success)
-        fuzzer.add_option("--fast",
-            help="Run as fast as possible (opposite of --slow)",
-            action="store_true")
-        fuzzer.add_option("--slow",
-            help="Try to keep system load low: be nice with CPU (opposite of --fast)",
-            action="store_true")
         fuzzer.add_option("--sessions",
             help="Maximum number of session (default: %s)" % formatLimit(self.config.fusil_session),
             type="int", default=self.config.fusil_session)
+        fuzzer.add_option("--fast",
+            help="Run as fast as possible (opposite of --slow)",
+            action="store_true", default=False)
+        fuzzer.add_option("--slow",
+            help="Try to keep system load low: be nice with CPU (opposite of --fast)",
+            action="store_true", default=True)
         fuzzer.add_option("--keep-generated-files",
             help="Keep a session directory if it contains generated files",
-            action="store_true")
+            action="store_true", default=False)
         fuzzer.add_option("--keep-sessions",
             help="Do not remove session directories",
-            action="store_true")
+            action="store_true", default=False)
         fuzzer.add_option("--aggressivity",
             help="Initial aggressivity factor in percent, value in -100.0..100.0 (default: 0.0%%)",
-            type="float", default=None)
+            type="float", default=0.0)
         fuzzer.add_option("--unsafe",
             help="Don't change user or group for child processes",
             action="store_true", default=False)
@@ -121,19 +122,19 @@ class Application(ApplicationAgent):
         log = OptionGroup(parser, "Logging")
         log.add_option('-v', "--verbose",
             help="Enable verbose mode (set log level to WARNING)",
-            action="store_true")
+            action="store_true", default=False)
         log.add_option("--quiet",
             help="Be quiet (lowest log level), don't create log file",
-            action="store_true")
+            action="store_true", default=False)
         parser.add_option_group(log)
 
         debug = OptionGroup(parser, "Development")
         debug.add_option("--debug",
             help="Enable debug mode (set log level to DEBUG)",
-            action="store_true")
+            action="store_true", default=False)
         debug.add_option("--profiler",
             help="Enable Python profiler",
-            action="store_true")
+            action="store_true", default=False)
         parser.add_option_group(debug)
 
         return parser
@@ -155,6 +156,13 @@ class Application(ApplicationAgent):
             self.options.verbose = False
         if self.options.debug:
             self.options.verbose = True
+        if self.options.verbose:
+            print("\nReceived options:")
+            for option, value in vars(self.options).items():
+                if option == "version":
+                    continue
+                print(f"{option}: {value!r}")
+            print("\n")
         self.processOptions(parser, self.options, self.arguments)
 
     def processOptions(self, parser, options, arguments):

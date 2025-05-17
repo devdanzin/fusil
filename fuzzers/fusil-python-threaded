@@ -260,99 +260,102 @@ class Fuzzer(Application):
     NAME = "python"
 
     def createFuzzerOptions(self, parser):
-        options = OptionGroup(parser, "Python fuzzer")
-        options.add_option(
+        input_options = OptionGroup(parser, "Input")
+        input_options.add_option(
             "--modules",
             help="Tested Python module names separated by commas (default: test all modules)",
             type="str",
             default="*",
         )
-        options.add_option(
+        input_options.add_option(
             "--packages",
             help="Tested Python packages names separated by commas (default: test all packages)",
             type="str",
             default="*",
         )
-        options.add_option(
+        input_options.add_option(
             "--skip-test",
             help="Skip modules with 'test' in the name (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        input_options.add_option(
             "--blacklist",
             help='Module blacklist separated by commas (eg. "_lsprof,_json")',
             type="str",
+            default="",
         )
-        options.add_option(
+        input_options.add_option(
             "--test-private",
             help="Test private methods (default: skip privates methods)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        input_options.add_option(
+            "--only-c",
+            help="Only search for modules written in C (default: search all module)",
+            action="store_true",
+            default=False,
+        )
+        input_options.add_option(
+            "--no-site-packages",
+            help="Don't search modules in site-packages directory",
+            action="store_true",
+            default=False,
+        )
+        running_options = OptionGroup(parser, "Running")
+        running_options.add_option(
             "--timeout",
-            help="Timeout in seconds (default: %.1f)" % TIMEOUT,
+            help="Timeout in seconds (default: %d)" % TIMEOUT,
             type="float",
             default=TIMEOUT,
         )
-        options.add_option(
-            "--filenames",
-            help="Names separated by commas of readable files (default: %s)"
-            % FILENAMES,
-            type="str",
-            default=FILENAMES,
-        )
-        options.add_option(
+        running_options.add_option(
             "--python",
             help="Python executable program path (default: %s)" % PYTHON,
             type="str",
             default=PYTHON,
         )
-        options.add_option(
-            "--only-c",
-            help="Only search for modules written in C (default: search all module)",
-            action="store_true",
-        )
-        options.add_option(
-            "--no-site-packages",
-            help="Don't search modules in site-packages directory",
-            action="store_true",
-        )
-        options.add_option(
+        running_options.add_option(
             "--record-timeouts",
             help="Consider timeouts as errors (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        running_options.add_option(
             "--record-high-cpu",
             help="Consider high CPU usage an error (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        running_options.add_option(
             "--show-stdout",
-            help="Consider display STDOUT (default: False)",
+            help="Display STDOUT (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        fuzzing_options = OptionGroup(parser, "Fuzzing")
+        fuzzing_options.add_option(
             "--functions-number",
-            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_CALL,
+            help="Number of function calls to generate per module (default: %d)" % DEFAULT_NB_CALL,
             type="int",
             default=DEFAULT_NB_CALL,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--methods-number",
-            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_METHOD,
+            help="Number of method calls to create for each class or object (default: %d)" % DEFAULT_NB_METHOD,
             type="int",
             default=DEFAULT_NB_METHOD,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--classes-number",
-            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_CLASS,
+            help="Number of classes to fuzz per module (default: %d)" % DEFAULT_NB_CLASS,
             type="int",
             default=DEFAULT_NB_CLASS,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--objects-number",
-            help="Timeout in seconds (default: %.1f)" % DEFAULT_NB_OBJ,
+            help="Number of objects to fuzz per module (default: %d)" % DEFAULT_NB_OBJ,
             type="int",
             default=DEFAULT_NB_OBJ,
         )
@@ -361,32 +364,44 @@ class Fuzzer(Application):
         #     help="Don't mangle objects (default: False)",
         #     action="store_true",
         # )
-        options.add_option(
+        fuzzing_options.add_option(
             "--fuzz-exceptions",
             help="Include basic Exceptions in fuzzing (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--no-async",
             help="Don't run code asynchronously (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--no-threads",
             help="Don't run code in threads (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--no-numpy",
             help="Don't use Numpy (default: False)",
             action="store_true",
+            default=False,
         )
-        options.add_option(
+        fuzzing_options.add_option(
             "--no-tstrings",
             help="Don't use template strings (default: False)",
             action="store_true",
+            default=False,
         )
-        return options
+        fuzzing_options.add_option(
+            "--filenames",
+            help="Names separated by commas of readable files (default: %s)"
+            % FILENAMES,
+            type="str",
+            default=FILENAMES,
+        )
+        return input_options, running_options, fuzzing_options
 
     def setupProject(self):
         project = self.project
