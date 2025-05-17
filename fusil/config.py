@@ -1,3 +1,4 @@
+import pathlib
 from configparser import NoOptionError, NoSectionError, RawConfigParser
 from os import getenv
 from os.path import exists as path_exists
@@ -29,10 +30,24 @@ DEFAULTS = {
 class ConfigError(Exception):
     pass
 
+
+def createFilename(name=None, configdir=None):
+    if name is None:
+        name = "fusil.conf"
+    if configdir is None:
+        configdir = getenv("XDG_CONFIG_HOME")
+        if not configdir:
+            homedir = getenv("HOME")
+            if not homedir:
+                raise ConfigError("Unable to retrieve user home directory: empty HOME environment variable")
+            configdir = path_join(homedir, ".config")
+    return path_join(configdir, name)
+
+
 class FusilConfig:
     def __init__(self):
         self._parser = RawConfigParser()
-        self.filename = self.createFilename()
+        self.filename = createFilename()
         if path_exists(self.filename):
             self._parser.read([self.filename])
 
@@ -68,14 +83,22 @@ class FusilConfig:
 
         self._parser = None
 
-    def createFilename(self):
-        configdir = getenv("XDG_CONFIG_HOME")
-        if not configdir:
-            homedir = getenv("HOME")
-            if not homedir:
-                raise ConfigError("Unable to retrieve user home directory: empty HOME environment variable")
-            configdir = path_join(homedir, ".config")
-        return path_join(configdir, "fusil.conf")
+    def write_sample_config(self):
+        self._parser = RawConfigParser()
+        filename = createFilename()
+        config_file = pathlib.Path(filename)
+        if config_file.exists():
+            raise ConfigError("Configuration file already exists: %s" % filename)
+
+        with config_file.open("w") as file:
+            file.write("""# Fusil configuration file\n\n""")
+            for session_and_key, value in DEFAULTS.items():
+                section, key = session_and_key.split('_', maxsplit=1)
+                if section not in self._parser:
+                    self._parser.add_section(section)
+                self._parser.set(section, key, str(value))
+            self._parser.write(file)
+        self._parser = None
 
     def _gettype(self, func, type_name, section, key, default_value):
         try:

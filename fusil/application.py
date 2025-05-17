@@ -151,6 +151,13 @@ class Application(ApplicationAgent):
             print("")
             exit(0)
 
+        # Just want to write a config file?
+        if self.options.write_config:
+            default_config = FusilConfig()
+            print("Writing configuration file %s" % default_config.filename)
+            default_config.write_sample_config()
+            exit(0)
+
         if self.options.quiet:
             self.options.debug = False
             self.options.verbose = False

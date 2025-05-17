@@ -26,6 +26,7 @@ from ptrace.os_tools import RUNNING_PYTHON3
 import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
+from fusil.config import createFilename
 from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
@@ -401,6 +402,13 @@ class Fuzzer(Application):
             type="str",
             default=FILENAMES,
         )
+        config_options = OptionGroup(parser, "Configuration")
+        config_options.add_option(
+            "--write-config",
+            help="Write a sample configuration file if one doesn't exist (default: %s)" % createFilename(),
+            action="store_true",
+            default=False,
+        )
         return input_options, running_options, fuzzing_options
 
     def setupProject(self):
@@ -559,7 +567,7 @@ class PythonSource(ProjectAgent):
                                      _async=not self.options.no_async)
 
     def on_session_start(self):
-        self.filename = self.session().createFilename("source.py")
+        self.filename = self.createFilename("source.py")
 
         # copy sys.modules
         old_sys_modules = sys.modules.copy()
