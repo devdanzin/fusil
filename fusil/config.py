@@ -1,5 +1,8 @@
+import configparser
+import optparse
 import pathlib
 from configparser import NoOptionError, NoSectionError, RawConfigParser
+from io import StringIO
 from os import getenv
 from os.path import exists as path_exists
 from os.path import join as path_join
@@ -45,8 +48,8 @@ def createFilename(name=None, configdir=None):
 
 
 class FusilConfig:
-    def __init__(self):
-        self._parser = RawConfigParser()
+    def __init__(self, options=None):
+        self._parser = RawConfigParser(allow_unnamed_section=True)
         self.filename = createFilename()
         if path_exists(self.filename):
             self._parser.read([self.filename])
@@ -83,22 +86,32 @@ class FusilConfig:
 
         self._parser = None
 
-    def write_sample_config(self):
-        self._parser = RawConfigParser()
+        # Options from command line
+        if options:
+            for key, value in options.__dict__.items():
+                setattr(self, key, value)
+
+    def write_sample_config(self, write_file=True):
+        output = StringIO()
+        self._parser = RawConfigParser(allow_unnamed_section=True)
         filename = createFilename()
         config_file = pathlib.Path(filename)
-        if config_file.exists():
+        if write_file and config_file.exists():
             raise ConfigError("Configuration file already exists: %s" % filename)
 
-        with config_file.open("w") as file:
-            file.write("""# Fusil configuration file\n\n""")
-            for session_and_key, value in DEFAULTS.items():
-                section, key = session_and_key.split('_', maxsplit=1)
-                if section not in self._parser:
-                    self._parser.add_section(section)
-                self._parser.set(section, key, str(value))
-            self._parser.write(file)
+        output.write("""# Fusil configuration file\n\n""")
+        for session_and_key, value in DEFAULTS.items():
+            section, key = session_and_key.split('_', maxsplit=1)
+            if section not in self._parser:
+                self._parser.add_section(section)
+            self._parser.set(section, key, str(value))
+        self._parser.write(output)
         self._parser = None
+
+        if write_file:
+            with config_file.open('w') as file:
+                file.write(output.getvalue())
+        return output
 
     def _gettype(self, func, type_name, section, key, default_value):
         try:
@@ -124,3 +137,35 @@ class FusilConfig:
     def getfloat(self, section, key, default_value):
         return self._gettype(self._parser.getfloat, "a float", section, key, default_value)
 
+
+def optparse_to_configparser(parser, output=None):
+    if output is None:
+        output = StringIO()
+    config_writer = configparser.ConfigParser(allow_unnamed_section=True)
+    option: optparse.Option
+    for option in parser.option_list:
+        if option.dest is not None and option.dest != "version":
+            if not config_writer.has_section(configparser.UNNAMED_SECTION):
+                config_writer.add_section(configparser.UNNAMED_SECTION)
+            config_writer.set(configparser.UNNAMED_SECTION, option.dest, f"{option.default}  # {option.help}")
+    for section in parser.option_groups:
+        for option in section.option_list:
+            if not config_writer.has_section(section.title.lower()):
+                config_writer.add_section(section.title.lower())
+            config_writer.set(section.title.lower(), option.dest, f"{option.default}  # {option.help}")
+    config_writer.write(output)
+    if isinstance(output, StringIO):
+        return output.getvalue()
+    output.close()
+    output = open(output.name)
+    return output.read()
+
+def configparser_to_options(parser):
+    class Options:
+        pass
+
+    options = Options()
+    for section in parser.sections():
+        for key in parser[section]:
+            setattr(options, key, parser[section][key])
+    return options

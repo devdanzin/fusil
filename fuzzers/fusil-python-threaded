@@ -16,14 +16,16 @@ import resource
 import sys
 import time
 import warnings
-from optparse import OptionGroup
+import optparse
 from os.path import exists as path_exists, isabs, sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
 
+import fusil.config
 import fusil.python.tricky_weird
+from fusil.config import optparse_to_configparser
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
 from fusil.config import createFilename
@@ -260,8 +262,8 @@ class ListAllModules:
 class Fuzzer(Application):
     NAME = "python"
 
-    def createFuzzerOptions(self, parser):
-        input_options = OptionGroup(parser, "Input")
+    def createFuzzerOptions(self, parser, config_output):
+        input_options = optparse.OptionGroup(parser, "Input")
         input_options.add_option(
             "--modules",
             help="Tested Python module names separated by commas (default: test all modules)",
@@ -304,7 +306,7 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
-        running_options = OptionGroup(parser, "Running")
+        running_options = optparse.OptionGroup(parser, "Running")
         running_options.add_option(
             "--timeout",
             help="Timeout in seconds (default: %d)" % TIMEOUT,
@@ -335,7 +337,7 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
-        fuzzing_options = OptionGroup(parser, "Fuzzing")
+        fuzzing_options = optparse.OptionGroup(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
             help="Number of function calls to generate per module (default: %d)" % DEFAULT_NB_CALL,
@@ -402,14 +404,27 @@ class Fuzzer(Application):
             type="str",
             default=FILENAMES,
         )
-        config_options = OptionGroup(parser, "Configuration")
+        config_options = optparse.OptionGroup(parser, "Configuration")
         config_options.add_option(
             "--write-config",
-            help="Write a sample configuration file if one doesn't exist (default: %s)" % createFilename(),
+            help="Write a sample configuration file if one doesn't exist (default: False)",
             action="store_true",
             default=False,
         )
-        return input_options, running_options, fuzzing_options
+        config_options.add_option(
+            "--config-file",
+            help="Name of the configuration file to be read or written (default: %s)" % createFilename(),
+            action="store_true",
+            default=False,
+        )
+
+        options = input_options, running_options, fuzzing_options, config_options
+        for option in options:
+            parser.add_option_group(option)
+
+        if config_output:
+            optparse_to_configparser(parser, config_output)
+        return config_output
 
     def setupProject(self):
         project = self.project
