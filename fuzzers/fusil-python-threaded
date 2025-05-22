@@ -414,8 +414,8 @@ class Fuzzer(Application):
         config_options.add_option(
             "--config-file",
             help="Name of the configuration file to be read or written (default: %s)" % createFilename(),
-            action="store_true",
-            default=False,
+            type="str",
+            default=createFilename(),
         )
         config_options.add_option(
             "--use-config",
@@ -428,8 +428,6 @@ class Fuzzer(Application):
         for option in options:
             parser.add_option_group(option)
 
-        if config_output:
-            optparse_to_configparser(parser, config_output)
         return config_output
 
     def setupProject(self):

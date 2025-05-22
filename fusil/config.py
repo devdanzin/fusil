@@ -123,7 +123,7 @@ class FusilConfig:
         if write_file and config_file.exists():
             raise ConfigError("Configuration file already exists: %s" % filename)
 
-        output.write("""# Fusil configuration file\n\n""")
+        output.write("""# Fusil default configuration file\n\n""")
         for session_and_key, value in DEFAULTS.items():
             section, key = session_and_key.split('_', maxsplit=1)
             if section not in self._parser:
@@ -162,23 +162,42 @@ class FusilConfig:
         return self._gettype(self._parser.getfloat, "a float", section, key, default_value)
 
 
-def optparse_to_configparser(parser, output=None):
+def optparse_to_configparser(parser, output=None, defaults=False, options=None):
+    if defaults and options:
+        raise ConfigError("Cannot use both defaults and options")
+    elif not (defaults or options is not None):
+        raise ConfigError("Must use either defaults or options")
+
     if output is None:
-        output = StringIO()
-    config_writer = configparser.ConfigParser(allow_unnamed_section=True)
+        output = StringIO("# Fusil configuration file\n\n")
+    config_writer = ConfigParserWithHelp(allow_unnamed_section=True)
 
     option: optparse.Option
     for option in parser.option_list:
         if option.dest is not None and option.dest != "version":
             if not config_writer.has_section(configparser.UNNAMED_SECTION):
                 config_writer.add_section(configparser.UNNAMED_SECTION)
-            config_writer.set(configparser.UNNAMED_SECTION, option.dest, f"{option.default}  # {option.help}")
+            if defaults:
+                config_writer.set(
+                    configparser.UNNAMED_SECTION, option.dest, f"{option.default}", option.help
+                )
+            else:
+                config_writer.set(
+                configparser.UNNAMED_SECTION, option.dest, f"{getattr(options, option.dest)}", option.help
+                )
 
     for section in parser.option_groups:
         for option in section.option_list:
             if not config_writer.has_section(section.title.lower()):
                 config_writer.add_section(section.title.lower())
-            config_writer.set(section.title.lower(), option.dest, f"{option.default}  # {option.help}")
+            if defaults:
+                config_writer.set(
+                    section.title.lower(), option.dest, f"{option.default}", option.help
+                )
+            else:
+                config_writer.set(
+                    section.title.lower(), option.dest, f"{getattr(options, option.dest)}", option.help
+                )
 
     config_writer.write(output)
     if isinstance(output, StringIO):
@@ -229,11 +248,38 @@ class OptionParserWithSections(OptionParser):
         options, args = super().parse_args(args, values)
         options.option_sections = self.option_sections
         options.option_groups = {}
-        import pprint
-        pprint.pprint(self.option_groups)
         for section in self.option_groups:
             options.option_groups[section.title.lower()] = {}
             for option in section.option_list:
                 options.option_groups[section.title.lower()][option.dest] = getattr(options, option.dest)
 
         return options, args
+
+
+class ConfigParserWithHelp(configparser.ConfigParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.help = {}
+
+    def set(self, section, option, value=None, help=None):
+        super().set(section, option, value)
+        if help is not None:
+            self.help[section][option] = help
+
+    def add_section(self, section):
+        super().add_section(section)
+        self.help[section] = {}
+
+    def _write_section(self, fp, section_name, section_items, delimiter):
+        fp.write("[%s]\n" % section_name)
+        for key, value in section_items:
+            if key in self.help[section_name]:
+                fp.write("# %s\n" % self.help[section_name][key])
+
+            value = self._interpolation.before_write(self, section_name, key, value)
+            if value is not None or not self._allow_no_value:
+                value = delimiter + str(value).replace('\n', '\n\t')
+            else:
+                value = ""
+            fp.write("%s = %s\n" % (key, value))
+        fp.write("\n")

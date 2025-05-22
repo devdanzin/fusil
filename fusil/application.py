@@ -88,7 +88,8 @@ class Application(ApplicationAgent):
             help="Display Fusil version (%s) and exit" % VERSION,
             action="store_true")
 
-        config_options = self.createFuzzerOptions(parser, output)
+        self.createFuzzerOptions(parser, output)
+        config_options = StringIO()
         fuzzer = OptionGroupWithSections(parser, "Fuzzer")
         fuzzer.add_option("--success",
             help="Maximum number of success sessions (default: %s)" % formatLimit(self.config.fusil_success),
@@ -138,8 +139,8 @@ class Application(ApplicationAgent):
         parser.add_option_group(debug)
 
         if output:
-            optparse_to_configparser(parser, config_options)
-        print(config_options.getvalue())
+            optparse_to_configparser(parser, config_options, defaults=True)
+            output.write(config_options.getvalue())
 
         return parser
 
@@ -169,10 +170,6 @@ class Application(ApplicationAgent):
             print("")
             exit(0)
 
-        # Just want to write a config file?
-        if self.options.write_config:
-            exit(0)
-
         if self.options.quiet:
             self.options.debug = False
             self.options.verbose = False
@@ -180,12 +177,16 @@ class Application(ApplicationAgent):
             self.options.verbose = True
         if self.options.verbose:
             print("\nReceived options:")
-            for option, value in vars(self.options).items():
-                if option == "version":
-                    continue
-                print(f"{option}: {value!r}")
+            default_configs = self.options.write_sample_config(False)
+            received_options = optparse_to_configparser(parser, default_configs, defaults=False, options=self.options)
             print("\n")
+            print(received_options, "\n\n")
         self.processOptions(parser, self.options, self.arguments)
+
+        # Just want to write a config file?
+        if self.options.write_config:
+            exit(0)
+
 
     def processOptions(self, parser, options, arguments):
         # Check the number of arguments
