@@ -50,7 +50,7 @@ def createFilename(name=None, configdir=None):
 
 class FusilConfig:
     def __init__(self, options=None, filename=None, configdir=None, read=False, write=False):
-        self._parser = RawConfigParser(allow_unnamed_section=True)
+        self._parser = ConfigParserWithHelp(allow_unnamed_section=True)
         self.filename = createFilename(filename, configdir)
         if read and path_exists(self.filename):
             self._parser.read([self.filename])
@@ -85,27 +85,24 @@ class FusilConfig:
         self.debugger_use_debugger = self.getbool('debugger', 'debugger_use_debugger', DEFAULTS['debugger_trace_forks'])
         self.debugger_trace_forks = self.getbool('debugger', 'trace_forks', DEFAULTS['debugger_trace_forks'])
 
-
-        for session_and_key, value in DEFAULTS.items():
-            section, key = session_and_key.split('_', maxsplit=1)
-            if section not in self._parser:
-                self._parser.add_section(section)
-            self._parser.set(section, key, str(value))
-
         # Options from command line
         options: optparse.Values
 
         if options:
             for section, option_dict in options.option_groups.items():
-                for name, value in option_dict.items():
+                for name, (value, help) in option_dict.items():
                     if not self._parser.has_section(section):
                         self._parser.add_section(section)
+                    elif self._parser.has_option(section, name):
+                        value = get_and_convert(self._parser, section, name)
+                        print(f"{section}: {name} = {value} {type(value)} (from config file)")
+
                     self._parser.set(
-                        section, name, value
+                        section, name, str(value), help
                     )
                     setattr(self, name, value)
-        if hasattr(options, "version"):
-            self.version = options.version
+
+        self.version = getattr(options, "version", False)
 
         if write:
             print("Writing configuration file %s" % self.filename)
@@ -251,7 +248,7 @@ class OptionParserWithSections(OptionParser):
         for section in self.option_groups:
             options.option_groups[section.title.lower()] = {}
             for option in section.option_list:
-                options.option_groups[section.title.lower()][option.dest] = getattr(options, option.dest)
+                options.option_groups[section.title.lower()][option.dest] = (getattr(options, option.dest), option.help)
 
         return options, args
 
@@ -264,6 +261,16 @@ class ConfigParserWithHelp(configparser.ConfigParser):
     def set(self, section, option, value=None, help=None):
         super().set(section, option, value)
         if help is not None:
+            if not self.has_section(section):
+                self.add_section(section)
+            elif section not in self.help:
+                self.help[section] = {}
+            if option in self.help[section]:
+                raise ConfigError(
+                    "Option %s of section %s already has a help message: %s" % (
+                        option, section, self.help[section][option]
+                    )
+                )
             self.help[section][option] = help
 
     def add_section(self, section):
@@ -271,15 +278,39 @@ class ConfigParserWithHelp(configparser.ConfigParser):
         self.help[section] = {}
 
     def _write_section(self, fp, section_name, section_items, delimiter):
-        fp.write("[%s]\n" % section_name)
+        fp.write("\n[%s]\n" % section_name)
         for key, value in section_items:
             if key in self.help[section_name]:
-                fp.write("# %s\n" % self.help[section_name][key])
+                fp.write("\n# %s\n" % self.help[section_name][key])
 
             value = self._interpolation.before_write(self, section_name, key, value)
             if value is not None or not self._allow_no_value:
                 value = delimiter + str(value).replace('\n', '\n\t')
             else:
                 value = ""
-            fp.write("%s = %s\n" % (key, value))
+            fp.write("%s%s\n" % (key, value))
+        fp.write("#" + "-" * 40 + "\n")
         fp.write("\n")
+
+BOOLEANS = {"True": True, "False": False, "true": True, "false": False, "yes": True, "no": False, "y": True, "n": False}
+
+def get_and_convert(parser, section, key):
+    value: str = parser.get(section, key)
+
+    if value in BOOLEANS:
+        return BOOLEANS[value]
+    elif value == "None":
+        return None
+
+    try:
+        return int(value, 0)
+    except ValueError:
+        pass
+
+    for num_type in (int, float, complex):
+        try:
+            return num_type(value)
+        except ValueError:
+            pass
+
+    return value
