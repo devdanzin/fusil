@@ -1,5 +1,5 @@
+import pathlib
 from io import StringIO
-from optparse import OptionGroup, OptionParser
 from sys import exit, stdout
 
 from fusil.unsafe import SUPPORT_UID
@@ -11,13 +11,15 @@ from ptrace.error import PTRACE_ERRORS, writeError
 from ptrace.os_tools import RUNNING_PYTHON3
 
 from fusil.application_logger import ApplicationLogger
-from fusil.config import ConfigError, FusilConfig, optparse_to_configparser
+from fusil.config import (
+    ConfigError, FusilConfig, OptionGroupWithSections, OptionParserWithSections, optparse_to_configparser
+)
 from fusil.file_tools import relativePath
 from fusil.mas.agent_list import AgentList
 from fusil.mas.application_agent import ApplicationAgent
 from fusil.mas.mta import MTA
 from fusil.mas.univers import Univers
-from fusil.process.tools import beNice, limitMemory, runCommand
+from fusil.process.tools import beNice, runCommand
 from fusil.project import Project
 from fusil.version import LICENSE, VERSION, WEBSITE
 from fusil.xhost import xhostCommand
@@ -36,6 +38,7 @@ def formatLimit(limit):
         return str(limit)
     else:
         return "unlimited"
+
 
 class Application(ApplicationAgent):
     """
@@ -80,13 +83,13 @@ class Application(ApplicationAgent):
         """
         Create all command line options including Fusil options.
         """
-        parser = OptionParser(usage=self.USAGE)
+        parser = OptionParserWithSections(usage=self.USAGE)
         parser.add_option("--version",
             help="Display Fusil version (%s) and exit" % VERSION,
             action="store_true")
 
         config_options = self.createFuzzerOptions(parser, output)
-        fuzzer = OptionGroup(parser, "Fuzzer")
+        fuzzer = OptionGroupWithSections(parser, "Fuzzer")
         fuzzer.add_option("--success",
             help="Maximum number of success sessions (default: %s)" % formatLimit(self.config.fusil_success),
             type="int", default=self.config.fusil_success)
@@ -116,7 +119,7 @@ class Application(ApplicationAgent):
             action="store_true", default=False)
         parser.add_option_group(fuzzer)
 
-        log = OptionGroup(parser, "Logging")
+        log = OptionGroupWithSections(parser, "Logging")
         log.add_option('-v', "--verbose",
             help="Enable verbose mode (set log level to WARNING)",
             action="store_true", default=False)
@@ -125,7 +128,7 @@ class Application(ApplicationAgent):
             action="store_true", default=False)
         parser.add_option_group(log)
 
-        debug = OptionGroup(parser, "Development")
+        debug = OptionGroupWithSections(parser, "Development")
         debug.add_option("--debug",
             help="Enable debug mode (set log level to DEBUG)",
             action="store_true", default=False)
@@ -141,13 +144,22 @@ class Application(ApplicationAgent):
         return parser
 
     def parseOptions(self, with_options=False):
-        default_config = FusilConfig()
+        default_config = FusilConfig(read=False)
         config_output = default_config.write_sample_config(write_file=False)
         parser = self.createOptionParser(config_output)
 
         self.options, self.arguments = parser.parse_args()
+        filename = configdir = None
+        if self.options.use_config:
+            file_path = pathlib.Path(self.options.config_file)
+            filename = file_path.name
+            configdir = file_path.parent
+
         if with_options:
-            self.options = FusilConfig(self.options)
+            self.options = FusilConfig(
+                self.options, filename=filename, configdir=configdir, read=self.options.use_config,
+                write=self.options.write_config
+            )
 
         # Just want to know the version?
         if self.options.version:
@@ -159,8 +171,6 @@ class Application(ApplicationAgent):
 
         # Just want to write a config file?
         if self.options.write_config:
-            print("Writing configuration file %s" % default_config.filename)
-            default_config.write_sample_config()
             exit(0)
 
         if self.options.quiet:

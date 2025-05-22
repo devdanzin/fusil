@@ -3,6 +3,7 @@ import optparse
 import pathlib
 from configparser import NoOptionError, NoSectionError, RawConfigParser
 from io import StringIO
+from optparse import OptionGroup, OptionParser
 from os import getenv
 from os.path import exists as path_exists
 from os.path import join as path_join
@@ -48,10 +49,10 @@ def createFilename(name=None, configdir=None):
 
 
 class FusilConfig:
-    def __init__(self, options=None):
+    def __init__(self, options=None, filename=None, configdir=None, read=False, write=False):
         self._parser = RawConfigParser(allow_unnamed_section=True)
-        self.filename = createFilename()
-        if path_exists(self.filename):
+        self.filename = createFilename(filename, configdir)
+        if read and path_exists(self.filename):
             self._parser.read([self.filename])
 
         # Fusil application options
@@ -84,12 +85,35 @@ class FusilConfig:
         self.debugger_use_debugger = self.getbool('debugger', 'debugger_use_debugger', DEFAULTS['debugger_trace_forks'])
         self.debugger_trace_forks = self.getbool('debugger', 'trace_forks', DEFAULTS['debugger_trace_forks'])
 
-        self._parser = None
+
+        for session_and_key, value in DEFAULTS.items():
+            section, key = session_and_key.split('_', maxsplit=1)
+            if section not in self._parser:
+                self._parser.add_section(section)
+            self._parser.set(section, key, str(value))
 
         # Options from command line
+        options: optparse.Values
+
         if options:
-            for key, value in options.__dict__.items():
-                setattr(self, key, value)
+            for section, option_dict in options.option_groups.items():
+                for name, value in option_dict.items():
+                    if not self._parser.has_section(section):
+                        self._parser.add_section(section)
+                    self._parser.set(
+                        section, name, value
+                    )
+                    setattr(self, name, value)
+        if hasattr(options, "version"):
+            self.version = options.version
+
+        if write:
+            print("Writing configuration file %s" % self.filename)
+            with pathlib.Path(self.filename).open('w') as config_file:
+                config_file.write("""# Fusil configuration file\n\n""")
+                self._parser.write(config_file)
+                config_file.close()
+                self._parser = None
 
     def write_sample_config(self, write_file=True):
         output = StringIO()
@@ -142,17 +166,20 @@ def optparse_to_configparser(parser, output=None):
     if output is None:
         output = StringIO()
     config_writer = configparser.ConfigParser(allow_unnamed_section=True)
+
     option: optparse.Option
     for option in parser.option_list:
         if option.dest is not None and option.dest != "version":
             if not config_writer.has_section(configparser.UNNAMED_SECTION):
                 config_writer.add_section(configparser.UNNAMED_SECTION)
             config_writer.set(configparser.UNNAMED_SECTION, option.dest, f"{option.default}  # {option.help}")
+
     for section in parser.option_groups:
         for option in section.option_list:
             if not config_writer.has_section(section.title.lower()):
                 config_writer.add_section(section.title.lower())
             config_writer.set(section.title.lower(), option.dest, f"{option.default}  # {option.help}")
+
     config_writer.write(output)
     if isinstance(output, StringIO):
         return output.getvalue()
@@ -161,11 +188,52 @@ def optparse_to_configparser(parser, output=None):
     return output.read()
 
 def configparser_to_options(parser):
-    class Options:
-        pass
+    options = optparse.Values()
 
-    options = Options()
     for section in parser.sections():
         for key in parser[section]:
             setattr(options, key, parser[section][key])
     return options
+
+
+class OptionGroupWithSections(OptionGroup):
+    """
+    OptionGroup class with sections:
+    - add_option(*args, section=None, **kwargs)
+    """
+    def __init__(self, parser, title, description=None):
+        super().__init__(parser, title, description)
+        self.option_sections = {}
+
+    def add_option(self, *args, **kwargs):
+        super().add_option(*args, **kwargs)
+        section = self.title.lower()
+        if "dest" in kwargs:
+            self.option_sections[kwargs["dest"]] = section
+        elif args[0].startswith("--"):
+            self.option_sections[args[0][2:].replace("-", "_")] = section
+        else:
+            self.option_sections[args[1][2:].replace("-", "_")] = section
+
+
+class OptionParserWithSections(OptionParser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.option_sections = {}
+
+    def add_option_group(self, group, *args, **kwargs):
+        super().add_option_group(group, *args, **kwargs)
+        self.option_sections.update(group.option_sections)
+
+    def parse_args(self, args=None, values=None):
+        options, args = super().parse_args(args, values)
+        options.option_sections = self.option_sections
+        options.option_groups = {}
+        import pprint
+        pprint.pprint(self.option_groups)
+        for section in self.option_groups:
+            options.option_groups[section.title.lower()] = {}
+            for option in section.option_list:
+                options.option_groups[section.title.lower()][option.dest] = getattr(options, option.dest)
+
+        return options, args
