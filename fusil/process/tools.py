@@ -1,9 +1,8 @@
 import re
 import sys
 from os import X_OK, access, devnull, getcwd, getenv, pathsep
-from os.path import dirname, isabs
+from os.path import dirname, isabs, normpath
 from os.path import join as path_join
-from os.path import normpath
 from subprocess import STDOUT, Popen
 
 # from ptrace.signames import signalName

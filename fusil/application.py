@@ -5,7 +5,7 @@ from sys import exit, stdout
 from fusil.unsafe import SUPPORT_UID
 
 if SUPPORT_UID:
-    from os import getuid, getgid
+    from os import getgid, getuid
 
 from ptrace.error import PTRACE_ERRORS, writeError
 

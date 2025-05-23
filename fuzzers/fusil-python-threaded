@@ -16,7 +16,9 @@ import resource
 import sys
 import time
 import warnings
-from os.path import exists as path_exists, isabs, sep as path_sep
+from os.path import exists as path_exists
+from os.path import isabs
+from os.path import sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
@@ -30,7 +32,7 @@ from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
 from fusil.project_agent import ProjectAgent
-from fusil.python.arg_numbers import get_arg_number, class_arg_number
+from fusil.python.arg_numbers import class_arg_number, get_arg_number
 from fusil.python.blacklists import (
     BLACKLIST,
     METHOD_BLACKLIST,

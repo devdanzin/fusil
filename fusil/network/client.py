@@ -1,7 +1,6 @@
 from errno import EAGAIN
-from socket import SHUT_RDWR
+from socket import SHUT_RDWR, socket
 from socket import error as socket_error
-from socket import socket
 from socket import timeout as socket_timeout
 from time import time
 

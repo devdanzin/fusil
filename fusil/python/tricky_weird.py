@@ -1,7 +1,6 @@
-from collections import deque, Counter, OrderedDict
-from queue import Queue
-
 from _decimal import Decimal
+from collections import Counter, OrderedDict, deque
+from queue import Queue
 
 sequences = [Queue, deque, frozenset, list, set, str, tuple]
 bytes_ = [bytearray, bytes]

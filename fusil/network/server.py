@@ -1,7 +1,6 @@
 from select import select
-from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET
+from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, socket
 from socket import error as socket_error
-from socket import socket
 
 from ptrace.error import writeError
 

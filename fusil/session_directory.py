@@ -8,7 +8,7 @@ from fusil.tools import makeUnicode
 from fusil.unsafe import SUPPORT_UID
 
 if SUPPORT_UID:
-    from os import getgid, chown
+    from os import chown, getgid
 
 import grp
 import re

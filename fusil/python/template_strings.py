@@ -2,8 +2,8 @@ import sys
 from ast import literal_eval
 from string.templatelib import Interpolation, Template
 
-from fusil.python.values import SURROGATES, INTERESTING
 from fusil.python.tricky_weird import weird_instance_names, weird_names
+from fusil.python.values import INTERESTING, SURROGATES
 
 sys.set_int_max_str_digits(4305)
 
