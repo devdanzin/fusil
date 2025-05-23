@@ -1,8 +1,5 @@
 import re
 
-from fusil.six import text_type
-from fusil.six.moves import zip as izip
-
 
 def minmax(min_value, value, max_value):
     """
@@ -25,7 +22,7 @@ def listDiff(old, new):
     >>> listDiff([4, 0, 3], [10, 0, 50])
     [6, 0, 47]
     """
-    return [item[1] - item[0] for item in izip(old, new)]
+    return [item[1] - item[0] for item in zip(old, new)]
 
 
 def timedeltaSeconds(delta):
@@ -43,13 +40,13 @@ def timedeltaSeconds(delta):
 
 
 def makeUnicode(text):
-    if isinstance(text, text_type):
+    if isinstance(text, str):
         return text
     try:
-        return text_type(text, "utf8")
+        return str(text, "utf8")
     except UnicodeError:
         pass
-    return text_type(text, "ISO-8859-1")
+    return str(text, "ISO-8859-1")
 
 
 def makeFilename(text):
@@ -57,7 +54,7 @@ def makeFilename(text):
     >>> makeFilename('Fatal error!')
     'fatal_error'
     """
-    if isinstance(text, text_type):
+    if isinstance(text, str):
         text = text.lower()
         text = re.sub("[^a-z_-]", "_", text)
         text = re.sub("_{2,}", "_", text)

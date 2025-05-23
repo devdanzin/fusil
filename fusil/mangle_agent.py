@@ -6,14 +6,12 @@ from random import choice
 from stat import ST_SIZE
 
 from fusil.project_agent import ProjectAgent
-from fusil.six import string_types
-from fusil.six.moves import range as xrange
 
 
 class MangleAgent(ProjectAgent):
     def __init__(self, project, sources, nb_file=1):
         ProjectAgent.__init__(self, project, "mangle")
-        if isinstance(sources, string_types):
+        if isinstance(sources, str):
             self.source_filenames = (sources,)
         else:
             # Remove duplicates
@@ -63,7 +61,7 @@ class MangleAgent(ProjectAgent):
 
     def mangle(self):
         filenames = []
-        for file_index in xrange(self.nb_file):
+        for file_index in range(self.nb_file):
             filename = choice(self.source_filenames)
             data = self.readData(filename, file_index)
             data = self.mangleData(data, file_index)

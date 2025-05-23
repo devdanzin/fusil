@@ -4,7 +4,6 @@ from sys import executable, getfilesystemencoding
 from sys import path as sys_path
 
 from fusil.python_tools import RUNNING_PYTHON3
-from fusil.six import binary_type, iteritems, itervalues, text_type
 from fusil.write_code import WriteCode
 from fusil.xhost import xhostCommand
 
@@ -46,7 +45,7 @@ def formatPath(value, cwd, cwd_bytes):
     cwd + u'b'
     """
     result = []
-    if isinstance(value, binary_type):
+    if isinstance(value, bytes):
         pattern = cwd_bytes
         replace = "cwd_bytes"
     else:
@@ -82,7 +81,7 @@ class WriteReplayScript(WriteCode):
         if args:
             line += " % "
             if len(args) == 1:
-                line += text_type(args[0])
+                line += str(args[0])
             else:
                 line += "(%s)" % ", ".join(args)
         line += ")"
@@ -375,8 +374,8 @@ class WriteReplayScript(WriteCode):
         cwd_bytes = cwd.encode(fs_charset)
 
         need_cwd_bytes = False
-        for value in itertools.chain(arguments, itervalues(env)):
-            if not isinstance(value, binary_type):
+        for value in itertools.chain(arguments, env.items()):
+            if not isinstance(value, bytes):
                 continue
             if cwd_bytes not in value:
                 continue
@@ -398,7 +397,7 @@ class WriteReplayScript(WriteCode):
 
         if env:
             self.write(0, "env = {")
-            for name, value in iteritems(env):
+            for name, value in env.items():
                 value = formatPath(value, cwd, cwd_bytes)
                 self.write(1, '"%s": %s,' % (name, value))
             self.write(0, "}")

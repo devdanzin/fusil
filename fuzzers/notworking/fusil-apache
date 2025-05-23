@@ -15,7 +15,6 @@ from fusil.bytes_generator import (
     LOWER_LETTERS, LETTERS, ASCII8, PRINTABLE_ASCII,
     DECIMAL_DIGITS, PUNCTUATION)
 from fusil.unicode_generator import UnixPathGenerator
-from fusil.six.moves import range as xrange
 from random import choice, randint
 import re
 
@@ -175,7 +174,7 @@ class HttpClient(TcpClient):
 
         # Headers
         nb_header = randint(self.min_nb_header, self.max_nb_header)
-        for index in xrange(nb_header):
+        for index in range(nb_header):
             generator = choice(self.key_generators)
             raw = generator.createValue()
             raw += ": "
@@ -309,7 +308,7 @@ class UriGenerator(BytesGenerator):
         # Host
         parts = randint(self.host_min_part, self.host_max_part)
         uri += '.'.join( self.host_part_generator.createValue()
-            for index in xrange(parts) )
+            for index in range(parts) )
         uri += '.' + self.domain_generator.createValue()
 
         # Port

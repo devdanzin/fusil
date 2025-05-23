@@ -3,7 +3,6 @@ from random import choice, randint
 
 from fusil.mangle_agent import MangleAgent
 from fusil.mangle_op import MAX_INCR, SPECIAL_VALUES
-from fusil.six.moves import range as xrange
 from fusil.tools import minmax
 
 
@@ -70,7 +69,7 @@ class Mangle:
     def mangle_insert_bytes(self):
         offset = self.offset()
         count = randint(1, self.config.max_insert_bytes)
-        for index in xrange(count):
+        for index in range(count):
             self.data.insert(offset, self.generateByte())
 
     def mangle_delete_bytes(self):
@@ -98,7 +97,7 @@ class Mangle:
         if self.config.max_op <= 0:
             return 0
         count = randint(self.config.min_op, self.config.max_op)
-        for index in xrange(count):
+        for index in range(count):
             operation = choice(operations)
             operation()
         return count

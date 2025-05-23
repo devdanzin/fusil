@@ -8,8 +8,6 @@ from os.path import join as path_join
 from shutil import rmtree
 from sys import getfilesystemencoding
 
-from fusil.six import text_type
-
 
 class Directory:
     def __init__(self, directory):
@@ -50,7 +48,7 @@ class Directory:
 
     def rmtree(self):
         filename = self.directory
-        if isinstance(filename, text_type):
+        if isinstance(filename, str):
             # Convert to byte strings because rmtree() doesn't support mixing
             # byte and unicode strings
             charset = getfilesystemencoding()

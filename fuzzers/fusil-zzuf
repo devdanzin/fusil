@@ -14,7 +14,6 @@ from fusil.process.env import EnvVarIntegerRange
 from fusil.process.watch import WatchProcess, DEFAULT_TIMEOUT_SCORE
 from fusil.zzuf import ZzufProcess, DEFAULT_RATIO
 from optparse import OptionGroup
-from fusil.six.moves import map as imap
 import re
 
 class Fuzzer(Application):
@@ -95,7 +94,7 @@ class Fuzzer(Application):
             include = self.options.include
         elif self.options.cmdline:
             filenames = self.getFilenames()
-            filenames = imap(re.escape, filenames)
+            filenames = map(re.escape, filenames)
             include = '(%s)' % '|'.join(filenames)
         exclude = self.options.exclude
 

@@ -11,7 +11,6 @@ from fusil.c_tools import FuzzyFunctionC, CodeC
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
-from fusil.six.moves import range as xrange
 from random import choice, randint
 from fusil.project_agent import ProjectAgent
 from fusil.linux.syslog import Syslog
@@ -96,7 +95,7 @@ class GenerateSyscall(ProjectAgent):
         ProjectAgent.__init__(self, project, "syscall")
 
         # Syscall parameters
-        self.syscalls = xrange(0, 255+1)
+        self.syscalls = range(0, 255+1)
         self.fixed_arguments = {}
 
     def on_session_start(self):
@@ -127,7 +126,7 @@ class GenerateSyscall(ProjectAgent):
         self.send('session_rename', syscall_name)
 
         arguments = [syscall]
-        for index in xrange(1, 8+1):
+        for index in range(1, 8+1):
             value = main.getarg(syscallnr, index)
             arguments.append("/* argument %s */ %s" % (index, value))
         main.callFunction("syscall", arguments, "ret")

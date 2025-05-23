@@ -29,16 +29,11 @@ from fusil.project_agent import ProjectAgent
 from fusil.process.create import CreateProcess
 from fusil.write_code import WriteCode
 from inspect import ismethoddescriptor, isclass
-from ptrace.os_tools import RUNNING_PYTHON3
-from fusil.six import text_type, string_types
-from fusil.six.moves import range as xrange
 from sys import executable, version as PYTHON_VERSION
 import pkgutil
 import re
 import sys
 import warnings
-if not RUNNING_PYTHON3:
-    from sys import getfilesystemencoding
 
 # Constants
 TIMEOUT = 30.0
@@ -265,30 +260,18 @@ else:
 MAX_ARG = 6
 MAX_VAR_ARG = 5
 
-if RUNNING_PYTHON3:
-    SURROGATES = (
-        u'"\\uDC80"',
-        u'"\\uDC80"',
-        u'"\\U0010FFFF"',
-        u'"\\udbff\\udfff"',
-    )
+SURROGATES = (
+    u'"\\uDC80"',
+    u'"\\uDC80"',
+    u'"\\U0010FFFF"',
+    u'"\\udbff\\udfff"',
+)
 
-    BUFFER_OBJECTS = (
-        u'bytearray(b"abc\\xe9\\xff")',
-        u'memoryview(b"abc\\xe9\\xff")',
-        u'memoryview(bytearray(b"abc\\xe9\\xff"))',
-    )
-else:
-    SURROGATES = (
-        u'u"\\uDC80"',
-        u'u"\\uDC80"',
-        u'u"\\U0010FFFF"',
-        u'u"\\udbff\\udfff"',
-    )
-
-    BUFFER_OBJECTS = (
-        u'buffer("abc\\xe9\\xff")',
-    )
+BUFFER_OBJECTS = (
+    u'bytearray(b"abc\\xe9\\xff")',
+    u'memoryview(b"abc\\xe9\\xff")',
+    u'memoryview(bytearray(b"abc\\xe9\\xff"))',
+)
 
 class ListAllModules:
     def __init__(self, logger, only_c, site_package, blacklist):
@@ -486,10 +469,7 @@ class PythonSource(ProjectAgent):
             self.info("Python module: %s" % name)
 
         self.filenames = self.options.filenames
-        if not RUNNING_PYTHON3:
-            encoding = getfilesystemencoding()
-            self.filenames = text_type(self.filenames, encoding)
-        self.filenames = self.filenames.split(u",")
+        self.filenames = self.filenames.split(",")
         for filename in self.filenames:
             if not isabs(filename):
                 raise ValueError("Filename %r is not an absolute path! Fix the --filenames option" % filename)
@@ -615,10 +595,7 @@ class WritePythonCode(WriteCode):
             raise PythonFuzzerError("Module %s has no function and no class!" % self.module_name)
 
     def writePrint(self, level, arguments):
-        if RUNNING_PYTHON3:
-            code = u"print (%s, file=stderr)" % arguments
-        else:
-            code = u"print >>stderr, %s" % arguments
+        code = u"print (%s, file=stderr)" % arguments
         self.write(level, code)
 
     def writeSource(self):
@@ -655,13 +632,9 @@ class WritePythonCode(WriteCode):
         self.write(1, u'result = func(*arguments)')
 
         exceptions = u'(Exception, SystemExit, KeyboardInterrupt)'
-        if RUNNING_PYTHON3:
-            self.write(0, u'except %s as err:' % exceptions)
-        else:
-            self.write(0, u'except %s, err:' % exceptions)
+        self.write(0, u'except %s as err:' % exceptions)
         self.write(1, u'errmsg = repr(err)')
-        if RUNNING_PYTHON3:
-            self.write(1, u"errmsg = errmsg.encode('ASCII', 'replace')")
+        self.write(1, u"errmsg = errmsg.encode('ASCII', 'replace')")
         self.writePrint(1, u'"[%s] %s => %s: %s" % (prefix, funcname, err.__class__.__name__, errmsg)')
         self.write(1, u'result = None')
 
@@ -719,7 +692,7 @@ class WritePythonCode(WriteCode):
         callback = choice(generators)
         value = callback()
         for item in value:
-            if not isinstance(item, text_type):
+            if not isinstance(item, str):
                 raise ValueError("%s returned type %s" % (callback, type(item)))
         return value
 
@@ -772,7 +745,7 @@ class WritePythonCode(WriteCode):
             self.write(0, first_line + u',')
             level = self.addLevel(1)
             last_char = u','
-            for index in xrange(nb_arg):
+            for index in range(nb_arg):
                 if index == nb_arg-1:
                     last_char = u')'
                 self.writeArgument(1, last_char)
@@ -796,7 +769,7 @@ class WritePythonCode(WriteCode):
         obj_name = u'obj'
         self.write(0, u'%s = callFunc("%s", "%s",' % (obj_name, prefix, class_name))
 
-        for index in xrange(nb_arg):
+        for index in range(nb_arg):
             self.write(2, u'# argument %s/%s' % (1+index, nb_arg))
             self.writeArgument(2)
         self.write(1, u')')
@@ -814,13 +787,13 @@ class WritePythonCode(WriteCode):
 
     def writeCode(self, prefix, object, functions, classes, func_min_arg, nb_call):
         if functions:
-            for index in xrange(nb_call):
+            for index in range(nb_call):
                 func_name = choice(functions)
                 func = getattr(object, func_name)
                 self.callFunction(prefix, index, func_name, func, func_min_arg)
         if classes:
             self.nb_class = NB_CLASS
-            for index in xrange(self.nb_class):
+            for index in range(self.nb_class):
                 class_name = choice(classes)
                 cls = getattr(object, class_name)
                 self.useClass(index, cls, class_name)
@@ -843,12 +816,8 @@ class WritePythonCode(WriteCode):
     def genBytes(self):
         # Bytes string
         bytes = self.bytes_generator.createValue()
-        if RUNNING_PYTHON3:
-            text = ''.join( u"\\x%02X" % byte for byte in bytes)
-            text = 'b"%s"' % text
-        else:
-            text = u''.join( u"\\x%02X" % ord(byte) for byte in bytes)
-            text = u'"%s"' % text
+        text = ''.join(u"\\x%02X" % byte for byte in bytes)
+        text = 'b"%s"' % text
         return [text]
 
     def genUnixPath(self):
@@ -859,10 +828,7 @@ class WritePythonCode(WriteCode):
         # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
-        if RUNNING_PYTHON3:
-            text = u'"%s"' % text
-        else:
-            text = u'u"%s"' % text
+        text = u'"%s"' % text
         return [text]
 
     def genLetterDigit(self):
@@ -896,10 +862,7 @@ class WritePythonCode(WriteCode):
 
     def genOpenFile(self):
         filename = choice(self.filenames)
-        if RUNNING_PYTHON3:
-            instr = "open('%s')" % filename
-        else:
-            instr = "open(u'%s')" % filename
+        instr = "open('%s')" % filename
         return [instr]
 
     def genException(self):
@@ -916,14 +879,14 @@ class WritePythonCode(WriteCode):
             if is_dict:
                 key_callback = choice(self.hashable_argument_generators)
             value_callback = choice(self.simple_argument_generators)
-            for index in xrange(nb_item):
+            for index in range(nb_item):
                 if is_dict:
                     item = self.createDictItem(key_callback, value_callback)
                 else:
                     item = value_callback()
                 items.append(item)
         else:
-            for index in xrange(nb_item):
+            for index in range(nb_item):
                 if is_dict:
                     item = self.createDictItem()
                 else:
@@ -993,7 +956,7 @@ def parsePrototype(doc):
     """
     if not doc:
         return None
-    if not isinstance(doc, string_types):
+    if not isinstance(doc, str):
         return None
     doc = doc.strip()
     match = PROTOTYPE_REGEX.match(doc)
@@ -1014,7 +977,7 @@ def parsePrototype(doc):
 
     # Argument with default value? => varkw
     move = None
-    for index in xrange(len(arguments)-1, -1, -1):
+    for index in range(len(arguments)-1, -1, -1):
         arg = arguments[index]
         if arg not in defaults:
             break

@@ -15,7 +15,6 @@ from fusil.bytes_generator import (
     ASCII8, PRINTABLE_ASCII)
 from fusil.write_code import WriteCode
 from optparse import OptionGroup
-from fusil.six import unichr, PY2
 from random import choice, randint
 from weakref import ref
 import re
@@ -78,10 +77,7 @@ class Fuzzer(Application):
             stdout.score_weight = 0.3
 
 def escapeCharacter(character):
-    if PY2:
-        code = ord(character)
-    else:
-        code = character
+    code = character
     if code == ord(b'\\'):
         # \ => \\
         return u'\\\\'
@@ -89,7 +85,7 @@ def escapeCharacter(character):
         # ' => \'
         return u'\\"'
     elif 32 <= code <= 126:
-        return unichr(code)
+        return chr(code)
     else:
         return u'\\x%02X' % code
 

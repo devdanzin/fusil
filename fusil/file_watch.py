@@ -5,7 +5,6 @@ from time import time
 
 from fusil.project_agent import ProjectAgent
 from fusil.score import scoreLogFunc
-from fusil.six import b, iteritems, text_type
 from fusil.tools import makeFilename
 
 VALID_POS = ("zero", "end", "current")
@@ -81,13 +80,13 @@ class FileWatch(ProjectAgent):
         return FileWatch(project, input_file, basename(filename), start)
 
     def ignoreRegex(self, regex, flags=0):
-        if isinstance(regex, text_type):
+        if isinstance(regex, str):
             regex = regex.encode("ASCII")
         regex = re.compile(regex, flags)
         self.ignore.append(regex.search)
 
     def addRegex(self, regex, score, flags=0):
-        if isinstance(regex, text_type):
+        if isinstance(regex, str):
             regex = regex.encode("ASCII")
         match = re.compile(regex, flags).search
         self.regexs.append((regex, score, match))
@@ -97,21 +96,21 @@ class FileWatch(ProjectAgent):
         for text, score, match in self.regexs:
             yield (text, score, match)
 
-        for text, score in iteritems(self.words):
+        for text, score in self.words.items():
             text = text.lower()
-            if isinstance(text, text_type):
+            if isinstance(text, str):
                 text = text.encode("ASCII")
             regex = re.escape(text)
-            regex = b(r"(?:^|\W)") + regex + b(r"(?:$|\W)")
+            regex = br"(?:^|\W)" + regex + br"(?:$|\W)"
             match = re.compile(regex, re.IGNORECASE).search
             yield (text, score, match)
 
         for text in self.kill_words:
             text = text.lower()
-            if isinstance(text, text_type):
+            if isinstance(text, str):
                 text = text.encode("ASCII")
             regex = re.escape(text)
-            regex = b(r"(?:^|\W)") + regex + b(r"(?:$|\W)")
+            regex = br"(?:^|\W)" + regex + br"(?:$|\W)"
             match = re.compile(regex, re.IGNORECASE).search
             yield (text, 100, match)
 
@@ -144,12 +143,12 @@ class FileWatch(ProjectAgent):
     def splitlines(self, data):
         lines = data.splitlines(1)
         for index, line in enumerate(lines):
-            if index == len(lines) - 1 and line[-1] not in b("\n\r"):
+            if index == len(lines) - 1 and line[-1] not in b"\n\r":
                 self.buffer.append(line)
                 return
             if index == 0 and self.buffer:
                 self.buffer.append(line)
-                line = b("").join(self.buffer)
+                line = b"".join(self.buffer)
                 self.buffer = []
             yield line.rstrip()
 

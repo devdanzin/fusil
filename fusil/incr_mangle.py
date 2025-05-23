@@ -37,7 +37,7 @@ class DataVersion:
             operation = self.createOperation(agent, datalen, dirty_bits)
             if not operation:
                 continue
-            for bit in xrange(operation.offset, operation.offset + operation.size):
+            for bit in range(operation.offset, operation.offset + operation.size):
                 dirty_bits.add(bit)
             operations.append(operation)
             nb_try = 0
@@ -46,7 +46,7 @@ class DataVersion:
     def createOperation(self, agent, datalen, dirty_bits):
         operation_cls = choice(agent.operations)
         operation = operation_cls(agent, datalen)
-        for bit in xrange(operation.offset, operation.offset + operation.size):
+        for bit in range(operation.offset, operation.offset + operation.size):
             if bit in dirty_bits:
                 return None
         return operation

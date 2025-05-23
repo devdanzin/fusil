@@ -18,16 +18,9 @@ Byte sets:
 
 from random import choice, randint
 
-from ptrace.os_tools import RUNNING_PYTHON3
-
-from fusil.six import b
-
 
 def createBytesSet(start, stop):
-    if RUNNING_PYTHON3:
-        return set(range(start, stop + 1))
-    else:
-        return set(chr(code) for code in xrange(start, stop + 1))
+    return set(range(start, stop + 1))
 
 
 # ASCII codes 0..255
@@ -43,12 +36,12 @@ ASCII7 = createBytesSet(0, 127)
 PRINTABLE_ASCII = createBytesSet(32, 126)
 
 # Letters and digits
-UPPER_LETTERS = set(b("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-LOWER_LETTERS = set(b("abcdefghijklmnopqrstuvwxyz"))
+UPPER_LETTERS = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+LOWER_LETTERS = set(b"abcdefghijklmnopqrstuvwxyz")
 LETTERS = UPPER_LETTERS | LOWER_LETTERS
-DECIMAL_DIGITS = set(b("0123456789"))
-HEXADECIMAL_DIGITS = DECIMAL_DIGITS | set(b("abcdefABCDEF"))
-PUNCTUATION = set(b(" .,-;?!:(){}[]<>'\"/\\"))
+DECIMAL_DIGITS = set(b"0123456789")
+HEXADECIMAL_DIGITS = DECIMAL_DIGITS | set(b"abcdefABCDEF")
+PUNCTUATION = set(b" .,-;?!:(){}[]<>'\"/\\")
 
 
 class Generator:
@@ -76,17 +69,13 @@ class BytesGenerator(Generator):
     def _createValue(self, length):
         bytes_list = list(self.bytes_set)
         if len(bytes_list) != 1:
-            if RUNNING_PYTHON3:
-                return bytes(choice(bytes_list) for index in range(length))
-            else:
-                return "".join(choice(bytes_list) for index in xrange(length))
+            return bytes(choice(bytes_list) for index in range(length))
         else:
             value = bytes_list[0]
-            if RUNNING_PYTHON3:
-                value = bytes((value,))
+            value = bytes((value,))
             return value * length
 
 
 class LengthGenerator(BytesGenerator):
     def __init__(self, min_length, max_length):
-        BytesGenerator.__init__(self, min_length, max_length, set(b("A")))
+        BytesGenerator.__init__(self, min_length, max_length, set(b"A"))

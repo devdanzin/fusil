@@ -4,7 +4,6 @@ from struct import pack
 
 from fusil.bytes_generator import BytesGenerator
 from fusil.process.tools import locateProgram, runCommand
-from fusil.six import PY2, b, string_types, text_type
 from fusil.write_code import WriteCode
 
 
@@ -22,7 +21,7 @@ def encodeUTF32(text):
     data = []
     for character in text:
         data.append(pack("I", ord(character)))
-    return b("").join(data)
+    return b"".join(data)
 
 
 def quoteString(text):
@@ -71,7 +70,7 @@ def compileC(
 
 class FunctionC:
     def __init__(self, name, arguments=None, type="void"):
-        self.name = text_type(name)
+        self.name = str(name)
         if arguments:
             self.arguments = arguments
         else:
@@ -90,7 +89,7 @@ class FunctionC:
             yield None
 
         for code in self.code:
-            if isinstance(code, string_types):
+            if isinstance(code, str):
                 yield (1, code)
             else:
                 level, code = code
@@ -112,7 +111,7 @@ class FunctionC:
             self.code.append(name)
             last_index = len(arguments) - 1
             for index, argument in enumerate(arguments):
-                argument = text_type(argument)
+                argument = str(argument)
                 if index != last_index:
                     argument += ","
                 self.code.append((1, argument))
@@ -147,7 +146,7 @@ class CodeC(WriteCode):
             arguments = None
         main = FunctionC("main", arguments, type)
         if footer:
-            footer = text_type(footer)
+            footer = str(footer)
             main.footer.append(footer)
         self.addFunction(main)
         return main
@@ -207,9 +206,6 @@ class FuzzyFunctionC(FunctionC):
 
         value = self.bytes_generator.createValue()
         size = len(value)
-        if PY2:
-            value = ", ".join("0x%02x" % ord(item) for item in value)
-        else:
-            value = ", ".join("0x%02x" % item for item in value)
+        value = ", ".join("0x%02x" % item for item in value)
         self.variables.append("const char %s[] = {%s}" % (name, value))
         return (name, size)

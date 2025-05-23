@@ -133,7 +133,7 @@ allows to do some operations before the process start. The patch: ::
 
         def createCmdline(self):
             arguments = ['echo']
-            for index in xrange(randint(3, 6)):
+            for index in range(randint(3, 6)):
                 if randint(1, 5) == 1:
                     option = choice(self.OPTIONS)
                     arguments.append(option)

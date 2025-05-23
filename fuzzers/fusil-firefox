@@ -208,7 +208,7 @@ class FuzzyHttpServer(HttpServer):
         tr_open = False
         count = len(self.filenames)
         session_index = self.project().session_index
-        for index in xrange(count):
+        for index in range(count):
             url = self.file_url_format % (session_index, index)
 
             if (index % self.rows) == 0:

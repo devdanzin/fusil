@@ -1,12 +1,10 @@
 from random import choice, randint
 
 from fusil.bytes_generator import Generator
-from fusil.six import text_type, unichr
-from fusil.six.moves import range as xrange
 
 
 def createCharset(start, stop):
-    return set("".join(unichr(code) for code in xrange(start, stop + 1)))
+    return set("".join(chr(code) for code in range(start, stop + 1)))
 
 
 # ASCII codes 0..255
@@ -40,7 +38,7 @@ class UnicodeGenerator(Generator):
 
     def _createValue(self, length):
         if 1 < len(self.charset):
-            return "".join(choice(self.charset) for index in xrange(length))
+            return "".join(choice(self.charset) for index in range(length))
         else:
             return self.charset[0] * length
 
@@ -93,7 +91,7 @@ class IntegerRangeGenerator(Generator):
 
     def createValue(self):
         value = randint(self.min, self.max)
-        return text_type(value)
+        return str(value)
 
 
 class UnixPathGenerator(UnicodeGenerator):

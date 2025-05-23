@@ -42,7 +42,6 @@ from fusil.python.blacklists import (
 from fusil.python.mangle import mangle_loop, mangle_obj
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
-from fusil.six import text_type
 from fusil.unicode_generator import (
     ASCII8,
     DECIMAL_DIGITS,
@@ -87,7 +86,7 @@ DEBUG = False
 USE_MANGLE = False
 TIMEOUT = 900.0
 
-xrange = range
+range = range
 
 # Constants
 PYTHON = sys.executable
@@ -575,7 +574,7 @@ class PythonSource(ProjectAgent):
         self.filenames = self.options.filenames
         if not RUNNING_PYTHON3:
             encoding = getfilesystemencoding()
-            self.filenames = text_type(self.filenames, encoding)
+            self.filenames = str(self.filenames, encoding)
         self.filenames = self.filenames.split(",")
         for filename in self.filenames:
             if not isabs(filename):
@@ -944,7 +943,7 @@ class WritePythonCode(WriteCode):
         callback = choice(generators)
         value = callback()
         for item in value:
-            if not isinstance(item, text_type):
+            if not isinstance(item, str):
                 raise ValueError("%s returned type %s" % (callback, type(item)))
         return value
 
@@ -989,7 +988,7 @@ class WritePythonCode(WriteCode):
             self.write(0, first_line + ",")
             level = self.addLevel(1)
             last_char = ","
-            for index in xrange(nb_arg):
+            for index in range(nb_arg):
                 if index == nb_arg - 1:
                     last_char = ")"
                 self.writeArgument(1, last_char)
@@ -1006,7 +1005,7 @@ class WritePythonCode(WriteCode):
             if nb_arg:
                 self.write(1, first_line)
                 last_char = ","
-                for index in xrange(nb_arg):
+                for index in range(nb_arg):
                     if index == nb_arg - 1:
                         last_char = ",)))"
                     self.writeArgument(1, last_char)
@@ -1023,7 +1022,7 @@ class WritePythonCode(WriteCode):
                 self.write(1, first_line)
                 level = self.addLevel(1)
                 last_char = ","
-                for index in xrange(nb_arg):
+                for index in range(nb_arg):
                     if index == nb_arg - 1:
                         last_char = ")"
                     self.writeArgument(1, last_char)
@@ -1050,7 +1049,7 @@ class WritePythonCode(WriteCode):
 
         obj_name = "obj"
         self.write(0, '%s = callFunc("%s", "%s",' % (obj_name, prefix, class_name))
-        for index in xrange(nb_arg):
+        for index in range(nb_arg):
             self.write(2, "# argument %s/%s" % (1 + index, nb_arg))
             self.writeArgument(2)
         self.write(1, ")")
@@ -1113,7 +1112,7 @@ class WritePythonCode(WriteCode):
         obj_name=None,
     ):
         if functions:
-            for index in xrange(nb_call):
+            for index in range(nb_call):
                 func_name = choice(functions)
                 func = getattr(object, func_name)
                 self.callFunction(
@@ -1121,12 +1120,12 @@ class WritePythonCode(WriteCode):
                 )
         if classes:
             self.nb_class = self.options.classes_number
-            for index in xrange(self.nb_class):
+            for index in range(self.nb_class):
                 class_name = choice(classes)
                 cls = getattr(object, class_name)
                 self.useClass(index, cls, class_name)
         if objects:
-            for index in xrange(self.options.objects_number):
+            for index in range(self.options.objects_number):
                 object_name = choice(objects)
                 obj = getattr(object, object_name)
                 if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):
@@ -1297,14 +1296,14 @@ class WritePythonCode(WriteCode):
             if is_dict:
                 key_callback = choice(self.hashable_argument_generators)
             value_callback = choice(self.simple_argument_generators)
-            for index in xrange(nb_item):
+            for index in range(nb_item):
                 if is_dict:
                     item = self.createDictItem(key_callback, value_callback)
                 else:
                     item = value_callback()
                 items.append(item)
         else:
-            for index in xrange(nb_item):
+            for index in range(nb_item):
                 if is_dict:
                     item = self.createDictItem()
                 else:

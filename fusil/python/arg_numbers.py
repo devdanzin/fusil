@@ -6,8 +6,6 @@ import inspect
 import re
 from random import randint
 
-from fusil.six import string_types
-
 MAX_ARG = 6
 MAX_VAR_ARG = 5
 PARSE_PROTOTYPE = True
@@ -238,7 +236,7 @@ def parsePrototype(doc):
     """
     if not doc:
         return None
-    if not isinstance(doc, string_types):
+    if not isinstance(doc, str):
         return None
     doc = doc.strip()
     match = PROTOTYPE_REGEX.match(doc)

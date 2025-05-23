@@ -12,7 +12,6 @@ from fusil.process.prepare import ChildError, prepareProcess
 from fusil.process.replay_python import createReplayPythonScript
 from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand
 from fusil.project_agent import ProjectAgent
-from fusil.six import binary_type, string_types, text_type
 
 from pwd import getpwuid
 
@@ -42,7 +41,7 @@ class CreateProcess(ProjectAgent):
         timeout=DEFAULT_TIMEOUT,
         name=None,
     ):
-        if isinstance(arguments, string_types):
+        if isinstance(arguments, str):
             arguments = splitCommand(arguments)
         config = project.config
         if not name:
@@ -86,9 +85,9 @@ class CreateProcess(ProjectAgent):
     def createProcess(self):
         arguments = self.createArguments()
         for index, argument in enumerate(arguments):
-            if isinstance(argument, binary_type):
-                has_null = "\0" in argument
-            elif isinstance(argument, text_type):
+            if isinstance(argument, bytes):
+                has_null = b"\0" in argument
+            elif isinstance(argument, str):
                 has_null = "\0" in argument
             else:
                 raise ValueError(

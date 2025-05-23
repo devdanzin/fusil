@@ -1,7 +1,5 @@
 from os import chmod
 
-from fusil.six import text_type
-
 
 class WriteCode:
     def __init__(self):
@@ -34,8 +32,8 @@ class WriteCode:
         self.base_level = level
 
     def indentLine(self, level, text):
-        if not isinstance(text, text_type):
-            text = unicode(text, "ASCII")
+        if not isinstance(text, str):
+            text = str(text, "ASCII")
         return self.indent * (self.base_level + level) + text
 
     def write(self, level, text):
