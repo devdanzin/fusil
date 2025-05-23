@@ -1,4 +1,3 @@
-import sys
 from errno import ENOENT
 from os import devnull
 from os.path import basename
@@ -14,27 +13,18 @@ from fusil.process.replay_python import createReplayPythonScript
 from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand
 from fusil.project_agent import ProjectAgent
 from fusil.six import binary_type, string_types, text_type
-from fusil.unsafe import SUPPORT_UID
 
-if SUPPORT_UID:
-    from pwd import getpwuid
+from pwd import getpwuid
 
-RUNNING_WINDOWS = sys.platform == "win32"
 
-if RUNNING_WINDOWS:
-    from win32api import TerminateProcess
-else:
-    from os import kill
-    from signal import SIGKILL
+from os import kill
+from signal import SIGKILL
 
 DEFAULT_TIMEOUT = 10.0
 
 
 def terminateProcess(process):
-    if RUNNING_WINDOWS:
-        TerminateProcess(process._handle, 1)
-    else:
-        kill(process.pid, SIGKILL)
+    kill(process.pid, SIGKILL)
 
 
 class ProcessError(Exception):
@@ -72,8 +62,7 @@ class CreateProcess(ProjectAgent):
         self.popen_args = {
             "stderr": STDOUT,
         }
-        if not RUNNING_WINDOWS:
-            self.popen_args["close_fds"] = True
+        self.popen_args["close_fds"] = True
         self.stdin = stdin
 
     def init(self):
@@ -121,7 +110,7 @@ class CreateProcess(ProjectAgent):
             self.time0 = time()
             self.process = Popen(arguments, **popen_args)
         except ChildError as err:
-            raise ProcessError(unicode(err))
+            raise ProcessError(err)
         except OSError as err:
             if err.errno == ENOENT:
                 raise ProcessError("Program doesn't exist: %s" % arguments[0])
@@ -147,19 +136,17 @@ class CreateProcess(ProjectAgent):
     def createPopenArguments(self):
         popen_args = dict(self.popen_args)
         env = self.env.create()
-        if SUPPORT_UID:
-            uid = self.project().config.process_uid
-            if "HOME" in env and uid is not None:
-                # Use the fuzzer user home directory
-                env["HOME"] = getpwuid(uid).pw_dir
+        uid = self.project().config.process_uid
+        if "HOME" in env and uid is not None:
+            # Use the fuzzer user home directory
+            env["HOME"] = getpwuid(uid).pw_dir
         popen_args["env"] = env
         self.stdin_file = self.createStdin()
         if self.stdin_file:
             popen_args["stdin"] = self.stdin_file.fileno()
         self.stdout_file = self.createStdout()
         popen_args["stdout"] = self.stdout_file.fileno()
-        if not RUNNING_WINDOWS:
-            popen_args["preexec_fn"] = self.prepareProcess
+        popen_args["preexec_fn"] = self.prepareProcess
         return popen_args
 
     def createStdin(self):

@@ -5,11 +5,10 @@ from os import X_OK, access, chdir
 from shutil import chown
 
 from fusil.process.tools import allowCoreDump, beNice, limitMemory, limitUserProcess
-from fusil.unsafe import SUPPORT_UID, permissionHelp
+from fusil.unsafe import permissionHelp
 
-if SUPPORT_UID:
-    from os import getuid, setgid, setuid
-    from pwd import getpwuid
+from os import getuid, setgid, setuid
+from pwd import getpwuid
 
 
 class ChildError(Exception):
@@ -36,8 +35,7 @@ def prepareProcess(process):
     except Exception as e:
         print(e)
     # Change the user and group
-    if SUPPORT_UID:
-        changeUserGroup(config, options)
+    changeUserGroup(config, options)
 
     try:
         chdir(directory)

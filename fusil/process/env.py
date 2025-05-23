@@ -1,12 +1,9 @@
-import sys
 from os import getenv
 from random import choice, randint
 
 from fusil.bytes_generator import ASCII0, BytesGenerator, LengthGenerator
 from fusil.project_agent import ProjectAgent
 from fusil.unicode_generator import IntegerGenerator
-
-RUNNING_WINDOWS = sys.platform == "win32"
 
 
 class EnvironmentVariable:
@@ -104,8 +101,6 @@ class Environment(ProjectAgent):
         self.copies.append("PYTHON_JIT")
         self.copies.append("LSAN_OPTIONS")
         self.copies.append("ASAN_OPTIONS")
-        if RUNNING_WINDOWS:
-            self.copies.append("SYSTEMROOT")
 
     def clear(self):
         self.copies = []

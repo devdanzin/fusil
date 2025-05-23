@@ -1,78 +1,56 @@
 import re
-import sys
 from os import X_OK, access, devnull, getcwd, getenv, pathsep
 from os.path import dirname, isabs, normpath
 from os.path import join as path_join
 from subprocess import STDOUT, Popen
 
-# from ptrace.signames import signalName
-from fusil.six import string_types
 
-RUNNING_WINDOWS = sys.platform == "win32"
+from resource import (
+    RLIMIT_AS,
+    RLIMIT_CORE,
+    RLIMIT_CPU,
+    RLIMIT_NPROC,
+    getrlimit,
+    setrlimit,
+)
 
-if RUNNING_WINDOWS:
-    from win32api import GetCurrentProcessId, OpenProcess
-    from win32con import PROCESS_ALL_ACCESS
-    from win32process import (
-        BELOW_NORMAL_PRIORITY_CLASS,
-        IDLE_PRIORITY_CLASS,
-        SetPriorityClass,
-    )
-else:
-    from resource import (
-        RLIMIT_AS,
-        RLIMIT_CORE,
-        RLIMIT_CPU,
-        RLIMIT_NPROC,
-        getrlimit,
-        setrlimit,
-    )
+try:
+    from os import nice
+except ImportError:
+    # PyPy doesn't have os.nice()
+    def nice(level):
+        pass
 
+def _setrlimit(key, value, change_hard):
     try:
-        from os import nice
-    except ImportError:
-        # PyPy doesn't have os.nice()
-        def nice(level):
-            pass
-
-    def _setrlimit(key, value, change_hard):
-        try:
-            soft, hard = getrlimit(key)
-            # Change soft limit
-            if hard != -1:
-                soft = min(value, hard)
-            else:
-                soft = value
-            if change_hard:
-                # Change hard limit
-                hard = soft
-        except ValueError:
-            hard = -1
-        setrlimit(key, (soft, hard))
-        return soft
+        soft, hard = getrlimit(key)
+        # Change soft limit
+        if hard != -1:
+            soft = min(value, hard)
+        else:
+            soft = value
+        if change_hard:
+            # Change hard limit
+            hard = soft
+    except ValueError:
+        hard = -1
+    setrlimit(key, (soft, hard))
+    return soft
 
 
 def limitMemory(nbytes, hard=False):
-    if RUNNING_WINDOWS:
-        return
     return _setrlimit(RLIMIT_AS, nbytes, hard)
 
 
 def limitUserProcess(nproc, hard=False):
-    if RUNNING_WINDOWS:
-        return
     return _setrlimit(RLIMIT_NPROC, nproc, hard)
 
 
 def allowCoreDump(hard=False):
-    if RUNNING_WINDOWS:
-        return
     return _setrlimit(RLIMIT_CORE, -1, hard)
 
 
 def limitCpuTime(seconds, hard=False):
-    if RUNNING_WINDOWS:
-        return
     # Round float to int
     if isinstance(seconds, float):
         seconds = int(seconds + 0.5)
@@ -80,21 +58,11 @@ def limitCpuTime(seconds, hard=False):
 
 
 def beNice(very_nice=False):
-    if RUNNING_WINDOWS:
-        if very_nice:
-            value = BELOW_NORMAL_PRIORITY_CLASS
-        else:
-            value = IDLE_PRIORITY_CLASS
-
-        pid = GetCurrentProcessId()
-        handle = OpenProcess(PROCESS_ALL_ACCESS, True, pid)
-        SetPriorityClass(handle, value)
+    if very_nice:
+        value = 10
     else:
-        if very_nice:
-            value = 10
-        else:
-            value = 5
-        nice(value)
+        value = 5
+    nice(value)
 
 
 def displayProcessStatus(logger, status, prefix="Process"):
@@ -122,7 +90,7 @@ def runCommand(
     process is killed by a signal. If raise_error=False, return the status and
     don't raise RuntimeError if status is not nul.
     """
-    if isinstance(command, string_types):
+    if isinstance(command, str):
         command_str = repr(command)
     else:
         command_str = " ".join(command)
@@ -143,7 +111,7 @@ def runCommand(
     elif stdout is not True:
         options["stdout"] = stdout
         options["stderr"] = STDOUT
-    if ("close_fds" not in options) and (not RUNNING_WINDOWS):
+    if ("close_fds" not in options):
         options["close_fds"] = True
 
     process = Popen(command, **options)

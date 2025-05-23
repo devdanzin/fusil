@@ -1,4 +1,3 @@
-import sys
 from os.path import basename
 from random import choice, randint
 from struct import pack
@@ -7,8 +6,6 @@ from fusil.bytes_generator import BytesGenerator
 from fusil.process.tools import locateProgram, runCommand
 from fusil.six import PY2, b, string_types, text_type
 from fusil.write_code import WriteCode
-
-RUNNING_WINDOWS = sys.platform == "win32"
 
 
 class CompilerError(Exception):
@@ -55,10 +52,7 @@ def compileC(
     """
     global GCC_PROGRAM
     if not GCC_PROGRAM:
-        if RUNNING_WINDOWS:
-            program = "gcc.exe"
-        else:
-            program = "gcc"
+        program = "gcc"
         GCC_PROGRAM = locateProgram(program, raise_error=True)
     command = [GCC_PROGRAM, "-o", output_filename, c_filename]
     if debug:

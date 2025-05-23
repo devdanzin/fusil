@@ -1,5 +1,3 @@
-import sys
-
 from ptrace.os_tools import HAS_PROC
 
 from fusil.project_agent import ProjectAgent
@@ -9,12 +7,11 @@ if HAS_PROC:
 
 from ptrace.process_tools import dumpProcessInfo
 
-RUNNING_WINDOWS = sys.platform == "win32"
 if HAS_PROC:
     from os import stat
 
     from fusil.process.cpu_probe import CpuProbe
-elif not RUNNING_WINDOWS:
+else:
     from os import kill
 
 from errno import ENOENT, ESRCH
@@ -25,8 +22,6 @@ class AttachProcessPID(ProjectAgent):
         if not name:
             name = "pid:%s" % pid
         ProjectAgent.__init__(self, project, name)
-        if RUNNING_WINDOWS:
-            raise NotImplementedError("AttachProcessPID is not supported on Windows")
         self.death_score = 1.0
         self.show_exit = True  # needed by the debugger
         self.max_memory = 100 * 1024 * 1024
@@ -69,8 +64,6 @@ class AttachProcessPID(ProjectAgent):
                 return
 
     def checkAlive(self):
-        if RUNNING_WINDOWS:
-            raise NotImplementedError()
 
         if self.dbg_process:
             status = self.debugger.pollPID(self.pid)

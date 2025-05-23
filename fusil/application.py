@@ -2,10 +2,7 @@ import pathlib
 from io import StringIO
 from sys import exit, stdout
 
-from fusil.unsafe import SUPPORT_UID
-
-if SUPPORT_UID:
-    from os import getgid, getuid
+from os import getgid, getuid
 
 from ptrace.error import PTRACE_ERRORS, writeError
 
@@ -27,9 +24,8 @@ from fusil.project import Project
 from fusil.version import LICENSE, VERSION, WEBSITE
 from fusil.xhost import xhostCommand
 
-if SUPPORT_UID:
-    from grp import getgrgid, getgrnam
-    from pwd import getpwnam, getpwuid
+from grp import getgrgid, getgrnam
+from pwd import getpwnam, getpwuid
 
 
 def formatLimit(limit):
@@ -305,10 +301,6 @@ class Application(ApplicationAgent):
 
     def processConfig(self):
         config = self.config
-        if not SUPPORT_UID:
-            config.process_user = None
-            config.process_group = None
-            return
 
         # Use --unsafe?
         if self.options.unsafe:
@@ -363,9 +355,6 @@ class Application(ApplicationAgent):
             self.error("")
 
     def safetyWarning(self):
-        if not SUPPORT_UID:
-            return
-
         # uid or gid is None?
         uid = self.config.process_uid
         gid = self.config.process_gid

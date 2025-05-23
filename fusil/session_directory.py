@@ -5,10 +5,8 @@ from fusil.directory import Directory
 from fusil.error import FusilError
 from fusil.session_agent import SessionAgent
 from fusil.tools import makeUnicode
-from fusil.unsafe import SUPPORT_UID
 
-if SUPPORT_UID:
-    from os import chown, getgid
+from os import chown, getgid
 
 import grp
 import re
@@ -42,8 +40,6 @@ class SessionDirectory(SessionAgent, Directory):
             self.changeOwner(uid)
 
     def changeOwner(self, uid):
-        if not SUPPORT_UID:
-            return
         gid = grp.getgrnam("fusil").gr_gid
         try:
             chown(self.directory, uid, gid)

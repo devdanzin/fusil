@@ -10,6 +10,7 @@ Fusil 1.6 (Unreleased)
  * fusil-python-threaded: added new kinds of tricky objects and
    interesting values.
  * moved six.py from ptrace into fusil.
+ * removed Windows support.
 
 Fusil 1.5 (2013-03-05)
 ----------------------

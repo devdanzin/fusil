@@ -17,11 +17,6 @@ Optional dependencies:
    and used by fusil-firefox:
    http://python-xlib.sourceforge.net/
 
-Running on Windows:
-
- * win32api for Python:
-   http://starship.python.net/crew/mhammond/win32/
-
 
 Projects dependencies
 =====================
