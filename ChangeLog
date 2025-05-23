@@ -9,7 +9,11 @@ Fusil 1.6 (Unreleased)
  * fusil-python-threaded: added threading in generated code.
  * fusil-python-threaded: added new kinds of tricky objects and
    interesting values.
- * moved six.py from ptrace into fusil.
+ * fusil-python-threaded: added async calling of code.
+ * fusil-python-threaded: added object mangling.
+ * fusil-python-threaded: improved handling of config files.
+ * removed PyPy workarounds.
+ * removed Python 2 support.
  * removed Windows support.
 
 Fusil 1.5 (2013-03-05)
