@@ -22,8 +22,6 @@ from os.path import sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
-from ptrace.os_tools import RUNNING_PYTHON3
-
 import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
@@ -54,9 +52,6 @@ from fusil.unicode_generator import (
     UnsignedGenerator,
 )
 from fusil.write_code import WriteCode
-
-if not RUNNING_PYTHON3:
-    from sys import getfilesystemencoding
 
 try:
     import numpy
@@ -570,9 +565,6 @@ class PythonSource(ProjectAgent):
             self.info("Python module: %s" % name)
 
         self.filenames = self.options.filenames
-        if not RUNNING_PYTHON3:
-            encoding = getfilesystemencoding()
-            self.filenames = str(self.filenames, encoding)
         self.filenames = self.filenames.split(",")
         for filename in self.filenames:
             if not isabs(filename):
@@ -722,10 +714,7 @@ class WritePythonCode(WriteCode):
             )
 
     def writePrint(self, level, arguments):
-        if RUNNING_PYTHON3:
-            code = "print (%s, file=stderr)" % arguments
-        else:
-            code = "print >>stderr, %s" % arguments
+        code = "print (%s, file=stderr)" % arguments
         self.write(level, code)
 
     def writeSource(self):
@@ -848,16 +837,12 @@ class WritePythonCode(WriteCode):
         self.write(2, "result = func(*arguments)")
 
         exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
-        if RUNNING_PYTHON3:
-            self.write(0, "except %s as err:" % exceptions)
-        else:
-            self.write(0, "except %s, err:" % exceptions)
+        self.write(0, "except %s as err:" % exceptions)
         self.write(1, "try:")
         self.write(2, "errmsg = repr(err)")
         self.write(1, "except ValueError as e:")
         self.write(2, "errmsg = repr(e)")
-        if RUNNING_PYTHON3:
-            self.write(1, "errmsg = errmsg.encode('ASCII', 'replace')")
+        self.write(1, "errmsg = errmsg.encode('ASCII', 'replace')")
         self.writePrint(
             1,
             '"[%s] %s => %s: %s" % (prefix, funcname, err.__class__.__name__, errmsg)',
@@ -1170,12 +1155,8 @@ class WritePythonCode(WriteCode):
     def genBytes(self):
         # Bytes string
         bytes = self.bytes_generator.createValue()
-        if RUNNING_PYTHON3:
-            text = "".join("\\x%02X" % byte for byte in bytes)
-            text = 'b"%s"' % text
-        else:
-            text = "".join("\\x%02X" % ord(byte) for byte in bytes)
-            text = '"%s"' % text
+        text = "".join("\\x%02X" % byte for byte in bytes)
+        text = 'b"%s"' % text
         return [text]
 
     def genUnixPath(self):
@@ -1186,10 +1167,7 @@ class WritePythonCode(WriteCode):
         # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
-        if RUNNING_PYTHON3:
-            text = '"%s"' % text
-        else:
-            text = 'u"%s"' % text
+        text = '"%s"' % text
         return [text]
 
     def genLetterDigit(self):
