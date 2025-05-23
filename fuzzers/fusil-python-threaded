@@ -6,6 +6,7 @@ Use "python" command line program.
 Interesting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
+from __future__ import annotations
 
 import builtins
 import datetime
@@ -16,19 +17,27 @@ import resource
 import sys
 import time
 import warnings
+from io import StringIO
 from os.path import exists as path_exists
 from os.path import isabs
 from os.path import sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
+from typing import Any, Callable, Generator
 
 import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
-from fusil.config import OptionGroupWithSections, createFilename
+from fusil.config import (
+    ConfigParserWithHelp,
+    FusilConfig,
+    OptionGroupWithSections,
+    createFilename,
+)
 from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
+from fusil.project import Project
 from fusil.project_agent import ProjectAgent
 from fusil.python.arg_numbers import class_arg_number, get_arg_number
 from fusil.python.blacklists import (
@@ -97,7 +106,7 @@ EXCEPTION_NAMES = {
 }
 
 
-def import_all():
+def import_all() -> None:
     # Currently we have to import all C modules before running the fuzzer.
     # TODO: figure out why and fix it properly.
     for name in sys.stdlib_module_names:
@@ -113,7 +122,8 @@ class PythonFuzzerError(Exception):
 
 
 class ListAllModules:
-    def __init__(self, logger, only_c, site_package, blacklist, skip_test, verbose=False):
+    def __init__(self, logger: PythonSource, only_c: bool, site_package: bool, blacklist: set[str], skip_test: bool,
+                 verbose=False):
         self.logger = logger
         self.only_c = only_c
         self.site_package = site_package
@@ -122,7 +132,7 @@ class ListAllModules:
         self.skip_test = skip_test
         self.verbose = verbose
 
-    def matchModule(self, is_package, name, filename):
+    def matchModule(self, is_package: bool, name: str, filename: str) -> bool:
         if filename is not None and not self.filter_filename(filename):
             return False
         if not self.only_c:
@@ -130,14 +140,14 @@ class ListAllModules:
         if is_package:
             return False
         if any(
-            filename.endswith(ext)
-            for ext in (".py", ".pyc", ".pyo")
-            if filename is not None
+                filename.endswith(ext)
+                for ext in (".py", ".pyc", ".pyo")
+                if filename is not None
         ):
             return False
         return True
 
-    def filter_filename(self, filename):
+    def filter_filename(self, filename: str) -> bool:
         name_parts = filename.split(path_sep)
         if not self.site_package:
             if "site-packages" in name_parts:
@@ -146,11 +156,15 @@ class ListAllModules:
             return False
         return True
 
-    def walk_packages(self, path=None, prefix="", onerror=None):
-        def seen(p, m={}):
+    def walk_packages(
+            self, path: list[str] | None = None, prefix: str = "", onerror: Callable | None = None
+    ) -> Generator[pkgutil.ModuleInfo]:
+
+        def seen(p: str, m: dict[str, bool] = {}) -> bool:
             if p in m:
                 return True
             m[p] = True
+            return False
 
         for info in pkgutil.iter_modules(path, prefix):
             path = package = None
@@ -158,17 +172,17 @@ class ListAllModules:
                 path = getattr(sys.modules[info.name], "__path__", None)
                 package = getattr(sys.modules[info.name], "__package__", None)
             if (
-                (self.skip_test and "test" in info.name)
-                or "pip" in info.name
-                or "logging" in info.name
-                or "pydoc" in info.name
-                or "tkinter" in info.name
-                or (
+                    (self.skip_test and "test" in info.name)
+                    or "pip" in info.name
+                    or "logging" in info.name
+                    or "pydoc" in info.name
+                    or "tkinter" in info.name
+                    or (
                     not self.site_package
                     and path is not None
                     and any("site-packages" in p for p in path)
-                )
-                or (package is not None and "pip" in package)
+            )
+                    or (package is not None and "pip" in package)
             ):
                 if self.verbose:
                     print("SKIPPED", info, file=sys.stderr)
@@ -196,28 +210,28 @@ class ListAllModules:
                         path = [p for p in path if not seen(p)]
                         yield from self.walk_packages(path, info.name + ".", onerror)
 
-    def search_modules(self, path, prefix):
+    def search_modules(self, path: list[str] | None, prefix: str) -> None:
         if path is not None and not self.site_package:
             path = [name for name in path if self.filter_filename(name)]
             if not path:
                 return
         try:
             for loader, name, is_package in self.walk_packages(
-                None, onerror=lambda x: None
+                    None, onerror=lambda x: None
             ):
                 if name.endswith("_d"):
                     # Ignore Debian debug modules
                     # (e.g. ignore "_bisect_d", the real module is "_bisect)
                     continue
                 if (
-                    name in self.blacklist
-                    or prefix in self.blacklist
-                    or prefix.split(".")[0] in self.blacklist
-                    or name.split(".")[0] in self.blacklist
-                    or "test" in name
-                    or "idlelib" in name
-                    or "pydoc" in name
-                    or "logging" in name
+                        name in self.blacklist
+                        or prefix in self.blacklist
+                        or prefix.split(".")[0] in self.blacklist
+                        or name.split(".")[0] in self.blacklist
+                        or "test" in name
+                        or "idlelib" in name
+                        or "pydoc" in name
+                        or "logging" in name
                 ):
                     # Ignore the module and all of its submodules
                     if self.verbose:
@@ -232,7 +246,7 @@ class ListAllModules:
         except:
             raise
 
-    def is_module_c(self, name, prefix):
+    def is_module_c(self, name: str, prefix: str) -> bool:
         is_c = True
         fullname = prefix + name
         if self.verbose:
@@ -255,6 +269,7 @@ class ListAllModules:
                 except ImportError as e:
                     print(e)
             if module and hasattr(module, "__file__"):
+                assert isinstance(module.__file__, str)
                 if module.__file__.endswith(("py", "pyo", "pyc", "pyw")):
                     if "__init__" not in module.__file__:
                         is_c = False
@@ -263,7 +278,7 @@ class ListAllModules:
             print(f"    IS {fullname} C: {is_c}")
         return is_c
 
-    def search(self):
+    def search(self) -> set[str]:
         self.search_modules(None, "")
         return self.names
 
@@ -271,7 +286,7 @@ class ListAllModules:
 class Fuzzer(Application):
     NAME = "python"
 
-    def createFuzzerOptions(self, parser, config_output):
+    def createFuzzerOptions(self, parser: ConfigParserWithHelp, config_output: StringIO) -> StringIO:
         input_options = OptionGroupWithSections(parser, "Input")
         input_options.add_option(
             "--modules",
@@ -350,21 +365,21 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--functions-number",
             help="Number of function calls to generate per module (default: %d)"
-            % DEFAULT_NB_CALL,
+                 % DEFAULT_NB_CALL,
             type="int",
             default=DEFAULT_NB_CALL,
         )
         fuzzing_options.add_option(
             "--methods-number",
             help="Number of method calls to create for each class or object (default: %d)"
-            % DEFAULT_NB_METHOD,
+                 % DEFAULT_NB_METHOD,
             type="int",
             default=DEFAULT_NB_METHOD,
         )
         fuzzing_options.add_option(
             "--classes-number",
             help="Number of classes to fuzz per module (default: %d)"
-            % DEFAULT_NB_CLASS,
+                 % DEFAULT_NB_CLASS,
             type="int",
             default=DEFAULT_NB_CLASS,
         )
@@ -412,7 +427,7 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--filenames",
             help="Names separated by commas of readable files (default: %s)"
-            % FILENAMES,
+                 % FILENAMES,
             type="str",
             default=FILENAMES,
         )
@@ -426,7 +441,7 @@ class Fuzzer(Application):
         config_options.add_option(
             "--config-file",
             help="Name of the configuration file to be read or written (default: %s)"
-            % createFilename(),
+                 % createFilename(),
             type="str",
             default=createFilename(),
         )
@@ -443,7 +458,7 @@ class Fuzzer(Application):
 
         return config_output
 
-    def setupProject(self):
+    def setupProject(self) -> None:
         """Prepare project for fuzzing."""
         project = self.project
 
@@ -511,13 +526,13 @@ class Fuzzer(Application):
 
         # import_all()
 
-    def exit(self, keep_log=True):
+    def exit(self, keep_log: bool = True) -> None:
         super().exit(keep_log=keep_log)
         self.error(print_running_time())
 
 
 class PythonSource(ProjectAgent):
-    def __init__(self, project, options):
+    def __init__(self, project: Project, options: FusilConfig):
         ProjectAgent.__init__(self, project, "python_source")
         self.options = options
         if self.options.modules != "*":
@@ -557,7 +572,7 @@ class PythonSource(ProjectAgent):
                 package_walker = all_modules.walk_packages([path], package + ".")
                 self.modules |= set(mod.name for mod in package_walker)
 
-            if self.verbose:
+            if self.options.verbose:
                 print(
                     f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
                 )
@@ -567,11 +582,11 @@ class PythonSource(ProjectAgent):
             blacklist = set(blacklist.split(","))
             removed = self.modules & blacklist
             self.error("Blacklist modules: %s" % removed)
-            self.modules = list(self.modules - blacklist)
-        self.modules = list(self.modules)
-        self.modules.sort()
-        self.error("Found %s Python modules" % len(self.modules))
-        for name in self.modules:
+            self.modules = self.modules - blacklist
+        self.modules_list = list(self.modules)
+        self.modules_list.sort()
+        self.error("Found %s Python modules" % len(self.modules_list))
+        for name in self.modules_list:
             self.info("Python module: %s" % name)
 
         self.filenames = self.options.filenames
@@ -590,7 +605,7 @@ class PythonSource(ProjectAgent):
         project.error("Use filenames: %s" % ", ".join(self.filenames))
         self.error(print_running_time())
 
-    def loadModule(self, module_name):
+    def loadModule(self, module_name: str) -> None:
         self.module_name = module_name
         self.debug("Import %s" % self.module_name)
         self.module = __import__(self.module_name)
@@ -609,15 +624,15 @@ class PythonSource(ProjectAgent):
             _async=not self.options.no_async,
         )
 
-    def on_session_start(self):
+    def on_session_start(self) -> None:
         self.filename = self.session().createFilename("source.py")
 
         # copy sys.modules
         old_sys_modules = sys.modules.copy()
 
         name = "NO_MODULES!"
-        while self.modules:
-            name = choice(self.modules)
+        while self.modules_list:
+            name = choice(self.modules_list)
             try:
                 self.loadModule(name)
                 break
@@ -626,8 +641,8 @@ class PythonSource(ProjectAgent):
                     "Unable to load module %s: [%s] %s"
                     % (name, err.__class__.__name__, err)
                 )
-                self.modules.remove(name)
-        if not self.modules:
+                self.modules_list.remove(name)
+        if not self.modules_list:
             self.error("There are no more modules!")
             self.send("project_stop")
             return
@@ -644,14 +659,15 @@ class PythonSource(ProjectAgent):
 
 
 class PythonProcess(CreateProcess):
-    def on_python_source(self, filename):
+    def on_python_source(self, filename: str) -> None:
         self.cmdline.arguments[-1] = filename
         self.createProcess()
 
 
 class WritePythonCode(WriteCode):
     def __init__(
-        self, parent, filename, module, module_name, threads=True, _async=True
+            self, parent: PythonSource, filename: str, module: ModuleType, module_name: str, threads: bool = True,
+            _async: bool = True
     ):
         WriteCode.__init__(self)
         self.filename = filename
@@ -659,7 +675,7 @@ class WritePythonCode(WriteCode):
         self.options = parent.options
         self.threads = threads
         self._async = _async
-        self.hashable_argument_generators = (
+        self.hashable_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genNone,
             self.genBool,
             self.genSmallUint,
@@ -678,7 +694,7 @@ class WritePythonCode(WriteCode):
             self.genRawString,
             self.genWeirdType,
         )
-        self.simple_argument_generators = self.hashable_argument_generators + (
+        self.simple_argument_generators: tuple[Callable[[], list[str]], ...] = self.hashable_argument_generators + (
             self.genBufferObject,
             self.genInterestingValues,
             self.genWeirdClass,
@@ -687,7 +703,7 @@ class WritePythonCode(WriteCode):
             self.genWeirdUnion,
             self.genTrickyObjects,
         )
-        self.complex_argument_generators = (
+        self.complex_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genList,
             self.genTuple,
             self.genDict,
@@ -723,11 +739,11 @@ class WritePythonCode(WriteCode):
                 "Module %s has no function, no class and no object!" % self.module_name
             )
 
-    def writePrint(self, level, arguments):
+    def writePrint(self, level: int, arguments: str) -> None:
         code = "print (%s, file=stderr)" % arguments
         self.write(level, code)
 
-    def writeSource(self):
+    def writeSource(self) -> None:
         self.createFile(self.filename)
         self.write(0, "from gc import collect")
         self.write(0, "from sys import stderr")
@@ -837,7 +853,7 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
         self.close()
 
-    def writeCallMethod(self):
+    def writeCallMethod(self) -> None:
         self.write(0, 'funcname = "%s.%%s()" %% name' % self.module_name)
         self.write(0, 'message = "[%s] %s" % (prefix, funcname)')
         self.writePrint(0, "message")
@@ -871,7 +887,7 @@ class WritePythonCode(WriteCode):
             self.write(1, "pass")
         self.write(0, "return result")
 
-    def getFunctions(self):
+    def getFunctions(self) -> tuple[list[str], list[str], list[str]]:
         classes = []
         functions = []
         objects = []
@@ -902,14 +918,14 @@ class WritePythonCode(WriteCode):
                 objects.append(name)
         return functions, classes, objects
 
-    def getMethods(self, object, class_name):
+    def getMethods(self, object: Any, class_name: str) -> dict[str, Any]:
         try:
             key = "%s:%s" % (self.module_name, class_name)
             blacklist = BLACKLIST[key]
         except KeyError:
             blacklist = set()
         blacklist |= METHOD_BLACKLIST
-        methods = {}
+        methods: dict[str, Callable] = {}
         if type(object) in {int, str}:
             return methods
         is_exception = isinstance(object, type) and issubclass(object, BaseException)
@@ -932,7 +948,7 @@ class WritePythonCode(WriteCode):
             methods[name] = attr
         return methods
 
-    def _createArgument(self, generators):
+    def _createArgument(self, generators: tuple[Callable[[], list[str]], ...]) -> list[str]:
         callback = choice(generators)
         value = callback()
         for item in value:
@@ -940,13 +956,13 @@ class WritePythonCode(WriteCode):
                 raise ValueError("%s returned type %s" % (callback, type(item)))
         return value
 
-    def createArgument(self):
+    def createArgument(self) -> list[str]:
         return self._createArgument(self.simple_argument_generators)
 
-    def createHashableArgument(self):
+    def createHashableArgument(self) -> list[str]:
         return self._createArgument(self.hashable_argument_generators)
 
-    def createComplexArgument(self):
+    def createComplexArgument(self) -> list[str]:
         if randint(0, 9) < 9:
             # 10%
             generators = self.complex_argument_generators
@@ -955,7 +971,8 @@ class WritePythonCode(WriteCode):
             generators = self.simple_argument_generators
         return self._createArgument(generators)
 
-    def callFunction(self, prefix, func_index, func_name, func, min_arg, obj_name=None):
+    def callFunction(self, prefix: str | None, func_index: int, func_name: str, func: Callable, min_arg: int,
+                     obj_name: str | None = None) -> None:
         if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
             return
         min_arg, max_arg = get_arg_number(func, func_name, min_arg)
@@ -1028,13 +1045,13 @@ class WritePythonCode(WriteCode):
             self.write(0, "_async.append(%s_%s)" % (prefix, func_name))
         self.emptyLine()
 
-    def writeArgument(self, level, last_char=","):
+    def writeArgument(self, level: int, last_char: str = ",") -> None:
         lines = self.createComplexArgument()
         lines[-1] += last_char
         for line in lines:
             self.write(level, line)
 
-    def useClass(self, cls_index, cls, class_name):
+    def useClass(self, cls_index: int, cls: type, class_name: str) -> None:
         nb_arg = class_arg_number(class_name, cls)
 
         prefix = "o%s" % (1 + cls_index)
@@ -1056,8 +1073,8 @@ class WritePythonCode(WriteCode):
                 prefix + "m",
                 cls,
                 methods,
-                tuple(),
-                tuple(),
+                list(),
+                list(),
                 0,
                 self.options.methods_number,
             )
@@ -1067,7 +1084,7 @@ class WritePythonCode(WriteCode):
             self.restoreLevel(level)
         self.emptyLine()
 
-    def useObject(self, obj_index, obj, obj_name):
+    def useObject(self, obj_index: int, obj: Any, obj_name: str) -> None:
         prefix = "obj%s" % (1 + obj_index)
         self.writePrint(
             0,
@@ -1082,8 +1099,8 @@ class WritePythonCode(WriteCode):
                 prefix + "m",
                 obj,
                 sorted(methods.keys()),
-                tuple(),
-                tuple(),
+                list(),
+                list(),
                 0,
                 self.options.methods_number,
                 obj_name,
@@ -1094,16 +1111,16 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
     def writeCode(
-        self,
-        prefix,
-        object,
-        functions,
-        classes,
-        objects,
-        func_min_arg,
-        nb_call,
-        obj_name=None,
-    ):
+            self,
+            prefix: str,
+            object: Any,
+            functions: list[str],
+            classes: list[str],
+            objects: list[str],
+            func_min_arg: int,
+            nb_call: int,
+            obj_name: str | None = None,
+    ) -> None:
         if functions:
             for index in range(nb_call):
                 func_name = choice(functions)
@@ -1125,10 +1142,10 @@ class WritePythonCode(WriteCode):
                     continue
                 self.useObject(index, obj, object_name)
 
-    def genNone(self):
+    def genNone(self) -> list[str]:
         return ["None"]
 
-    def genTricky(self):
+    def genTricky(self) -> list[str]:
         return [
             choice(
                 [
@@ -1150,47 +1167,47 @@ class WritePythonCode(WriteCode):
             )
         ]
 
-    def genBool(self):
+    def genBool(self) -> list[str]:
         if randint(0, 1) == 1:
             return ["True"]
         else:
             return ["False"]
 
-    def genSmallUint(self):
+    def genSmallUint(self) -> list[str]:
         return [self.smallint_generator.createValue()]
 
-    def genInt(self):
+    def genInt(self) -> list[str]:
         return [self.int_generator.createValue()]
 
-    def genBytes(self):
+    def genBytes(self) -> list[str]:
         # Bytes string
         bytes = self.bytes_generator.createValue()
         text = "".join("\\x%02X" % byte for byte in bytes)
         text = 'b"%s"' % text
         return [text]
 
-    def genUnixPath(self):
+    def genUnixPath(self) -> list[str]:
         path = self.unix_path_generator.createValue()
         return ['"%s"' % path]
 
-    def _genUnicode(self, generator):
+    def _genUnicode(self, generator: UnicodeGenerator) -> list[str]:
         # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
         text = '"%s"' % text
         return [text]
 
-    def genLetterDigit(self):
+    def genLetterDigit(self) -> list[str]:
         return self._genUnicode(self.letters_generator)
 
-    def genString(self):
+    def genString(self) -> list[str]:
         return self._genUnicode(self.unicode_generator)
 
-    def genRawString(self):
+    def genRawString(self) -> list[str]:
         sequences = (
-            [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
-            + sorted(LETTERS)
-            + ["."] * 10
+                [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
+                + sorted(LETTERS)
+                + ["."] * 10
         )
         special = ["+", "?", "*"]
         result = []
@@ -1200,40 +1217,40 @@ class WritePythonCode(WriteCode):
                 result.append(choice(special))
         return [f'r"{"".join(result)}"']
 
-    def genSurrogates(self):
+    def genSurrogates(self) -> list[str]:
         text = choice(SURROGATES)
         return [text]
 
-    def genInterestingValues(self):
+    def genInterestingValues(self) -> list[str]:
         interesting = choice(INTERESTING)
         return [interesting]
 
-    def genTrickyObjects(self):
+    def genTrickyObjects(self) -> list[str]:
         tricky = choice(fusil.python.tricky_weird.tricky_objects_names)
         return [tricky]
 
-    def genTrickyNumpy(self):
+    def genTrickyNumpy(self) -> list[str]:
         tricky = choice(fusil.python.tricky_weird.tricky_numpy_names)
         return [tricky]
 
-    def genTrickyTemplate(self):
+    def genTrickyTemplate(self) -> list[str]:
         tricky = choice(TEMPLATES)
         return [tricky]
 
-    def genWeirdClass(self):
+    def genWeirdClass(self) -> list[str]:
         weird_class_name = choice(fusil.python.tricky_weird.weird_names)
         return [f"weird_classes['{weird_class_name}']"]
 
-    def genWeirdInstance(self):
+    def genWeirdInstance(self) -> list[str]:
         weird_class_name = choice(fusil.python.tricky_weird.weird_instance_names)
         return [f"weird_instances['{weird_class_name}']"]
 
-    def genWeirdType(self):
+    def genWeirdType(self) -> list[str]:
         weird_class_name = choice(fusil.python.tricky_weird.weird_names)
         type_name = choice(fusil.python.tricky_weird.type_names)
         return [f"{type_name}[weird_classes['{weird_class_name}']]"]
 
-    def genWeirdUnion(self):
+    def genWeirdUnion(self) -> list[str]:
         weird_class_name1 = choice(fusil.python.tricky_weird.weird_names)
         weird_class_name2 = choice(fusil.python.tricky_weird.weird_names)
         type_name = choice(fusil.python.tricky_weird.type_names)
@@ -1241,34 +1258,34 @@ class WritePythonCode(WriteCode):
             f"{type_name}[weird_classes['{weird_class_name1}']] | weird_classes['{weird_class_name2}'] | big_union"
         ]
 
-    def genBufferObject(self):
+    def genBufferObject(self) -> list[str]:
         text = choice(BUFFER_OBJECTS)
         return [text]
 
-    def genAsciiString(self):
+    def genAsciiString(self) -> list[str]:
         return self._genUnicode(self.ascii_generator)
 
-    def genFloat(self):
+    def genFloat(self) -> list[str]:
         int_part = self.float_int_generator.createValue()
         float_part = self.float_float_generator.createValue()
         return ["%s.%s" % (int_part, float_part)]
 
-    def genExistingFilename(self):
+    def genExistingFilename(self) -> list[str]:
         filename = choice(self.filenames)
         return ["'%s'" % filename]
 
-    def genErrback(self):
+    def genErrback(self) -> list[str]:
         return ["%s" % ERRBACK_NAME]
 
-    def genOpenFile(self):
+    def genOpenFile(self) -> list[str]:
         filename = choice(self.filenames)
         instr = "open('%s')" % filename
         return [instr]
 
-    def genException(self):
+    def genException(self) -> list[str]:
         return ["Exception('pouet')"]
 
-    def _genList(self, open_text, close_text, empty, is_dict=False):
+    def _genList(self, open_text: str, close_text: str, empty: str, is_dict: bool = False) -> list[str]:
         # 90% of the time generate values of the same type
         same_type = randint(0, 9) != 0
         nb_item = randint(0, 9)
@@ -1292,7 +1309,7 @@ class WritePythonCode(WriteCode):
                 else:
                     item = self.createArgument()
                 items.append(item)
-        lines = []
+        lines: list[str] = []
         for item_index, item_lines in enumerate(items):
             if item_index:
                 lines[-1] += ","
@@ -1306,7 +1323,8 @@ class WritePythonCode(WriteCode):
         lines[-1] += close_text
         return lines
 
-    def createDictItem(self, key_callback=None, value_callback=None):
+    def createDictItem(self, key_callback: Callable[[], list[str]] | None = None,
+                       value_callback: Callable[[], list[str]] | None = None) -> list[str]:
         if key_callback:
             key = key_callback()
         else:
@@ -1319,17 +1337,17 @@ class WritePythonCode(WriteCode):
         key.extend(value[1:])
         return key
 
-    def genList(self):
+    def genList(self) -> list[str]:
         return self._genList("[", "]", "[]")
 
-    def genTuple(self):
+    def genTuple(self) -> list[str]:
         return self._genList("(", ")", "tuple()")
 
-    def genDict(self):
+    def genDict(self) -> list[str]:
         return self._genList("{", "}", "{}", True)
 
 
-def remove_logging_pycache():
+def remove_logging_pycache() -> None:
     """Remove stale logging __pycache__ that causes logging errors."""
     import importlib
     import logging
@@ -1348,7 +1366,7 @@ def remove_logging_pycache():
     importlib.reload(logging)
 
 
-def print_running_time():
+def print_running_time() -> str:
     raw_utime = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     user_time = str(datetime.timedelta(0, round(raw_utime, 2)))
     total_time = str(datetime.timedelta(0, round(time.time() - time_start, 2)))
