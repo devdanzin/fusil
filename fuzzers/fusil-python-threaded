@@ -86,8 +86,6 @@ DEBUG = False
 USE_MANGLE = False
 TIMEOUT = 900.0
 
-range = range
-
 # Constants
 PYTHON = sys.executable
 FILENAMES = "/etc/machine-id,/bin/sh"
@@ -510,7 +508,7 @@ class Fuzzer(Application):
         # Hide Python warnings on import
         warnings.simplefilter("ignore")
 
-        import_all()
+        # import_all()
 
     def exit(self, keep_log=True):
         super().exit(keep_log=keep_log)
