@@ -21,7 +21,6 @@ import warnings
 from io import StringIO
 from os.path import exists as path_exists
 from os.path import isabs
-from os.path import sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import Any, Callable, Generator
@@ -143,28 +142,39 @@ class ListAllModules:
         self.skip_test = skip_test
         self.verbose = verbose
 
-    def matchModule(self, is_package: bool, name: str, filename: str) -> bool:
-        if filename is not None and not self.filter_filename(filename):
-            return False
-        if not self.only_c:
-            return True
-        if is_package:
-            return False
+    def matchModule(
+        self,
+        is_package: bool,
+        name: str,
+        filename: str | None,
+        path: list[str] | None,
+        package: str | None,
+        prefix: str = "",
+    ) -> bool:
+        """Check if a module is valid for fuzzing."""
+
+        filename = "" if filename is None else filename
+        path = [] if path is None else path
+
+        if not self.site_package:
+            if "site-packages" in filename:
+                return False
+            elif any("site-packages" in p for p in path):
+                return False
+
+        if self.only_c:
+            if any(filename.endswith(ext) for ext in (".py", ".pyc", ".pyo")):
+                return False
+            elif is_package or not self.is_module_c(name, prefix):
+                return False
+
+        package = "" if package is None else package
         if any(
-            filename.endswith(ext)
-            for ext in (".py", ".pyc", ".pyo")
-            if filename is not None
+            entry in name or entry in package or entry in filename or entry in prefix
+            for entry in self.blacklist
         ):
             return False
-        return True
 
-    def filter_filename(self, filename: str) -> bool:
-        name_parts = filename.split(path_sep)
-        if not self.site_package:
-            if "site-packages" in name_parts:
-                return False
-        if name_parts[-1] in self.blacklist:
-            return False
         return True
 
     def walk_packages(
@@ -180,29 +190,25 @@ class ListAllModules:
             return False
 
         for info in pkgutil.iter_modules(path, prefix):
-            path = package = None
+            if info.name in self.blacklist:
+                continue
+            if info.name.endswith("_d"):
+                # Ignore Debian debug modules
+                # (e.g. ignore "_bisect_d", the real module is "_bisect)
+                continue
+            path = package = filename = None
             if info.name in sys.modules:
                 path = getattr(sys.modules[info.name], "__path__", None)
                 package = getattr(sys.modules[info.name], "__package__", None)
-            if (
-                (self.skip_test and "test" in info.name)
-                or "pip" in info.name
-                or "logging" in info.name
-                or "pydoc" in info.name
-                or "tkinter" in info.name
-                or (
-                    not self.site_package
-                    and path is not None
-                    and any("site-packages" in p for p in path)
-                )
-                or (package is not None and "pip" in package)
+                filename = getattr(sys.modules[info.name], "__file__", None)
+
+            if not self.matchModule(
+                info.ispkg, info.name, filename, path, package, prefix
             ):
                 if self.verbose:
-                    print("SKIPPED", info, file=sys.stderr)
+                    print("SKIPPED", prefix + info.name, file=sys.stderr)
                 continue
-            # print(f"CHECKING {info.name=} {package=} {path=}")
-            if not self.is_module_c(info.name, ""):
-                continue
+
             yield info
 
             if info.ispkg:
@@ -223,48 +229,22 @@ class ListAllModules:
                         path = [p for p in path if not seen(p)]
                         yield from self.walk_packages(path, info.name + ".", onerror)
 
-    def search_modules(self, path: list[str] | None, prefix: str) -> None:
-        if path is not None and not self.site_package:
-            path = [name for name in path if self.filter_filename(name)]
-            if not path:
-                return
-        try:
-            for loader, name, is_package in self.walk_packages(
-                None, onerror=lambda x: None
-            ):
-                if name.endswith("_d"):
-                    # Ignore Debian debug modules
-                    # (e.g. ignore "_bisect_d", the real module is "_bisect)
-                    continue
-                if (
-                    name in self.blacklist
-                    or prefix in self.blacklist
-                    or prefix.split(".")[0] in self.blacklist
-                    or name.split(".")[0] in self.blacklist
-                    or "test" in name
-                    or "idlelib" in name
-                    or "pydoc" in name
-                    or "logging" in name
-                ):
-                    # Ignore the module and all of its submodules
-                    if self.verbose:
-                        self.logger.error(f"IGNORED {prefix}:{name}")
-                    continue
-                if not self.is_module_c(name, prefix):
-                    continue
-                fullname = prefix + name
-                if self.verbose:
-                    self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
-                self.names.add(fullname)
-        except:
-            raise
+    def search_modules(self, prefix: str = "") -> set[str]:
+        for loader, name, is_package in self.walk_packages(
+            None, onerror=lambda x: None
+        ):
+            fullname = prefix + name
+            if self.verbose:
+                self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
+            self.names.add(fullname)
+        return self.names
 
     def is_module_c(self, name: str, prefix: str) -> bool:
         is_c = True
         fullname = prefix + name
-        if self.verbose:
-            print(f"TESTING {fullname}:")
         if self.only_c:
+            if self.verbose:
+                print(f"TESTING {fullname}:")
             module = None
             if fullname in sys.modules:
                 module = sys.modules[fullname]
@@ -284,16 +264,11 @@ class ListAllModules:
             if module and hasattr(module, "__file__"):
                 assert isinstance(module.__file__, str)
                 if module.__file__.endswith(("py", "pyo", "pyc", "pyw")):
-                    if "__init__" not in module.__file__:
-                        is_c = False
-                        self.logger.error(f"SKIP PYTHON MODULE {fullname}")
-        if self.verbose:
-            print(f"    IS {fullname} C: {is_c}")
+                    is_c = False
+                    self.logger.error(f"SKIP PYTHON MODULE {fullname}")
+            if self.verbose:
+                print(f"    IS {fullname} C: {is_c}")
         return is_c
-
-    def search(self) -> set[str]:
-        self.search_modules(None, "")
-        return self.names
 
 
 class Fuzzer(Application):
@@ -563,7 +538,7 @@ class PythonSource(ProjectAgent):
                 MODULE_BLACKLIST,
                 self.options.skip_test,
                 verbose=self.options.verbose,
-            ).search()
+            ).search_modules()
         if self.options.packages != "*":
             print("\nAdding packages...")
             all_modules = ListAllModules(
