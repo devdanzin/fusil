@@ -36,6 +36,7 @@ class ConfigError(Exception):
 
 
 def createFilename(name=None, configdir=None):
+    """Create a filename from the given name and configdir."""
     if name is None:
         name = "fusil.conf"
     if configdir is None:
@@ -113,6 +114,7 @@ class FusilConfig:
                 self._parser = None
 
     def write_sample_config(self, write_file=True):
+        """Create a sample configuration file and optionally write it."""
         output = StringIO()
         self._parser = RawConfigParser(allow_unnamed_section=True)
         filename = createFilename()
@@ -160,6 +162,7 @@ class FusilConfig:
 
 
 def optparse_to_configparser(parser, output=None, defaults=False, options=None):
+    """Convert optparse options to a configparser."""
     if defaults and options:
         raise ConfigError("Cannot use both defaults and options")
     elif not (defaults or options is not None):
@@ -204,6 +207,7 @@ def optparse_to_configparser(parser, output=None, defaults=False, options=None):
     return output.read()
 
 def configparser_to_options(parser):
+    """Convert a configparser to optparse options."""
     options = optparse.Values()
 
     for section in parser.sections():
@@ -233,6 +237,7 @@ class OptionGroupWithSections(OptionGroup):
 
 
 class OptionParserWithSections(OptionParser):
+    """OptionParser class which records sections."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.option_sections = {}
@@ -254,6 +259,7 @@ class OptionParserWithSections(OptionParser):
 
 
 class ConfigParserWithHelp(configparser.ConfigParser):
+    """ConfigParser class which records and writes help messages."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.help = {}
@@ -295,6 +301,7 @@ class ConfigParserWithHelp(configparser.ConfigParser):
 BOOLEANS = {"True": True, "False": False, "true": True, "false": False, "yes": True, "no": False, "y": True, "n": False}
 
 def get_and_convert(parser, section, key):
+    """Get a value from a parser and convert it to the appropriate type."""
     value: str = parser.get(section, key)
 
     if value in BOOLEANS:

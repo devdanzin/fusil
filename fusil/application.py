@@ -81,7 +81,7 @@ class Application(ApplicationAgent):
 
     def createOptionParser(self, output=None):
         """
-        Create all command line options including Fusil options.
+        Create all command line options, including Fusil options.
         """
         parser = OptionParserWithSections(usage=self.USAGE)
         parser.add_option("--version",
@@ -145,6 +145,7 @@ class Application(ApplicationAgent):
         return parser
 
     def parseOptions(self, with_options=False):
+        """Create command line options and parse them."""
         default_config = FusilConfig(read=False)
         config_output = default_config.write_sample_config(write_file=False)
         parser = self.createOptionParser(config_output)
@@ -181,15 +182,19 @@ class Application(ApplicationAgent):
             received_options = optparse_to_configparser(parser, default_configs, defaults=False, options=self.options)
             print("\n")
             print(received_options, "\n\n")
+
+        # --force-unsafe enables --unsafe
+        if self.options.force_unsafe:
+            self.options.unsafe = True
+
         self.processOptions(parser, self.options, self.arguments)
 
         # Just want to write a config file?
         if self.options.write_config:
             exit(0)
 
-
     def processOptions(self, parser, options, arguments):
-        # Check the number of arguments
+        """Check the number of arguments."""
         nb_arg = len(arguments)
         if isinstance(self.NB_ARGUMENTS, tuple):
             # Range (min, max)
@@ -207,11 +212,8 @@ class Application(ApplicationAgent):
             parser.print_help()
             exit(1)
 
-        # --force-unsafe enables --unsafe
-        if options.force_unsafe:
-            options.unsafe = True
-
     def setup(self):
+        """Prepare the application."""
         # Application objects
         self.exitcode = 0
         self.interrupted = False

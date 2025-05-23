@@ -431,6 +431,7 @@ class Fuzzer(Application):
         return config_output
 
     def setupProject(self):
+        """Prepare project for fuzzing."""
         project = self.project
 
         project.error(f"Start time: {time.asctime()}")
