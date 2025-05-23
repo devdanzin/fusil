@@ -36,10 +36,11 @@ class AutoMangle(MangleFile):
         count = int(count * self.aggressivity)
         self.config.max_op = max(count, self.hard_min_op)
         self.config.min_op = max(int(self.config.max_op * 0.80), self.hard_min_op)
-        self.warning("operation#:%s..%s  operations=%s"
-            % (self.config.min_op, self.config.max_op, self.config.operations))
+        self.warning(
+            "operation#:%s..%s  operations=%s"
+            % (self.config.min_op, self.config.max_op, self.config.operations)
+        )
 
     def mangleData(self, data, file_index):
         self.setupConf(data)
         return MangleFile.mangleData(self, data, file_index)
-

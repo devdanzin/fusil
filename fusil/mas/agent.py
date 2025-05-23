@@ -12,6 +12,7 @@ from fusil.mas.message import Message
 class AgentError(Exception):
     pass
 
+
 class Agent(object):
     def __init__(self, name, mta):
         self.agent_id = AgentID().generate()
@@ -41,14 +42,14 @@ class Agent(object):
 
     def __del__(self):
         try:
-            if hasattr(self, 'is_active'):
+            if hasattr(self, "is_active"):
                 self.deactivate()
             if hasattr(self, "mailbox") and self.mailbox:
                 self.mailbox.unregister()
             self.destroy()
         except KeyboardInterrupt:
             self.error("Agent destruction interrupted!")
-            self.send('application_interrupt')
+            self.send("application_interrupt")
         except Exception as error:
             print(self, error, "Agent destruction error", file=stderr)
 
@@ -141,31 +142,33 @@ class Agent(object):
         """
         Write a message to the log with DEBUG level
         """
-        self._log('debug', message)
+        self._log("debug", message)
 
     def info(self, message):
         """
         Write a message to the log with INFO level
         """
-        self._log('info', message)
+        self._log("info", message)
 
     def warning(self, message):
         """
         Write a message to the log with WARNING level
         """
-        self._log('warning', message)
+        self._log("warning", message)
 
     def error(self, message):
         """
         Write a message to the log with ERROR level
         """
-        self._log('error', message)
+        self._log("error", message)
 
     def __repr__(self):
-        return '<%s id=%s, name=%r is_active=%s>' % (
-            self.__class__.__name__, self.agent_id,
-            self.name, self.is_active)
+        return "<%s id=%s, name=%r is_active=%s>" % (
+            self.__class__.__name__,
+            self.agent_id,
+            self.name,
+            self.is_active,
+        )
 
     def __str__(self):
-        return '<%s %r>' % (self.__class__.__name__, self.name)
-
+        return "<%s %r>" % (self.__class__.__name__, self.name)

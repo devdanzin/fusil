@@ -11,7 +11,7 @@ class Option:
         index = 0
         for part in self.format.split():
             count = part.count("%s")
-            arg = part % tuple(arguments[index:index+count])
+            arg = part % tuple(arguments[index : index + count])
             result.append(arg)
             index += count
         if index != len(arguments):
@@ -20,8 +20,9 @@ class Option:
 
     def __str__(self):
         text = self.format
-        arguments = tuple( ("ARG%s" % index) for index in range(1, self.nb_argument+1) )
+        arguments = tuple(("ARG%s" % index) for index in range(1, self.nb_argument + 1))
         return text % arguments
+
 
 class CommandHelpParser:
     def __init__(self, program):
@@ -31,46 +32,54 @@ class CommandHelpParser:
         self.parse_line = self.parseLine
 
         # "-a", "-9" or "-C"
-        SHORT_OPT_REGEX = r'-[a-zA-Z0-9]'
+        SHORT_OPT_REGEX = r"-[a-zA-Z0-9]"
 
         # "-long", "-long-option" or "-Wunsued"
-        LONG_OPT_REGEX = r'-[a-zA-Z][a-z-]+'
+        LONG_OPT_REGEX = r"-[a-zA-Z][a-z-]+"
 
         # "--print" or "--very-long-option
-        LONGLONG_OPT_REGEX = r'--[a-z][a-z-]+'
+        LONGLONG_OPT_REGEX = r"--[a-z][a-z-]+"
 
         # "value", "VALUE", "define:option" or "LONG_VALUE"
-        VALUE_REGEX = '[a-zA-Z_:]+'
+        VALUE_REGEX = "[a-zA-Z_:]+"
 
         # @ value@, @=value@, @,<value>@, @ "value"@, @[=value]@, ...
         VALUE_REGEX = r'[ =]%s|[ ,=]<%s>|[ =]"%s"|\[=%s\]' % (
-            VALUE_REGEX, VALUE_REGEX, VALUE_REGEX, VALUE_REGEX)
+            VALUE_REGEX,
+            VALUE_REGEX,
+            VALUE_REGEX,
+            VALUE_REGEX,
+        )
 
         # -o
         # -o, --option
         # -o, --long-option=VALUE
-        self.gnu_regex = re.compile(r'^\s+(%s), (%s)?(%s)?' %
-            (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX))
+        self.gnu_regex = re.compile(
+            r"^\s+(%s), (%s)?(%s)?" % (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX)
+        )
 
         # -option
         # -Long-option VALUE
-        self.long_opt_regex = re.compile(r'^\s+(%s)(%s)?(%s)?' %
-            (LONG_OPT_REGEX, VALUE_REGEX, VALUE_REGEX))
+        self.long_opt_regex = re.compile(
+            r"^\s+(%s)(%s)?(%s)?" % (LONG_OPT_REGEX, VALUE_REGEX, VALUE_REGEX)
+        )
 
         # -C
         # -o VALUE
         # --option
         # --long-option=VALUE
-        self.opt_regex = re.compile(r'^\s+(%s|%s)(%s)?' %
-            (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX))
-        self.opt2_regex = re.compile(r'^(%s|%s)(%s)?\s+: ' %
-            (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX))
+        self.opt_regex = re.compile(
+            r"^\s+(%s|%s)(%s)?" % (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX)
+        )
+        self.opt2_regex = re.compile(
+            r"^(%s|%s)(%s)?\s+: " % (SHORT_OPT_REGEX, LONGLONG_OPT_REGEX, VALUE_REGEX)
+        )
 
         # Match "Usage: ping [-LRUbdfnqrvVaA]"
-        self.usage_prefix_regex = re.compile(r'^[Uu]sage: %s (.*)$' % self.program)
+        self.usage_prefix_regex = re.compile(r"^[Uu]sage: %s (.*)$" % self.program)
 
         # Match "[..]"
-        self.usage_group_regex = re.compile(r'\[([^]]+)\]')
+        self.usage_group_regex = re.compile(r"\[([^]]+)\]")
 
     def addOption(self, name, values, default_separator=None):
         nb_arg = 0
@@ -85,13 +94,13 @@ class CommandHelpParser:
             else:
                 separator = value[0]
             if '"' in value:
-                format.append( separator + '"%s"' )
+                format.append(separator + '"%s"')
             else:
-                if separator == '[':
+                if separator == "[":
                     separator = value[1]
-                format.append( separator + "%s" )
+                format.append(separator + "%s")
         nb_arg = len(format)
-        format = name + ''.join(format)
+        format = name + "".join(format)
 
         option = Option(format, nb_arg)
         self._addOption(option)
@@ -114,7 +123,7 @@ class CommandHelpParser:
             name = match.group(1)
             value = match.group(3)
             # Short option: -f FILE
-            self.addOption(name, [value], ' ')
+            self.addOption(name, [value], " ")
 
             name = match.group(2)
             if name:
@@ -152,17 +161,17 @@ class CommandHelpParser:
         Parse "group" like [-cdaf] (line="-cdaf")
         """
         line = line.strip()
-        if not line.startswith('-'):
+        if not line.startswith("-"):
             return False
-        if ' ' in line:
+        if " " in line:
             # '-c count'
             parts = line.split()
             values = parts[1:]
-            self.addOption(parts[0], values, ' ')
+            self.addOption(parts[0], values, " ")
         else:
             # '-ntpu'
             for opt in line[1:]:
-                self.addOption('-' + opt, tuple())
+                self.addOption("-" + opt, tuple())
         return True
 
     def parseUsage(self, line):
@@ -177,4 +186,3 @@ class CommandHelpParser:
         else:
             self.parse_line = self.parseLine
             self.parse_line(line)
-

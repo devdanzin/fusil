@@ -11,8 +11,7 @@ from fusil.process.cmdline import CommandLine
 from fusil.process.env import Environment
 from fusil.process.prepare import ChildError, prepareProcess
 from fusil.process.replay_python import createReplayPythonScript
-from fusil.process.tools import (displayProcessStatus, locateProgram,
-                                 splitCommand)
+from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand
 from fusil.project_agent import ProjectAgent
 from fusil.six import binary_type, string_types, text_type
 from fusil.unsafe import SUPPORT_UID
@@ -20,7 +19,7 @@ from fusil.unsafe import SUPPORT_UID
 if SUPPORT_UID:
     from pwd import getpwuid
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 
 if RUNNING_WINDOWS:
     from win32api import TerminateProcess
@@ -30,21 +29,29 @@ else:
 
 DEFAULT_TIMEOUT = 10.0
 
+
 def terminateProcess(process):
     if RUNNING_WINDOWS:
         TerminateProcess(process._handle, 1)
     else:
         kill(process.pid, SIGKILL)
 
+
 class ProcessError(Exception):
     # Exception raised by Fusil, by the CreateProcess class
     pass
 
+
 class CreateProcess(ProjectAgent):
-    def __init__(self, project, arguments=None,
-    stdout="file", stdin=False,
-    timeout=DEFAULT_TIMEOUT,
-    name=None):
+    def __init__(
+        self,
+        project,
+        arguments=None,
+        stdout="file",
+        stdin=False,
+        timeout=DEFAULT_TIMEOUT,
+        name=None,
+    ):
         if isinstance(arguments, string_types):
             arguments = splitCommand(arguments)
         config = project.config
@@ -63,10 +70,10 @@ class CreateProcess(ProjectAgent):
         self.debugger = project.debugger
         self.use_x11 = False
         self.popen_args = {
-            'stderr': STDOUT,
+            "stderr": STDOUT,
         }
         if not RUNNING_WINDOWS:
-            self.popen_args['close_fds'] = True
+            self.popen_args["close_fds"] = True
         self.stdin = stdin
 
     def init(self):
@@ -91,15 +98,18 @@ class CreateProcess(ProjectAgent):
         arguments = self.createArguments()
         for index, argument in enumerate(arguments):
             if isinstance(argument, binary_type):
-                has_null = ("\0" in argument)
+                has_null = "\0" in argument
             elif isinstance(argument, text_type):
-                has_null = (u"\0" in argument)
+                has_null = "\0" in argument
             else:
-                raise ValueError("Process argument %s is not a byte or unicode string: (%s) %r" % (
-                    index, type(argument).__name__, argument))
+                raise ValueError(
+                    "Process argument %s is not a byte or unicode string: (%s) %r"
+                    % (index, type(argument).__name__, argument)
+                )
             if has_null:
-                raise ValueError("Process argument %s contains nul byte: %r" % (
-                    index, argument))
+                raise ValueError(
+                    "Process argument %s contains nul byte: %r" % (index, argument)
+                )
         arguments[0] = locateProgram(arguments[0], raise_error=True)
         popen_args = self.createPopenArguments()
         self.info("Create process: %s" % repr(arguments))
@@ -122,8 +132,8 @@ class CreateProcess(ProjectAgent):
         self.closeStreams()
         if self.debugger.enabled:
             self._attach()
-        self.send('process_create', self)
-        self.send('process_pid', self, pid)
+        self.send("process_create", self)
+        self.send("process_pid", self, pid)
 
     def writeReplayScripts(self, arguments, popen_args):
         if self.wrote_replay:
@@ -139,36 +149,35 @@ class CreateProcess(ProjectAgent):
         env = self.env.create()
         if SUPPORT_UID:
             uid = self.project().config.process_uid
-            if 'HOME' in env \
-            and uid is not None:
+            if "HOME" in env and uid is not None:
                 # Use the fuzzer user home directory
-                env['HOME'] = getpwuid(uid).pw_dir
-        popen_args['env'] = env
+                env["HOME"] = getpwuid(uid).pw_dir
+        popen_args["env"] = env
         self.stdin_file = self.createStdin()
         if self.stdin_file:
-            popen_args['stdin'] = self.stdin_file.fileno()
+            popen_args["stdin"] = self.stdin_file.fileno()
         self.stdout_file = self.createStdout()
-        popen_args['stdout'] = self.stdout_file.fileno()
+        popen_args["stdout"] = self.stdout_file.fileno()
         if not RUNNING_WINDOWS:
-            popen_args['preexec_fn'] = self.prepareProcess
+            popen_args["preexec_fn"] = self.prepareProcess
         return popen_args
 
     def createStdin(self):
         if self.stdin:
             return None
         self.info("Stdin: %s" % devnull)
-        return open(devnull, 'rb')
+        return open(devnull, "rb")
 
     def createStdout(self):
         # Check stdout type
-        if self.stdout not in ('null', 'file'):
-            raise ValueError('Invalid stdout type: %r' % self.stdout)
+        if self.stdout not in ("null", "file"):
+            raise ValueError("Invalid stdout type: %r" % self.stdout)
 
         # Ignore stdout?
         if self.stdout != "null":
             # Otherwise, create a "stdout" file as output
-            filename = self.session().createFilename('stdout')
-            self.send('process_stdout', self, filename)
+            filename = self.session().createFilename("stdout")
+            self.send("process_stdout", self, filename)
         else:
             filename = devnull
         self.info("Stdout filename: %s" % filename)
@@ -193,7 +202,7 @@ class CreateProcess(ProjectAgent):
         else:
             # nul exitcode: don't rename the session
             return
-        self.send('session_rename', name)
+        self.send("session_rename", name)
 
     def processExited(self, status):
         if self.show_exit:
@@ -246,13 +255,12 @@ class CreateProcess(ProjectAgent):
         return status
 
     def live(self):
-        if (not self.process) \
-        or not (0 < self.timeout):
+        if (not self.process) or not (0 < self.timeout):
             return
         if time() - self.time0 < self.timeout:
             return
         self.warning("Timeout! (%.1f second)" % self.timeout)
-        self.send('session_rename', 'timeout')
+        self.send("session_rename", "timeout")
         self.timeout_reached = True
         self.terminate()
 
@@ -286,14 +294,18 @@ class CreateProcess(ProjectAgent):
             # Timeout?
             diff = time() - start
             if timeout < diff:
-                raise ValueError("Unable to kill process %s after %.1f seconds" % (
-                    self.process.pid, diff))
+                raise ValueError(
+                    "Unable to kill process %s after %.1f seconds"
+                    % (self.process.pid, diff)
+                )
 
             # Inform user about this loop
             if next_msg <= time():
                 next_msg = time() + 5.0
-                self.error("Wait until process %s death (since %.1f seconds)..."
-                    % (self.process.pid, diff))
+                self.error(
+                    "Wait until process %s death (since %.1f seconds)..."
+                    % (self.process.pid, diff)
+                )
 
             # Is process terminated?
             status = self.poll()
@@ -325,7 +337,7 @@ class CreateProcess(ProjectAgent):
     def getScore(self):
         return self.score
 
+
 class ProjectProcess(CreateProcess):
     def on_session_start(self):
         self.createProcess()
-

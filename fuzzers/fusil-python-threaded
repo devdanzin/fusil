@@ -16,25 +16,27 @@ import resource
 import sys
 import time
 import warnings
-import optparse
 from os.path import exists as path_exists, isabs, sep as path_sep
 from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 
 from ptrace.os_tools import RUNNING_PYTHON3
 
-import fusil.config
 import fusil.python.tricky_weird
-from fusil.config import optparse_to_configparser, OptionGroupWithSections
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
-from fusil.config import createFilename
+from fusil.config import OptionGroupWithSections, createFilename
 from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
 from fusil.project_agent import ProjectAgent
 from fusil.python.arg_numbers import get_arg_number, class_arg_number
-from fusil.python.blacklists import BLACKLIST, METHOD_BLACKLIST, MODULE_BLACKLIST, OBJECT_BLACKLIST
+from fusil.python.blacklists import (
+    BLACKLIST,
+    METHOD_BLACKLIST,
+    MODULE_BLACKLIST,
+    OBJECT_BLACKLIST,
+)
 from fusil.python.mangle import mangle_loop, mangle_obj
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
@@ -57,7 +59,8 @@ if not RUNNING_PYTHON3:
 
 try:
     import numpy
-    print("Numpy is available, using it to build tricky arrays.")
+
+    print(f"Numpy {numpy.__version__} is available, using it to build tricky arrays.")
     USE_NUMPY = True
 except ImportError:
     print("Numpy is not available.")
@@ -65,6 +68,7 @@ except ImportError:
 
 try:
     from fusil.python.template_strings import TEMPLATES
+
     print("Template strings available.")
     USE_TEMPLATE_STRINGS = True
 except ImportError:
@@ -93,7 +97,8 @@ DEFAULT_NB_OBJ = 100
 ERRBACK_NAME = "errback"
 
 EXCEPTION_NAMES = {
-    cls.__name__ for cls in builtins.__dict__.values()
+    cls.__name__
+    for cls in builtins.__dict__.values()
     if isinstance(cls, type) and issubclass(cls, Exception)
 }
 
@@ -163,7 +168,11 @@ class ListAllModules:
                 or "logging" in info.name
                 or "pydoc" in info.name
                 or "tkinter" in info.name
-                or (not self.site_package and path is not None and any("site-packages" in p for p in path))
+                or (
+                    not self.site_package
+                    and path is not None
+                    and any("site-packages" in p for p in path)
+                )
                 or (package is not None and "pip" in package)
             ):
                 print("SKIPPED", info, file=sys.stderr)
@@ -340,19 +349,22 @@ class Fuzzer(Application):
         fuzzing_options = OptionGroupWithSections(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
-            help="Number of function calls to generate per module (default: %d)" % DEFAULT_NB_CALL,
+            help="Number of function calls to generate per module (default: %d)"
+            % DEFAULT_NB_CALL,
             type="int",
             default=DEFAULT_NB_CALL,
         )
         fuzzing_options.add_option(
             "--methods-number",
-            help="Number of method calls to create for each class or object (default: %d)" % DEFAULT_NB_METHOD,
+            help="Number of method calls to create for each class or object (default: %d)"
+            % DEFAULT_NB_METHOD,
             type="int",
             default=DEFAULT_NB_METHOD,
         )
         fuzzing_options.add_option(
             "--classes-number",
-            help="Number of classes to fuzz per module (default: %d)" % DEFAULT_NB_CLASS,
+            help="Number of classes to fuzz per module (default: %d)"
+            % DEFAULT_NB_CLASS,
             type="int",
             default=DEFAULT_NB_CLASS,
         )
@@ -413,7 +425,8 @@ class Fuzzer(Application):
         )
         config_options.add_option(
             "--config-file",
-            help="Name of the configuration file to be read or written (default: %s)" % createFilename(),
+            help="Name of the configuration file to be read or written (default: %s)"
+            % createFilename(),
             type="str",
             default=createFilename(),
         )
@@ -541,7 +554,9 @@ class PythonSource(ProjectAgent):
                 print(f"Adding package: {package} ({path})")
                 package_walker = all_modules.walk_packages([path], package + ".")
                 self.modules |= set(mod.name for mod in package_walker)
-            print(f"\nKnow modules ({len(self.modules)}): {",".join(sorted(self.modules))}")
+            print(
+                f"\nKnow modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
+            )
 
         blacklist = self.options.blacklist
         if blacklist:
@@ -584,9 +599,14 @@ class PythonSource(ProjectAgent):
             self.warning("Module filename: %s" % self.module.__file__)
         except AttributeError:
             pass
-        self.write = WritePythonCode(self, self.filename, self.module,
-                                     self.module_name, threads=not self.options.no_threads,
-                                     _async=not self.options.no_async)
+        self.write = WritePythonCode(
+            self,
+            self.filename,
+            self.module,
+            self.module_name,
+            threads=not self.options.no_threads,
+            _async=not self.options.no_async,
+        )
 
     def on_session_start(self):
         self.filename = self.session().createFilename("source.py")
@@ -629,7 +649,9 @@ class PythonProcess(CreateProcess):
 
 
 class WritePythonCode(WriteCode):
-    def __init__(self, parent, filename, module, module_name, threads=True, _async=True):
+    def __init__(
+        self, parent, filename, module, module_name, threads=True, _async=True
+    ):
         WriteCode.__init__(self)
         self.filename = filename
         self.filenames = parent.filenames
@@ -677,13 +699,9 @@ class WritePythonCode(WriteCode):
             self.genTrickyObjects,
         )
         if not self.options.no_numpy and USE_NUMPY:
-            self.complex_argument_generators += (
-                self.genTrickyNumpy,
-            )
+            self.complex_argument_generators += (self.genTrickyNumpy,)
         if not self.options.no_tstrings and USE_TEMPLATE_STRINGS:
-            self.complex_argument_generators += (
-                self.genTrickyTemplate,
-            )
+            self.complex_argument_generators += (self.genTrickyTemplate,)
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
         self.int_generator = IntegerGenerator(20)
         self.bytes_generator = BytesGenerator(0, 20)
@@ -784,7 +802,13 @@ class WritePythonCode(WriteCode):
         self.write(0, "obj = %s" % self.module_name)
 
         self.writeCode(
-            "", self.module, self.functions, self.classes, self.objects, 1, self.options.functions_number,
+            "",
+            self.module,
+            self.functions,
+            self.classes,
+            self.objects,
+            1,
+            self.options.functions_number,
         )
         self.emptyLine()
         if self.threads:
@@ -803,7 +827,10 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
         if self._async:
             self.write(0, "async def main_async():")
-            self.write(1, "await asyncio.gather(*[asyncio.to_thread(x) for x in _async], return_exceptions=True)")
+            self.write(
+                1,
+                "await asyncio.gather(*[asyncio.to_thread(x) for x in _async], return_exceptions=True)",
+            )
             self.emptyLine()
             self.write(0, "runner = asyncio.Runner()")
             self.write(0, "loop = runner.get_loop()")
@@ -843,7 +870,9 @@ class WritePythonCode(WriteCode):
         if self.threads:
             self.write(0, "try:")
             self.write(1, "if result:")
-            self.write(2, "alive.append(Thread(target=func, args=arguments, name=message))")
+            self.write(
+                2, "alive.append(Thread(target=func, args=arguments, name=message))"
+            )
             self.write(0, "except:")
             self.write(1, "pass")
         self.write(0, "return result")
@@ -967,7 +996,10 @@ class WritePythonCode(WriteCode):
             self.write(0, first_line + ")")
         if self.threads:
             self.emptyLine()
-            first_line = "alive.append(Thread(target=obj.%s, name='%s', args=(" % (func_name, f"{prefix}:{func_name}")
+            first_line = "alive.append(Thread(target=obj.%s, name='%s', args=(" % (
+                func_name,
+                f"{prefix}:{func_name}",
+            )
             self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
             if nb_arg:
                 self.write(1, first_line)
@@ -984,7 +1016,7 @@ class WritePythonCode(WriteCode):
             self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
             self.write(1, "time.sleep(%s)" % (random.random() / 100))
             # self.write(1, "await asyncio.sleep(%s)" % (random.random() / 100))
-            first_line = 'try: obj.%s(' % func_name
+            first_line = "try: obj.%s(" % func_name
             if nb_arg:
                 self.write(1, first_line)
                 level = self.addLevel(1)
@@ -1026,7 +1058,15 @@ class WritePythonCode(WriteCode):
         if methods:
             self.write(0, "if obj is not None:")
             level = self.addLevel(1)
-            self.writeCode(prefix + "m", cls, methods, tuple(), tuple(), 0, self.options.methods_number)
+            self.writeCode(
+                prefix + "m",
+                cls,
+                methods,
+                tuple(),
+                tuple(),
+                0,
+                self.options.methods_number,
+            )
             self.write(0, "del %s" % obj_name)
             self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
             self.write(0, "collect()   # explicit call to the garbage collector")
@@ -1210,7 +1250,9 @@ class WritePythonCode(WriteCode):
         weird_class_name1 = choice(fusil.python.tricky_weird.weird_names)
         weird_class_name2 = choice(fusil.python.tricky_weird.weird_names)
         type_name = choice(fusil.python.tricky_weird.type_names)
-        return [f"{type_name}[weird_classes['{weird_class_name1}']] | weird_classes['{weird_class_name2}'] | big_union"]
+        return [
+            f"{type_name}[weird_classes['{weird_class_name1}']] | weird_classes['{weird_class_name2}'] | big_union"
+        ]
 
     def genBufferObject(self):
         text = choice(BUFFER_OBJECTS)

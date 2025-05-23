@@ -16,11 +16,13 @@ def listWindows(root):
         for window in listWindows(window):
             yield window
 
+
 def findWindowById(root, window_id):
     for window in listWindows(root):
         if window.id == window_id:
             return window
     raise KeyError("Unable to find Window 0x%08x" % window_id)
+
 
 def findWindowByNameRegex(root, name_regex, ignore_case=True):
     if ignore_case:
@@ -34,6 +36,7 @@ def findWindowByNameRegex(root, name_regex, ignore_case=True):
             return window
     raise KeyError("Unable to find window with name regex: %r" % name_regex)
 
+
 def formatWindow(window):
     name = window.get_wm_name()
     info = []
@@ -41,32 +44,35 @@ def formatWindow(window):
         info.append(name)
 
     geometry = window.get_geometry()
-    info.append('%sx%sx%s at (%s,%s)' % (
-        geometry.width, geometry.height, geometry.depth,
-        geometry.x, geometry.y))
+    info.append(
+        "%sx%sx%s at (%s,%s)"
+        % (geometry.width, geometry.height, geometry.depth, geometry.x, geometry.y)
+    )
 
     atom = InternAtom(display=window.display, name="_NET_WM_PID", only_if_exists=1)
     pid = window.get_property(atom.atom, AnyPropertyType, 0, 10)
     if pid:
         pid = int(pid.value.tolist()[0])
-        info.append('PID=%r' % pid)
+        info.append("PID=%r" % pid)
 
     info.append("ID=0x%08x" % window.id)
-    return '; '.join(info)
+    return "; ".join(info)
+
 
 def displayWindows(root, level=0):
     tree = root.query_tree()
     children = tree.children
     if not children:
         return
-    indent = ("   "*level)
+    indent = "   " * level
     print(indent + "|== %s ===" % formatWindow(root))
     parent = tree.parent
     if parent:
         print(indent + "|-- parent: %s" % formatWindow(parent))
     for window in children:
         print(indent + "|-> %s" % formatWindow(window))
-        displayWindows(window, level+1)
+        displayWindows(window, level + 1)
+
 
 def sendKey(window, keycode, modifiers=0, released=True):
     if released:
@@ -87,10 +93,11 @@ def sendKey(window, keycode, modifiers=0, released=True):
         event_x=0,
         event_y=0,
         state=modifiers,
-        same_screen=1)
+        same_screen=1,
+    )
     window.send_event(event)
     window.display.flush()
 
+
 def getDisplay():
     return Display()
-

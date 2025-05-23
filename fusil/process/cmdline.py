@@ -8,4 +8,3 @@ class CommandLine(ProjectAgent):
 
     def create(self):
         return list(self.arguments)
-

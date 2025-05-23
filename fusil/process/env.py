@@ -6,7 +6,7 @@ from fusil.bytes_generator import ASCII0, BytesGenerator, LengthGenerator
 from fusil.project_agent import ProjectAgent
 from fusil.unicode_generator import IntegerGenerator
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 
 
 class EnvironmentVariable:
@@ -54,7 +54,7 @@ class EnvironmentVariable:
 
 
 class EnvVarValue(EnvironmentVariable):
-    def __init__(self, name, value='', max_count=1):
+    def __init__(self, name, value="", max_count=1):
         EnvironmentVariable.__init__(self, name, max_count)
         self.value = value
 
@@ -89,7 +89,9 @@ class EnvVarIntegerRange(EnvironmentVariable):
 
 
 class EnvVarRandom(BytesGenerator, EnvironmentVariable):
-    def __init__(self, name, min_length=0, max_length=10000, max_count=1, bytes_set=ASCII0):
+    def __init__(
+        self, name, min_length=0, max_length=10000, max_count=1, bytes_set=ASCII0
+    ):
         BytesGenerator.__init__(self, min_length, max_length, bytes_set)
         EnvironmentVariable.__init__(self, name, max_count)
 
@@ -103,7 +105,7 @@ class Environment(ProjectAgent):
         self.copies.append("LSAN_OPTIONS")
         self.copies.append("ASAN_OPTIONS")
         if RUNNING_WINDOWS:
-            self.copies.append('SYSTEMROOT')
+            self.copies.append("SYSTEMROOT")
 
     def clear(self):
         self.copies = []
@@ -117,8 +119,10 @@ class Environment(ProjectAgent):
         try:
             variable = self[name]
             if not isinstance(variable, EnvVarValue):
-                raise TypeError("Variable %s is already set but the type is not EnvVarValue but %s"
-                    % (name, variable.__class__.__name__))
+                raise TypeError(
+                    "Variable %s is already set but the type is not EnvVarValue but %s"
+                    % (name, variable.__class__.__name__)
+                )
         except KeyError:
             variable = EnvVarValue(name, value, max_count)
             self.add(variable)
@@ -144,7 +148,7 @@ class Environment(ProjectAgent):
         for var in self.variables:
             if var.hasName(name):
                 return var
-        raise KeyError('No environment variable: %r' % name)
+        raise KeyError("No environment variable: %r" % name)
 
     def create(self):
         """
@@ -162,12 +166,17 @@ class Environment(ProjectAgent):
         # Generate new variables
         for var in self.variables:
             for name, value in var.create():
-                message = "Create environment variable %s: (len=%s)" % (name, len(value))
+                message = "Create environment variable %s: (len=%s)" % (
+                    name,
+                    len(value),
+                )
                 if len(value) <= 50:
-                    message += ' ' + repr(value)
+                    message += " " + repr(value)
                 self.info(message)
                 if "\0" in value:
-                    raise ValueError("Nul byte in environment variable value is forbidden!")
+                    raise ValueError(
+                        "Nul byte in environment variable value is forbidden!"
+                    )
                 env[name] = value
 
         # Write result to logs
@@ -175,6 +184,5 @@ class Environment(ProjectAgent):
         return env
 
     def copyX11(self):
-        self.copy('HOME')
-        self.copy('DISPLAY')
-
+        self.copy("HOME")
+        self.copy("DISPLAY")

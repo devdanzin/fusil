@@ -12,7 +12,5 @@ class TcpClient(NetworkClient):
 
     def on_session_start(self):
         self.connect(
-            (self.host, self.port),
-            AF_INET, SOCK_STREAM,
-            timeout=self.connect_timeout)
-
+            (self.host, self.port), AF_INET, SOCK_STREAM, timeout=self.connect_timeout
+        )

@@ -10,6 +10,7 @@ class MTA(ApplicationAgent):
      - send(): store messages in a mailbox of message category
      - live(): deliver messages in agent mailboxes
     """
+
     def __init__(self, application):
         ApplicationAgent.__init__(self, "mta", application, None)
         self.setupMTA(self, application.logger)
@@ -56,4 +57,3 @@ class MTA(ApplicationAgent):
             for mailbox_ref in broken_refs:
                 mailing_list.remove(mailbox_ref)
         self.clear()
-

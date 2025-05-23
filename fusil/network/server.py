@@ -32,10 +32,11 @@ class NetworkServer(ProjectAgent):
             self.socket.listen(self.backlog)
             self.error("Server waiting on %s" % formatAddress(family, address))
         except socket_error as err:
-            writeError(self, err, "Unable to bind on %s" %
-                formatAddress(family, address))
+            writeError(
+                self, err, "Unable to bind on %s" % formatAddress(family, address)
+            )
             self.socket = None
-            self.send('application_error', 'Network server bind error')
+            self.send("application_error", "Network server bind error")
 
     def close(self):
         if self.clients:
@@ -53,9 +54,8 @@ class NetworkServer(ProjectAgent):
     def acceptClient(self):
         client_socket, client_address = self.socket.accept()
         client = self.client_class(
-            self.session(),
-            self,
-            client_socket, client_address, self.family)
+            self.session(), self, client_socket, client_address, self.family
+        )
         self.warning("New client: %s" % client)
         self.clients.append(client)
 
@@ -74,7 +74,7 @@ class NetworkServer(ProjectAgent):
             return
         server_fileno = self.socket.fileno()
         read_fds = [server_fileno]
-        client_fds = dict( (client.socket.fileno(), client) for client in self.clients )
+        client_fds = dict((client.socket.fileno(), client) for client in self.clients)
         read_fds += list(client_fds.keys())
         read_available = select(read_fds, [], [], 0)[0]
         if read_available is None:
@@ -87,4 +87,3 @@ class NetworkServer(ProjectAgent):
             else:
                 self.info("Accept client")
                 self.acceptClient()
-

@@ -15,4 +15,3 @@ class ApplicationAgent(Agent):
 
     def unregister(self, destroy=True):
         self.application().unregisterAgent(self, destroy)
-

@@ -324,6 +324,7 @@ def get_arg_number(func, func_name, min_arg):
 
 def class_arg_number(class_name, cls):
     import inspect
+
     if class_name in CLASS_NB_ARG:
         min_args, max_args = CLASS_NB_ARG[class_name]
         nb_arg = randint(min_args, max_args)

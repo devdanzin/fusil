@@ -4,11 +4,12 @@ from fusil.process.create import ProjectProcess
 
 LIBRARY_PATHS = (
     # Linux
-    '/usr/lib/zzuf/libzzuf.so',
+    "/usr/lib/zzuf/libzzuf.so",
     # BSD
-    '/usr/local/lib/zzuf/libzzuf.so',
+    "/usr/local/lib/zzuf/libzzuf.so",
 )
 DEFAULT_RATIO = 0.004
+
 
 class ZzufProcess(ProjectProcess):
     def __init__(self, project, arguments, library_path=None, **options):
@@ -26,10 +27,12 @@ class ZzufProcess(ProjectProcess):
                 library_path = path
                 break
             if not library_path:
-                raise ValueError("Unable to find zzuf library (try %s)" % ', '.join(LIBRARY_PATHS))
+                raise ValueError(
+                    "Unable to find zzuf library (try %s)" % ", ".join(LIBRARY_PATHS)
+                )
 
         # Load zzuf using LD_PRELOAD
-        self.env.set('LD_PRELOAD', library_path)
+        self.env.set("LD_PRELOAD", library_path)
 
     def init(self):
         ProjectProcess.init(self)
@@ -43,8 +46,8 @@ class ZzufProcess(ProjectProcess):
 
     def createProcess(self):
         if self.use_debug_file:
-            filename = self.session().createFilename('zzuf.dbg')
-            self.zzuf_file = open(filename, 'w')
+            filename = self.session().createFilename("zzuf.dbg")
+            self.zzuf_file = open(filename, "w")
             self.env.set("ZZUF_DEBUG", str(self.zzuf_file.fileno()))
         ProjectProcess.createProcess(self)
 
@@ -57,7 +60,6 @@ class ZzufProcess(ProjectProcess):
 
     def setRatio(self, min_ratio, max_ratio):
         self.min_ratio = min_ratio
-        self.env.set('ZZUF_MINRATIO', str(self.min_ratio))
+        self.env.set("ZZUF_MINRATIO", str(self.min_ratio))
         self.max_ratio = max_ratio
-        self.env.set('ZZUF_MAXRATIO', str(self.max_ratio))
-
+        self.env.set("ZZUF_MAXRATIO", str(self.max_ratio))

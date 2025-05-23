@@ -16,6 +16,5 @@ class ProcessTimeWatch(TimeWatch):
 
     def on_process_exit(self, agent, status):
         duration = time() - self.time0
-        self.warning("Process done: duration=%.1f ms" % (duration*1000))
+        self.warning("Process done: duration=%.1f ms" % (duration * 1000))
         self.setScore(duration)
-

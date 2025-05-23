@@ -15,6 +15,7 @@ if RUNNING_PYPY:
 # Match "[0][session 0010] "
 PREFIX_REGEX = re.compile(r"\[[0-9]\]\[+session [0-9]+\] ")
 
+
 class SessionFormatter(Formatter):
     """
     Log formatter for session.log: only write the message and
@@ -22,9 +23,11 @@ class SessionFormatter(Formatter):
 
     "[0][session 0010] text" => "text"
     """
+
     def format(self, record):
         text = Formatter.format(self, record)
-        return PREFIX_REGEX.sub('', text)
+        return PREFIX_REGEX.sub("", text)
+
 
 class Session(SessionAgent):
     """
@@ -32,6 +35,7 @@ class Session(SessionAgent):
      - create a directory as working directory
      - compute the score of the session
     """
+
     def __init__(self, project):
         self.agents = AgentList()
         self.score = None
@@ -66,7 +70,7 @@ class Session(SessionAgent):
             score *= agent.score_weight
             score = normalizeScore(score)
             if verbose and score:
-                self.info("- %s score: %.1f%%" % (agent, score*100))
+                self.info("- %s score: %.1f%%" % (agent, score * 100))
             session_score += score
         return session_score
 
@@ -83,7 +87,8 @@ class Session(SessionAgent):
 
         log_filename = self.createFilename("session.log")
         self.log_handler = self.logger.addFileHandler(
-            log_filename, level=INFO, formatter_class=SessionFormatter)
+            log_filename, level=INFO, formatter_class=SessionFormatter
+        )
 
         self.stopped = False
 
@@ -105,9 +110,9 @@ class Session(SessionAgent):
         if score is None:
             return
         project = self.project()
-        if not(project.success_score <= score or score <= project.error_score):
+        if not (project.success_score <= score or score <= project.error_score):
             return
-        self.send('session_stop')
+        self.send("session_stop")
 
     def on_session_stop(self):
         if self.stopped:
@@ -115,8 +120,8 @@ class Session(SessionAgent):
         self.stopped = True
         score = self.computeScore(True)
         if self.project().success_score <= score:
-            self.send('session_success')
-        self.send('session_done', score)
+            self.send("session_success")
+        self.send("session_done", score)
 
     def createFilename(self, filename, count=None):
         """
@@ -124,4 +129,3 @@ class Session(SessionAgent):
         prefix and make sure that the generated filename is unique.
         """
         return self.directory.uniqueFilename(filename, count=count)
-

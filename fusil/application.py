@@ -8,11 +8,14 @@ if SUPPORT_UID:
     from os import getuid, getgid
 
 from ptrace.error import PTRACE_ERRORS, writeError
-from ptrace.os_tools import RUNNING_PYTHON3
 
 from fusil.application_logger import ApplicationLogger
 from fusil.config import (
-    ConfigError, FusilConfig, OptionGroupWithSections, OptionParserWithSections, optparse_to_configparser
+    ConfigError,
+    FusilConfig,
+    OptionGroupWithSections,
+    OptionParserWithSections,
+    optparse_to_configparser,
 )
 from fusil.file_tools import relativePath
 from fusil.mas.agent_list import AgentList
@@ -27,11 +30,7 @@ from fusil.xhost import xhostCommand
 if SUPPORT_UID:
     from grp import getgrgid, getgrnam
     from pwd import getpwnam, getpwuid
-try:
-    # Use readline to get better raw_input()
-    import readline
-except ImportError:
-    pass
+
 
 def formatLimit(limit):
     if 0 < limit:
@@ -84,58 +83,102 @@ class Application(ApplicationAgent):
         Create all command line options, including Fusil options.
         """
         parser = OptionParserWithSections(usage=self.USAGE)
-        parser.add_option("--version",
+        parser.add_option(
+            "--version",
             help="Display Fusil version (%s) and exit" % VERSION,
-            action="store_true")
+            action="store_true",
+        )
 
         self.createFuzzerOptions(parser, output)
         config_options = StringIO()
         fuzzer = OptionGroupWithSections(parser, "Fuzzer")
-        fuzzer.add_option("--success",
-            help="Maximum number of success sessions (default: %s)" % formatLimit(self.config.fusil_success),
-            type="int", default=self.config.fusil_success)
-        fuzzer.add_option("--sessions",
-            help="Maximum number of session (default: %s)" % formatLimit(self.config.fusil_session),
-            type="int", default=self.config.fusil_session)
-        fuzzer.add_option("--fast",
+        fuzzer.add_option(
+            "--success",
+            help="Maximum number of success sessions (default: %s)"
+            % formatLimit(self.config.fusil_success),
+            type="int",
+            default=self.config.fusil_success,
+        )
+        fuzzer.add_option(
+            "--sessions",
+            help="Maximum number of session (default: %s)"
+            % formatLimit(self.config.fusil_session),
+            type="int",
+            default=self.config.fusil_session,
+        )
+        fuzzer.add_option(
+            "--fast",
             help="Run as fast as possible (opposite of --slow)",
-            action="store_true", default=False)
-        fuzzer.add_option("--slow",
+            action="store_true",
+            default=False,
+        )
+        fuzzer.add_option(
+            "--slow",
             help="Try to keep system load low: be nice with CPU (opposite of --fast)",
-            action="store_true", default=True)
-        fuzzer.add_option("--keep-generated-files",
+            action="store_true",
+            default=True,
+        )
+        fuzzer.add_option(
+            "--keep-generated-files",
             help="Keep a session directory if it contains generated files",
-            action="store_true", default=False)
-        fuzzer.add_option("--keep-sessions",
+            action="store_true",
+            default=False,
+        )
+        fuzzer.add_option(
+            "--keep-sessions",
             help="Do not remove session directories",
-            action="store_true", default=False)
-        fuzzer.add_option("--aggressivity",
+            action="store_true",
+            default=False,
+        )
+        fuzzer.add_option(
+            "--aggressivity",
             help="Initial aggressivity factor in percent, value in -100.0..100.0 (default: 0.0%%)",
-            type="float", default=0.0)
-        fuzzer.add_option("--unsafe",
+            type="float",
+            default=0.0,
+        )
+        fuzzer.add_option(
+            "--unsafe",
             help="Don't change user or group for child processes",
-            action="store_true", default=False)
-        fuzzer.add_option("--force-unsafe",
+            action="store_true",
+            default=False,
+        )
+        fuzzer.add_option(
+            "--force-unsafe",
             help="Similar to --unsafe option but don't ask confirmation",
-            action="store_true", default=False)
+            action="store_true",
+            default=False,
+        )
         parser.add_option_group(fuzzer)
 
         log = OptionGroupWithSections(parser, "Logging")
-        log.add_option('-v', "--verbose",
+        log.add_option(
+            "-v",
+            "--verbose",
             help="Enable verbose mode (set log level to WARNING)",
-            action="store_true", default=False)
-        log.add_option("--quiet",
+            action="store_true",
+            default=False,
+        )
+        log.add_option(
+            "--quiet",
             help="Be quiet (lowest log level), don't create log file",
-            action="store_true", default=False)
+            action="store_true",
+            default=False,
+        )
         parser.add_option_group(log)
 
         debug = OptionGroupWithSections(parser, "Development")
-        debug.add_option("--debug",
+        debug.add_option(
+            "--debug",
             help="Enable debug mode (set log level to DEBUG)",
-            action="store_true", default=False)
-        debug.add_option("--profiler",
+            action="store_true",
+            default=False,
+        )
+        debug.add_option(
+            "--profiler",
             help="Enable Python profiler",
-            action="store_true", default=False)
+            action="store_true",
+            default=False,
+        )
         parser.add_option_group(debug)
 
         if output:
@@ -159,8 +202,11 @@ class Application(ApplicationAgent):
 
         if with_options:
             self.options = FusilConfig(
-                self.options, filename=filename, configdir=configdir, read=self.options.use_config,
-                write=self.options.write_config
+                self.options,
+                filename=filename,
+                configdir=configdir,
+                read=self.options.use_config,
+                write=self.options.write_config,
             )
 
         # Just want to know the version?
@@ -179,7 +225,9 @@ class Application(ApplicationAgent):
         if self.options.verbose:
             print("\nReceived options:")
             default_configs = self.options.write_sample_config(False)
-            received_options = optparse_to_configparser(parser, default_configs, defaults=False, options=self.options)
+            received_options = optparse_to_configparser(
+                parser, default_configs, defaults=False, options=self.options
+            )
             print("\n")
             print(received_options, "\n\n")
 
@@ -202,12 +250,11 @@ class Application(ApplicationAgent):
             need_arg = False
             if nb_arg < min_arg:
                 need_arg = True
-            elif (max_arg is not None) \
-            and (max_arg < nb_arg):
+            elif (max_arg is not None) and (max_arg < nb_arg):
                 need_arg = True
         else:
             # Fixed number of arguments
-            need_arg = (nb_arg != self.NB_ARGUMENTS)
+            need_arg = nb_arg != self.NB_ARGUMENTS
         if need_arg:
             parser.print_help()
             exit(1)
@@ -228,7 +275,7 @@ class Application(ApplicationAgent):
         try:
             self.config = FusilConfig()
         except ConfigError as err:
-            self.fatalError(u"Configuration error: %s" % err)
+            self.fatalError("Configuration error: %s" % err)
 
         # Read command line options
         self.parseOptions(with_options=True)
@@ -242,13 +289,15 @@ class Application(ApplicationAgent):
         try:
             self.processConfig()
         except ConfigError as err:
-            self.fatalError(u"Configuration error: %s" % err)
+            self.fatalError("Configuration error: %s" % err)
 
         # Limit Fusil environment
         if not self.options.fast:
             beNice(True)
         if 0 < self.config.fusil_max_memory:
-            self.error("Skip limiting memory to %s bytes" % self.config.fusil_max_memory)
+            self.error(
+                "Skip limiting memory to %s bytes" % self.config.fusil_max_memory
+            )
             # limitMemory(self.config.fusil_max_memory)
 
         # Create multi agent system
@@ -297,9 +346,9 @@ class Application(ApplicationAgent):
 
         # Display error if any
         if errors:
-            message  = u"Unable to get the identifier of "
-            message += u" and ".join(errors)
-            message += u" (create missing user/group or use --unsafe option)"
+            message = "Unable to get the identifier of "
+            message += " and ".join(errors)
+            message += " (create missing user/group or use --unsafe option)"
             raise ConfigError(message)
 
         # Display the safety warning (if needed)
@@ -308,7 +357,9 @@ class Application(ApplicationAgent):
         # Display second warning about force unsafee
         if self.options.force_unsafe:
             self.error("")
-            self.error("!!!WARNING!!! You choosed --force-unsafe, so don't cry if you lost any file or process!")
+            self.error(
+                "!!!WARNING!!! You choosed --force-unsafe, so don't cry if you lost any file or process!"
+            )
             self.error("")
 
     def safetyWarning(self):
@@ -323,8 +374,7 @@ class Application(ApplicationAgent):
 
         # Don't show the warning
         running_root = (uid is None) and (getuid() == 0)
-        if self.options.force_unsafe \
-        and not running_root:
+        if self.options.force_unsafe and not running_root:
             return
 
         # Display huge error message
@@ -333,12 +383,24 @@ class Application(ApplicationAgent):
         if gid is None:
             gid = getgid()
         self.error("")
-        self.error("!!!WARNING!!! The fuzzer will run as user %s and group %s," % (uid, gid))
-        self.error("!!!WARNING!!! and may remove arbitrary files and kill arbitrary processes.")
+        self.error(
+            "!!!WARNING!!! The fuzzer will run as user %s and group %s," % (uid, gid)
+        )
+        self.error(
+            "!!!WARNING!!! and may remove arbitrary files and kill arbitrary processes."
+        )
         if not self.options.unsafe:
-            self.error("!!!WARNING!!! Change your Fusil configuration (%s)" % self.config.filename)
-            self.error("!!!WARNING!!! to use different user and group, or use --unsafe command")
-            self.error("!!!WARNING!!! line option to use current user and group (%s:%s)." % (getuid(), getgid()))
+            self.error(
+                "!!!WARNING!!! Change your Fusil configuration (%s)"
+                % self.config.filename
+            )
+            self.error(
+                "!!!WARNING!!! to use different user and group, or use --unsafe command"
+            )
+            self.error(
+                "!!!WARNING!!! line option to use current user and group (%s:%s)."
+                % (getuid(), getgid())
+            )
         if not running_root:
             # always show the warning when running as root!
             self.error("!!!WARNING!!! Use --force-unsafe to avoid this warning.")
@@ -347,17 +409,15 @@ class Application(ApplicationAgent):
         # Ask confirmation
         try:
             answer = None
-            while answer not in (u"yes", u"no", u""):
+            while answer not in ("yes", "no", ""):
                 if answer:
                     prompt = 'Please answer "yes" or "no": '
                 else:
-                    prompt = 'Do you want to continue? (yes/NO) '
-                if RUNNING_PYTHON3:
-                    answer = input(prompt)
-                else:
-                    answer = raw_input(prompt)
+                    prompt = "Do you want to continue? (yes/NO) "
+
+                answer = input(prompt)
                 answer = answer.strip().lower()
-            confirm = (answer == 'yes')
+            confirm = answer == "yes"
         except (KeyboardInterrupt, EOFError):
             stdout.write("\n")
             confirm = False
@@ -435,6 +495,7 @@ class Application(ApplicationAgent):
         try:
             if self.options.profiler:
                 from ptrace.profiler import runProfiler
+
                 runProfiler(self, self.univers.execute, (self.project,))
             else:
                 self.univers.execute(self.project)
@@ -473,12 +534,12 @@ class Application(ApplicationAgent):
 
     def on_application_interrupt(self):
         self.error("User interrupt!")
-        self.send('univers_stop')
+        self.send("univers_stop")
 
     def on_application_error(self, message):
         self.error(message)
         self.exitcode = 1
-        self.send('univers_stop')
+        self.send("univers_stop")
 
     def main(self, exit_at_end=True):
         """
@@ -521,4 +582,3 @@ class Application(ApplicationAgent):
             return
         command = xhostCommand(config.fusil_xhost_program, config.process_uid, allow)
         runCommand(self, command, stdout=None)
-

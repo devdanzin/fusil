@@ -4,20 +4,22 @@ from errno import EACCES
 from os import X_OK, access, chdir
 from shutil import chown
 
-from fusil.process.tools import (allowCoreDump, beNice, limitMemory,
-                                 limitUserProcess)
+from fusil.process.tools import allowCoreDump, beNice, limitMemory, limitUserProcess
 from fusil.unsafe import SUPPORT_UID, permissionHelp
 
 if SUPPORT_UID:
     from os import getuid, setgid, setuid
     from pwd import getpwuid
 
+
 class ChildError(Exception):
     # Exception raised after the fork(), in prepareProcess()
     pass
 
+
 def prepareProcess(process):
     from sys import stderr
+
     print(f"USER {getuid()}", file=stderr)
     project = process.project()
     config = project.config
@@ -44,11 +46,10 @@ def prepareProcess(process):
             raise
         user = getuid()
         user = getpwuid(user).pw_name
-        message = 'The user %s is not allowed enter directory to %s' \
-            % (user, directory)
+        message = "The user %s is not allowed enter directory to %s" % (user, directory)
         help = permissionHelp(options)
         if help:
-            message += ' (%s)' % help
+            message += " (%s)" % help
         raise ChildError(message)
 
     # Make sure that the program is executable by the current user
@@ -56,15 +57,15 @@ def prepareProcess(process):
     if not access(program, X_OK):
         user = getuid()
         user = getpwuid(user).pw_name
-        message = 'The user %s is not allowed to execute the file %s' \
-            % (user, program)
+        message = "The user %s is not allowed to execute the file %s" % (user, program)
         help = permissionHelp(options)
         if help:
-            message += ' (%s)' % help
+            message += " (%s)" % help
         raise ChildError(message)
 
     # Limit process resources
     limitResources(process, config, options)
+
 
 def limitResources(process, config, options):
     # Change process priority to be nice
@@ -81,6 +82,7 @@ def limitResources(process, config, options):
         allowCoreDump(hard=True)
     if config.process_user and (0 < process.max_user_process):
         limitUserProcess(process.max_user_process, hard=True)
+
 
 def changeUserGroup(config, options):
     # Change group?
@@ -112,9 +114,8 @@ def changeUserGroup(config, options):
     help = permissionHelp(options)
 
     # Raise an error message
-    errors = ' and '.join(reversed(errors))
-    message = 'Unable to set ' + errors
+    errors = " and ".join(reversed(errors))
+    message = "Unable to set " + errors
     if help:
-        message += ' (%s)' % help
+        message += " (%s)" % help
     raise ChildError(message)
-

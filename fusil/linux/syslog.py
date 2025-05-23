@@ -5,38 +5,40 @@ from fusil.project_agent import ProjectAgent
 
 FILENAMES = (
     # Linux: system logs
-    'syslog',
-    'messages',
+    "syslog",
+    "messages",
     # Linux: kernel logs
-    'dmesg',
-    'kern.log',
+    "dmesg",
+    "kern.log",
     # Linux: authentication (PAM) logs
-    'auth.log',
+    "auth.log",
     # Linux: user logs
-    'user.log',
+    "user.log",
     # FreeBSD: kernel logs
-    'dmesg.today',
+    "dmesg.today",
     # FreeBSD: user logs
-    'userlog',
+    "userlog",
 )
+
 
 class Syslog(ProjectAgent):
     def __init__(self, project):
         ProjectAgent.__init__(self, project, "syslog")
         self.logs = []
         for filename in FILENAMES:
-            agent = self.create(project, '/var/log/' + filename)
+            agent = self.create(project, "/var/log/" + filename)
             if not agent:
                 continue
             self.logs.append(agent)
 
     def create(self, project, filename):
         if exists(filename):
-            return FileWatch(project, open(filename), 'syslog:%s' % basename(filename), start='end')
+            return FileWatch(
+                project, open(filename), "syslog:%s" % basename(filename), start="end"
+            )
         else:
             self.warning("Skip (non existent) log file: %s" % filename)
             return None
 
     def __iter__(self):
         return iter(self.logs)
-

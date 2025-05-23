@@ -1,3 +1,2 @@
 class FusilError(Exception):
     pass
-

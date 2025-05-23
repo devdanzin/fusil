@@ -18,18 +18,19 @@ DEFAULTS = {
     "fusil_normal_calm_sleep": 0.5,
     "fusil_slow_calm_load": 0.30,
     "fusil_slow_calm_sleep": 3.0,
-    "fusil_xhost_program": 'xhost',
+    "fusil_xhost_program": "xhost",
     "process_use_cpu_probe": True,
-    "process_max_memory":  2000 * 1024 * 1024,
+    "process_max_memory": 2000 * 1024 * 1024,
     "process_core_dump": True,
     "process_max_user_process": 1000,
-    "process_user": 'fusil',
+    "process_user": "fusil",
     "process_uid": None,
-    "process_group": 'fusil',
+    "process_group": "fusil",
     "process_gid": None,
     "debugger_use_debugger": True,
     "debugger_trace_forks": False,
 }
+
 
 class ConfigError(Exception):
     pass
@@ -44,47 +45,79 @@ def createFilename(name=None, configdir=None):
         if not configdir:
             homedir = getenv("HOME")
             if not homedir:
-                raise ConfigError("Unable to retrieve user home directory: empty HOME environment variable")
+                raise ConfigError(
+                    "Unable to retrieve user home directory: empty HOME environment variable"
+                )
             configdir = path_join(homedir, ".config")
     return path_join(configdir, name)
 
 
 class FusilConfig:
-    def __init__(self, options=None, filename=None, configdir=None, read=False, write=False):
+    def __init__(
+        self, options=None, filename=None, configdir=None, read=False, write=False
+    ):
         self._parser = ConfigParserWithHelp(allow_unnamed_section=True)
         self.filename = createFilename(filename, configdir)
         if read and path_exists(self.filename):
             self._parser.read([self.filename])
 
         # Fusil application options
-        self.fusil_max_memory = self.getint('fusil', 'max_memory', DEFAULTS['fusil_max_memory'])
-        self.fusil_success_score = self.getfloat('fusil', 'success_score', DEFAULTS['fusil_success_score'])
-        self.fusil_error_score = self.getfloat('fusil', 'error_score', DEFAULTS['fusil_error_score'])
-        self.fusil_success = self.getint('fusil', 'success', DEFAULTS['fusil_success'])
-        self.fusil_session = self.getint('fusil', 'session', DEFAULTS['fusil_session'])
-        self.fusil_normal_calm_load = self.getfloat('fusil', 'normal_calm_load', DEFAULTS['fusil_normal_calm_load'])
-        self.fusil_normal_calm_sleep = self.getfloat('fusil', 'normal_calm_sleep', DEFAULTS['fusil_normal_calm_sleep'])
-        self.fusil_slow_calm_load = self.getfloat('fusil', 'slow_calm_load', DEFAULTS['fusil_slow_calm_load'])
-        self.fusil_slow_calm_sleep = self.getfloat('fusil', 'slow_calm_sleep', DEFAULTS['fusil_slow_calm_sleep'])
-        self.fusil_xhost_program = self.getstr('fusil', 'xhost_program', DEFAULTS['fusil_xhost_program'])
+        self.fusil_max_memory = self.getint(
+            "fusil", "max_memory", DEFAULTS["fusil_max_memory"]
+        )
+        self.fusil_success_score = self.getfloat(
+            "fusil", "success_score", DEFAULTS["fusil_success_score"]
+        )
+        self.fusil_error_score = self.getfloat(
+            "fusil", "error_score", DEFAULTS["fusil_error_score"]
+        )
+        self.fusil_success = self.getint("fusil", "success", DEFAULTS["fusil_success"])
+        self.fusil_session = self.getint("fusil", "session", DEFAULTS["fusil_session"])
+        self.fusil_normal_calm_load = self.getfloat(
+            "fusil", "normal_calm_load", DEFAULTS["fusil_normal_calm_load"]
+        )
+        self.fusil_normal_calm_sleep = self.getfloat(
+            "fusil", "normal_calm_sleep", DEFAULTS["fusil_normal_calm_sleep"]
+        )
+        self.fusil_slow_calm_load = self.getfloat(
+            "fusil", "slow_calm_load", DEFAULTS["fusil_slow_calm_load"]
+        )
+        self.fusil_slow_calm_sleep = self.getfloat(
+            "fusil", "slow_calm_sleep", DEFAULTS["fusil_slow_calm_sleep"]
+        )
+        self.fusil_xhost_program = self.getstr(
+            "fusil", "xhost_program", DEFAULTS["fusil_xhost_program"]
+        )
 
         # Process options
-        self.process_use_cpu_probe = self.getbool('process', 'process_use_cpu_probe', DEFAULTS['process_use_cpu_probe'])
-        self.process_max_memory = self.getint('process', 'max_memory',  DEFAULTS['process_max_memory'])
-        self.process_core_dump = self.getbool('process', 'core_dump', DEFAULTS['process_core_dump'])
-        self.process_max_user_process = self.getint('process', 'max_user_process', DEFAULTS['process_max_user_process'])
+        self.process_use_cpu_probe = self.getbool(
+            "process", "process_use_cpu_probe", DEFAULTS["process_use_cpu_probe"]
+        )
+        self.process_max_memory = self.getint(
+            "process", "max_memory", DEFAULTS["process_max_memory"]
+        )
+        self.process_core_dump = self.getbool(
+            "process", "core_dump", DEFAULTS["process_core_dump"]
+        )
+        self.process_max_user_process = self.getint(
+            "process", "max_user_process", DEFAULTS["process_max_user_process"]
+        )
 
         # User used for subprocess
-        self.process_user = self.getstr('process', 'user', DEFAULTS['process_user'])
-        self.process_uid = DEFAULTS['process_uid']
+        self.process_user = self.getstr("process", "user", DEFAULTS["process_user"])
+        self.process_uid = DEFAULTS["process_uid"]
 
         # Group used for subprocess
-        self.process_group = self.getstr('process', 'group', DEFAULTS['process_group'])
-        self.process_gid = DEFAULTS['process_gid']
+        self.process_group = self.getstr("process", "group", DEFAULTS["process_group"])
+        self.process_gid = DEFAULTS["process_gid"]
 
         # Debugger options
-        self.debugger_use_debugger = self.getbool('debugger', 'debugger_use_debugger', DEFAULTS['debugger_trace_forks'])
-        self.debugger_trace_forks = self.getbool('debugger', 'trace_forks', DEFAULTS['debugger_trace_forks'])
+        self.debugger_use_debugger = self.getbool(
+            "debugger", "debugger_use_debugger", DEFAULTS["debugger_trace_forks"]
+        )
+        self.debugger_trace_forks = self.getbool(
+            "debugger", "trace_forks", DEFAULTS["debugger_trace_forks"]
+        )
 
         # Options from command line
         options: optparse.Values
@@ -96,18 +129,18 @@ class FusilConfig:
                         self._parser.add_section(section)
                     elif self._parser.has_option(section, name):
                         value = get_and_convert(self._parser, section, name)
-                        print(f"{section}: {name} = {value} {type(value)} (from config file)")
+                        print(
+                            f"{section}: {name} = {value} {type(value)} (from config file)"
+                        )
 
-                    self._parser.set(
-                        section, name, str(value), help
-                    )
+                    self._parser.set(section, name, str(value), help)
                     setattr(self, name, value)
 
         self.version = getattr(options, "version", False)
 
         if write:
             print("Writing configuration file %s" % self.filename)
-            with pathlib.Path(self.filename).open('w') as config_file:
+            with pathlib.Path(self.filename).open("w") as config_file:
                 config_file.write("""# Fusil configuration file\n\n""")
                 self._parser.write(config_file)
                 config_file.close()
@@ -124,7 +157,7 @@ class FusilConfig:
 
         output.write("""# Fusil default configuration file\n\n""")
         for session_and_key, value in DEFAULTS.items():
-            section, key = session_and_key.split('_', maxsplit=1)
+            section, key = session_and_key.split("_", maxsplit=1)
             if section not in self._parser:
                 self._parser.add_section(section)
             self._parser.set(section, key, str(value))
@@ -132,7 +165,7 @@ class FusilConfig:
         self._parser = None
 
         if write_file:
-            with config_file.open('w') as file:
+            with config_file.open("w") as file:
                 file.write(output.getvalue())
         return output
 
@@ -145,20 +178,27 @@ class FusilConfig:
         except (NoSectionError, NoOptionError):
             return default_value
         except ValueError as err:
-            raise ConfigError("Value %s of section %s is not %s! %s" % (
-                key, section, type_name, err))
+            raise ConfigError(
+                "Value %s of section %s is not %s! %s" % (key, section, type_name, err)
+            )
 
     def getstr(self, section, key, default_value=None):
         return self._gettype(self._parser.get, "a string", section, key, default_value)
 
     def getbool(self, section, key, default_value):
-        return self._gettype(self._parser.getboolean, "a boolean", section, key, default_value)
+        return self._gettype(
+            self._parser.getboolean, "a boolean", section, key, default_value
+        )
 
     def getint(self, section, key, default_value):
-        return self._gettype(self._parser.getint, "an integer", section, key, default_value)
+        return self._gettype(
+            self._parser.getint, "an integer", section, key, default_value
+        )
 
     def getfloat(self, section, key, default_value):
-        return self._gettype(self._parser.getfloat, "a float", section, key, default_value)
+        return self._gettype(
+            self._parser.getfloat, "a float", section, key, default_value
+        )
 
 
 def optparse_to_configparser(parser, output=None, defaults=False, options=None):
@@ -179,11 +219,17 @@ def optparse_to_configparser(parser, output=None, defaults=False, options=None):
                 config_writer.add_section(configparser.UNNAMED_SECTION)
             if defaults:
                 config_writer.set(
-                    configparser.UNNAMED_SECTION, option.dest, f"{option.default}", option.help
+                    configparser.UNNAMED_SECTION,
+                    option.dest,
+                    f"{option.default}",
+                    option.help,
                 )
             else:
                 config_writer.set(
-                configparser.UNNAMED_SECTION, option.dest, f"{getattr(options, option.dest)}", option.help
+                    configparser.UNNAMED_SECTION,
+                    option.dest,
+                    f"{getattr(options, option.dest)}",
+                    option.help,
                 )
 
     for section in parser.option_groups:
@@ -196,7 +242,10 @@ def optparse_to_configparser(parser, output=None, defaults=False, options=None):
                 )
             else:
                 config_writer.set(
-                    section.title.lower(), option.dest, f"{getattr(options, option.dest)}", option.help
+                    section.title.lower(),
+                    option.dest,
+                    f"{getattr(options, option.dest)}",
+                    option.help,
                 )
 
     config_writer.write(output)
@@ -205,6 +254,7 @@ def optparse_to_configparser(parser, output=None, defaults=False, options=None):
     output.close()
     output = open(output.name)
     return output.read()
+
 
 def configparser_to_options(parser):
     """Convert a configparser to optparse options."""
@@ -221,6 +271,7 @@ class OptionGroupWithSections(OptionGroup):
     OptionGroup class with sections:
     - add_option(*args, section=None, **kwargs)
     """
+
     def __init__(self, parser, title, description=None):
         super().__init__(parser, title, description)
         self.option_sections = {}
@@ -238,6 +289,7 @@ class OptionGroupWithSections(OptionGroup):
 
 class OptionParserWithSections(OptionParser):
     """OptionParser class which records sections."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.option_sections = {}
@@ -253,13 +305,17 @@ class OptionParserWithSections(OptionParser):
         for section in self.option_groups:
             options.option_groups[section.title.lower()] = {}
             for option in section.option_list:
-                options.option_groups[section.title.lower()][option.dest] = (getattr(options, option.dest), option.help)
+                options.option_groups[section.title.lower()][option.dest] = (
+                    getattr(options, option.dest),
+                    option.help,
+                )
 
         return options, args
 
 
 class ConfigParserWithHelp(configparser.ConfigParser):
     """ConfigParser class which records and writes help messages."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.help = {}
@@ -273,9 +329,8 @@ class ConfigParserWithHelp(configparser.ConfigParser):
                 self.help[section] = {}
             if option in self.help[section]:
                 raise ConfigError(
-                    "Option %s of section %s already has a help message: %s" % (
-                        option, section, self.help[section][option]
-                    )
+                    "Option %s of section %s already has a help message: %s"
+                    % (option, section, self.help[section][option])
                 )
             self.help[section][option] = help
 
@@ -291,14 +346,25 @@ class ConfigParserWithHelp(configparser.ConfigParser):
 
             value = self._interpolation.before_write(self, section_name, key, value)
             if value is not None or not self._allow_no_value:
-                value = delimiter + str(value).replace('\n', '\n\t')
+                value = delimiter + str(value).replace("\n", "\n\t")
             else:
                 value = ""
             fp.write("%s%s\n" % (key, value))
         fp.write("#" + "-" * 40 + "\n")
         fp.write("\n")
 
-BOOLEANS = {"True": True, "False": False, "true": True, "false": False, "yes": True, "no": False, "y": True, "n": False}
+
+BOOLEANS = {
+    "True": True,
+    "False": False,
+    "true": True,
+    "false": False,
+    "yes": True,
+    "no": False,
+    "y": True,
+    "n": False,
+}
+
 
 def get_and_convert(parser, section, key):
     """Get a value from a parser and convert it to the appropriate type."""

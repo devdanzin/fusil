@@ -25,6 +25,7 @@ class MangleConfig:
         else:
             self.operations = None
 
+
 class Mangle:
     def __init__(self, config, data):
         self.config = config
@@ -35,11 +36,11 @@ class Mangle:
 
     def offset(self, last=1):
         first = self.config.first_offset
-        last = len(self.data)-last
+        last = len(self.data) - last
         if last < first:
             raise ValueError(
-                "Invalid first_offset value (first=%s > last=%s)"
-                % (first, last))
+                "Invalid first_offset value (first=%s > last=%s)" % (first, last)
+            )
         return randint(first, last)
 
     def mangle_replace(self):
@@ -57,7 +58,7 @@ class Mangle:
     def mangle_special_value(self):
         text = choice(SPECIAL_VALUES)
         offset = self.offset(len(text))
-        self.data[offset:offset+len(text)] = array("B", text)
+        self.data[offset : offset + len(text)] = array("B", text)
 
     def mangle_increment(self):
         incr = randint(1, self.config.max_incr)
@@ -75,8 +76,8 @@ class Mangle:
     def mangle_delete_bytes(self):
         offset = self.offset(2)
         count = randint(1, self.config.max_delete_bytes)
-        count = min(count, len(self.data)-offset)
-        del self.data[offset:offset+count]
+        count = min(count, len(self.data) - offset)
+        del self.data[offset : offset + count]
 
     def run(self):
         """
@@ -102,12 +103,14 @@ class Mangle:
             operation()
         return count
 
+
 class MangleFile(MangleAgent):
     """
     Inject errors in a valid file ("mutate" or "mangle" a file) to
     create new files. Use the config attribute (a MangleConfig
     instance) to configure the mutation parameters.
     """
+
     def __init__(self, project, source, nb_file=1):
         MangleAgent.__init__(self, project, source, nb_file)
         self.config = MangleConfig()
@@ -117,4 +120,3 @@ class MangleFile(MangleAgent):
         count = Mangle(self.config, data).run()
         self.info("Mangle operation: %s" % count)
         return data
-

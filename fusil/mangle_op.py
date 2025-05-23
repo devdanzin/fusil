@@ -30,7 +30,7 @@ def generateSpecialValues():
             result.append(itemb)
     return result
 
+
 SPECIAL_VALUES = generateSpecialValues()
 
 MAX_INCR = 8
-

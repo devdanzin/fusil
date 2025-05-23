@@ -2,14 +2,14 @@ from datetime import datetime, timedelta
 from os import sysconf
 from time import sleep
 
-from ptrace.linux_proc import (ProcError, getSystemBoot, openProc,
-                               readProcessStat)
+from ptrace.linux_proc import ProcError, getSystemBoot, openProc, readProcessStat
 
 from fusil.tools import listDiff, minmax, timedeltaSeconds
 
 
 class CpuLoadError(ProcError):
     pass
+
 
 # sysconf() keys: values working on Ubuntu Feisty (libc 2.5)
 _SC_CLK_TCK = 2
@@ -19,9 +19,10 @@ _SC_NPROCESSORS_ONLN = 84
 NB_CPU = max(sysconf(_SC_NPROCESSORS_ONLN), 1)
 HERTZ = sysconf(_SC_CLK_TCK)
 
-SYSLOAD_MIN_CYCLES = HERTZ // 2         # 500 ms
-CPULOAD_MIN_CYCLES = HERTZ // 10        # 100 ms
-SYSLOAD_SLEEP = 0.500                   # 500 ms
+SYSLOAD_MIN_CYCLES = HERTZ // 2  # 500 ms
+CPULOAD_MIN_CYCLES = HERTZ // 10  # 100 ms
+SYSLOAD_SLEEP = 0.500  # 500 ms
+
 
 class CpuLoad:
     def __init__(self):
@@ -48,24 +49,27 @@ class CpuLoad:
             del self.datas[0:ok]
         return self.datas[0]
 
+
 class CpuLoadValue:
     def __init__(self):
         self.timestamp = datetime.now()
+
 
 class SystemCpuLoadValue(CpuLoadValue):
     def __init__(self):
         CpuLoadValue.__init__(self)
         self.data = None
-        stat_file = openProc('stat')
+        stat_file = openProc("stat")
         for data in stat_file:
             # Look for "cpu ..." line
             if not data.startswith("cpu "):
                 continue
-            self.data = [ max(int(item), 0) for item in data.split()[1:] ]
+            self.data = [max(int(item), 0) for item in data.split()[1:]]
             break
         stat_file.close()
         if not self.data:
             raise CpuLoadError("Unable to get system load!")
+
 
 class SystemCpuLoad(CpuLoad):
     def __init__(self):
@@ -76,8 +80,9 @@ class SystemCpuLoad(CpuLoad):
 
     def isValid(self, item, current):
         data = listDiff(item.data, current.data)
-        return (self.min_cycles <= sum(data)) \
-            and (self.min_duration < current.timestamp - item.timestamp)
+        return (self.min_cycles <= sum(data)) and (
+            self.min_duration < current.timestamp - item.timestamp
+        )
 
     def get(self, estimate=False):
         while True:
@@ -98,6 +103,7 @@ class SystemCpuLoad(CpuLoad):
         load = 1.0 - float(data[3]) / sum(data)
         return load
 
+
 class ProcessCpuLoadValue(CpuLoadValue):
     def __init__(self, pid):
         CpuLoadValue.__init__(self)
@@ -108,10 +114,12 @@ class ProcessCpuLoadValue(CpuLoadValue):
         except UnicodeDecodeError:
             pass
 
+
 class ProcessCpuLoad(CpuLoad):
     """
     Compute process cpu usage
     """
+
     def __init__(self, pid):
         CpuLoad.__init__(self)
         self.min_cycles = CPULOAD_MIN_CYCLES
@@ -129,8 +137,9 @@ class ProcessCpuLoad(CpuLoad):
 
     def isValid(self, item, current):
         try:
-            return (self.min_cycles <= current.tics - item.tics) \
-                and (self.min_duration < current.timestamp - item.timestamp)
+            return (self.min_cycles <= current.tics - item.tics) and (
+                self.min_duration < current.timestamp - item.timestamp
+            )
         except AttributeError:
             return False
 
@@ -152,4 +161,3 @@ class ProcessCpuLoad(CpuLoad):
         except AttributeError:
             load = 0.5
         return minmax(0.0, load, 1.0)
-

@@ -42,4 +42,3 @@ class ProjectAgent(Agent):
         #  0: nothing special
         # -1: inputs rejected
         return None
-

@@ -12,6 +12,7 @@ from fusil.session_agent import SessionAgent
 class ServerClientDisconnect(Exception):
     pass
 
+
 class ServerClient(SessionAgent):
     def __init__(self, session, server, socket, address, family):
         self.server = weakref_ref(server)
@@ -34,7 +35,7 @@ class ServerClient(SessionAgent):
                 break
             except socket_error as err:
                 errcode = err[0]
-                if errcode == 11: # Resource temporarily unavailable
+                if errcode == 11:  # Resource temporarily unavailable
                     break
                 else:
                     self.close()
@@ -50,14 +51,14 @@ class ServerClient(SessionAgent):
         if not datas:
             self.close()
             return None
-        return ''.join(datas)
+        return "".join(datas)
 
     def sendBytes(self, data, buffer_size=None):
         log_data_exchange = self.server().log_data_exchange
         index = 0
         while index < len(data):
             if buffer_size:
-                chunk = data[index:index+buffer_size]
+                chunk = data[index : index + buffer_size]
             else:
                 chunk = data[index:]
             if log_data_exchange:
@@ -91,5 +92,5 @@ class ServerClient(SessionAgent):
     def __repr__(self):
         return "<%s %s>" % (
             self.__class__.__name__,
-            formatAddress(self.family, self.address))
-
+            formatAddress(self.family, self.address),
+        )

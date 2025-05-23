@@ -11,8 +11,5 @@ class UnixSocketClient(NetworkClient):
 
     def on_session_start(self):
         self.connect(
-            self.socket_filename,
-            AF_UNIX, SOCK_STREAM,
-            timeout=self.connect_timeout)
-
-
+            self.socket_filename, AF_UNIX, SOCK_STREAM, timeout=self.connect_timeout
+        )

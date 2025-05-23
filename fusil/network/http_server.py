@@ -27,7 +27,9 @@ class HttpServer(TcpServer):
         if not url:
             url = "index.html"
         if url == "index.html":
-            self.serveData(client, 200, "OK", "<html><body><p>Hello World!</p></body></html>")
+            self.serveData(
+                client, 200, "OK", "<html><body><p>Hello World!</p></body></html>"
+            )
         else:
             self.error404(client, url)
 
@@ -59,4 +61,3 @@ class HttpServer(TcpServer):
             client.close()
         except ServerClientDisconnect:
             self.clientDisconnection(client)
-

@@ -7,6 +7,7 @@ from fusil.tools import minmax
 
 CREATE_GRAPH_DAT = True
 
+
 class AggressivityAgent(ProjectAgent):
     def __init__(self, project):
         ProjectAgent.__init__(self, project, "aggressivity")
@@ -14,13 +15,13 @@ class AggressivityAgent(ProjectAgent):
         # Options for state machine
         self.aggressivity_min = 0.01
         self.aggressivity_max = 1.00
-        self.add_after = 5       # steps
-        self.faster_after = 10   # steps
-        self.slower_after = 5    # steps
+        self.add_after = 5  # steps
+        self.faster_after = 10  # steps
+        self.slower_after = 5  # steps
         self.state_increment = {
-            "+":   0.01,
-            "++":  0.04,
-            "-":  -0.01,
+            "+": 0.01,
+            "++": 0.04,
+            "-": -0.01,
             "--": -0.04,
         }
 
@@ -43,19 +44,19 @@ class AggressivityAgent(ProjectAgent):
         self.aggressivity = value
 
     def on_session_start(self):
-        self.send('aggressivity_value', self.aggressivity)
+        self.send("aggressivity_value", self.aggressivity)
 
     def destroy(self):
         if not self.graph_data:
             return
-        self.writeGraphData(self.last_session_index+1, 0.0)
-        self.writeGraphData(self.last_session_index+1, 0.0)
+        self.writeGraphData(self.last_session_index + 1, 0.0)
+        self.writeGraphData(self.last_session_index + 1, 0.0)
 
     def writeGraphData(self, session_index, score):
         self.last_session_index = session_index
         if CREATE_GRAPH_DAT and not self.graph_data:
-            filename = self.project().createFilename('aggressivity.dat')
-            self.graph_data = open(filename, 'w')
+            filename = self.project().createFilename("aggressivity.dat")
+            self.graph_data = open(filename, "w")
             print("# Aggressivity data", file=self.graph_data)
             print("# Started at %s" % datetime.now(), file=self.graph_data)
             print("#", file=self.graph_data)
@@ -65,8 +66,10 @@ class AggressivityAgent(ProjectAgent):
         else:
             score = minmax(-1.0, score, 1.0)
         if self.graph_data:
-            print("%u\t%.3f\t%.3f" % (
-                self.last_session_index, score, self.aggressivity), file=self.graph_data)
+            print(
+                "%u\t%.3f\t%.3f" % (self.last_session_index, score, self.aggressivity),
+                file=self.graph_data,
+            )
             self.graph_data.flush()
 
     def on_session_done(self, score):
@@ -144,5 +147,4 @@ class AggressivityAgent(ProjectAgent):
         return None
 
     def __str__(self):
-        return "%.1f%%" % (self.aggressivity*100)
-
+        return "%.1f%%" % (self.aggressivity * 100)

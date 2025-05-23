@@ -10,4 +10,3 @@ class TerminalEcho(ProjectAgent):
     def deinit(self):
         if enableEchoMode():
             self.info("Terminal: restore echo mode to stdin")
-

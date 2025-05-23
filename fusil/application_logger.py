@@ -1,15 +1,15 @@
-from logging import (DEBUG, ERROR, INFO, WARNING, Formatter, StreamHandler,
-                     getLogger)
+from logging import DEBUG, ERROR, INFO, WARNING, Formatter, StreamHandler, getLogger
 from os import unlink
 from sys import stdout
 from weakref import ref as weakref_ref
 
-LOG_FILENAME = 'fusil.log'
+LOG_FILENAME = "fusil.log"
+
 
 class ApplicationLogger:
     def __init__(self, application):
         self.application = weakref_ref(application)
-        self.timestamp_format = '%(asctime)s: %(message)s'
+        self.timestamp_format = "%(asctime)s: %(message)s"
 
         # Get the logger
         self.logger = getLogger()
@@ -47,7 +47,7 @@ class ApplicationLogger:
         self.filename = LOG_FILENAME
         self.file_handler = self.addFileHandler(self.filename, file_level)
 
-    def addFileHandler(self, filename, level=None, mode='w', formatter_class=Formatter):
+    def addFileHandler(self, filename, level=None, mode="w", formatter_class=Formatter):
         if level is None:
             if self.application().options.verbose:
                 level = DEBUG
@@ -91,18 +91,18 @@ class ApplicationLogger:
                 debug = False
             project = application.project
             if project and project.session_index:
-                prefix.append('[%s]' % project.nb_success)
+                prefix.append("[%s]" % project.nb_success)
                 session = project.session
                 if session:
-                    prefix.append('[%s]' % session.name)
+                    prefix.append("[%s]" % session.name)
                 if debug and project.step:
-                    prefix.append('[step %s]' % project.step)
+                    prefix.append("[step %s]" % project.step)
         else:
             debug = False
         if debug and sender is not None:
-            prefix.append('[%s]' % sender.name)
+            prefix.append("[%s]" % sender.name)
         if prefix:
-            message = ''.join(prefix)+' '+message
+            message = "".join(prefix) + " " + message
         return message
 
     def debug(self, message, sender):
@@ -120,4 +120,3 @@ class ApplicationLogger:
     def log(self, func, message, sender):
         message = self.formatMessage(message, sender)
         func(message)
-

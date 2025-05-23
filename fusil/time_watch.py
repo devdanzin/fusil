@@ -4,9 +4,14 @@ from fusil.project_agent import ProjectAgent
 
 
 class TimeWatch(ProjectAgent):
-    def __init__(self, project,
-    too_fast=None, too_slow=None,
-    too_fast_score=-1.0, too_slow_score=1.0):
+    def __init__(
+        self,
+        project,
+        too_fast=None,
+        too_slow=None,
+        too_fast_score=-1.0,
+        too_slow_score=1.0,
+    ):
         if too_fast is not None and too_slow is not None:
             if too_fast > too_slow:
                 raise ValueError("too_fast > too_slow")
@@ -38,6 +43,5 @@ class TimeWatch(ProjectAgent):
 
     def on_session_done(self, score):
         duration = time() - self.time0
-        self.warning("Session done: duration=%.1f ms" % (duration*1000))
+        self.warning("Session done: duration=%.1f ms" % (duration * 1000))
         self.setScore(duration)
-

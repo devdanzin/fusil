@@ -11,7 +11,7 @@ class WatchStdout(FileWatch):
     def on_process_stdout(self, agent, filename):
         if agent != self.process():
             return
-        input_file = open(filename, 'rb')
+        input_file = open(filename, "rb")
         self.setFileObject(input_file)
 
     def on_process_exit(self, agent, status):
@@ -23,4 +23,3 @@ class WatchStdout(FileWatch):
     def deinit(self):
         FileWatch.deinit(self)
         self.close()
-

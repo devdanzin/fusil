@@ -37,7 +37,7 @@ class Directory:
     def isEmpty(self, ignore_generated=False):
         try:
             for entry in scandir(self.directory):
-                if entry.name in ('.', '..'):
+                if entry.name in (".", ".."):
                     continue
                 if entry.name in self.files and ignore_generated:
                     continue
@@ -47,7 +47,6 @@ class Directory:
             print(e)
             print(resource.getrusage(resource.RUSAGE_SELF))
             return False
-
 
     def rmtree(self):
         filename = self.directory
@@ -66,8 +65,7 @@ class Directory:
             pass
         operation(argument)
 
-    def uniqueFilename(self, name,
-    count=None, count_format="%d", save=True):
+    def uniqueFilename(self, name, count=None, count_format="%d", save=True):
         # Test with no count suffix
         name = basename(name)
         if not name:
@@ -83,7 +81,7 @@ class Directory:
             count = 2
         count_format = "-" + count_format
         if 1 < len(name_pattern):
-            name_pattern = name_pattern[0] + count_format + '.' + name_pattern[1]
+            name_pattern = name_pattern[0] + count_format + "." + name_pattern[1]
         else:
             name_pattern = name_pattern[0] + count_format
 
@@ -101,4 +99,3 @@ class Directory:
             return True
         filename = path_join(self.directory, name)
         return path_exists(filename)
-

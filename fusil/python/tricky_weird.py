@@ -43,8 +43,9 @@ for cls in numbers:
     weird_instance_names.append(f"weird_{cls.__name__}_-2**31")
     weird_instance_names.append(f"weird_{cls.__name__}_-2**31-1")
     if cls not in (float, complex):
-        weird_instance_names.append(f"weird_{cls.__name__}_10**default_max_str_digits+1")
-
+        weird_instance_names.append(
+            f"weird_{cls.__name__}_10**default_max_str_digits+1"
+        )
 
 
 weird_classes = """

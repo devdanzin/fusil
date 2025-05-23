@@ -11,13 +11,19 @@ if HAS_PTRACE:
     from ptrace import PtraceError
     from ptrace.binding import ptrace_traceme
     from ptrace.debugger import DebuggerError as PtraceDebuggerError
-    from ptrace.debugger import (NewProcessEvent, ProcessExit, ProcessSignal,
-                                 PtraceDebugger)
+    from ptrace.debugger import (
+        NewProcessEvent,
+        ProcessExit,
+        ProcessSignal,
+        PtraceDebugger,
+    )
 
     from fusil.unsafe import permissionHelp
 
+
 class DebuggerError(Exception):
     pass
+
 
 # Status for "process terminated abnormally"
 ABNORMAL_STATUS = 1
@@ -27,15 +33,17 @@ from signal import SIGABRT, SIGFPE, SIGSEGV
 FATAL_SIGNALS = set((SIGFPE, SIGSEGV, SIGABRT))
 try:
     from signal import SIGBUS
+
     FATAL_SIGNALS.add(SIGBUS)
 except ImportError:
     pass
+
 
 class Debugger(ProjectAgent):
     def __init__(self, project):
         ProjectAgent.__init__(self, project, "dbg")
         self.debugger = None
-        self.enabled = (HAS_PTRACE and project.config.debugger_use_debugger)
+        self.enabled = HAS_PTRACE and project.config.debugger_use_debugger
         self.fusil_processes = {}
 
         if self.enabled:
@@ -128,11 +136,11 @@ class Debugger(ProjectAgent):
                 log = self.info
             log(message)
             if event.exitcode:
-                fusil_process.send('session_rename', 'exitcode%s' % event.exitcode)
+                fusil_process.send("session_rename", "exitcode%s" % event.exitcode)
             elif event.signum:
                 name = signalName(event.signum)
                 name = name.lower()
-                fusil_process.send('session_rename', name)
+                fusil_process.send("session_rename", name)
             fusil_process.send("process_exit", fusil_process, status)
         return status
 
@@ -151,7 +159,7 @@ class Debugger(ProjectAgent):
         event.display(self.error)
         reason = event.reason
         if reason:
-            fusil_process.send('session_rename', reason.name)
+            fusil_process.send("session_rename", reason.name)
 
     def tracePID(self, agent, pid):
         if not self.enabled:
@@ -162,7 +170,10 @@ class Debugger(ProjectAgent):
             process.cont()
         except PtraceError as err:
             if err.errno == EPERM:
-                msg = "You are not allowed to trace the process %s: permission denied or process already traced" % pid
+                msg = (
+                    "You are not allowed to trace the process %s: permission denied or process already traced"
+                    % pid
+                )
             else:
                 msg = "Process can no be attached! %s" % err
             help = permissionHelp(self.application().options)
@@ -188,4 +199,3 @@ class Debugger(ProjectAgent):
 
     def on_project_stop(self):
         self.quit()
-

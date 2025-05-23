@@ -1,5 +1,6 @@
 from ptrace.error import PTRACE_ERRORS, writeError
 
+
 class AgentList:
     def __init__(self):
         self.agents = []
@@ -36,4 +37,3 @@ class AgentList:
 
     def __iter__(self):
         return iter(self.agents)
-

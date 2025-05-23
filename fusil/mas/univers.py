@@ -36,4 +36,3 @@ class Univers(ApplicationAgent):
         if self.on_stop:
             self.on_stop()
         self.is_done = True
-

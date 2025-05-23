@@ -10,6 +10,7 @@ from struct import unpack
 BIG_ENDIAN = "ABCD"
 LITTLE_ENDIAN = "DCBA"
 
+
 def uint2bytes(value, endian, size=None):
     r"""
     Convert an unsigned integer to a bytes string in the specified endian.
@@ -25,9 +26,9 @@ def uint2bytes(value, endian, size=None):
     assert (not size and 0 < value) or (0 <= value)
     assert endian in (LITTLE_ENDIAN, BIG_ENDIAN)
     text = []
-    while (value != 0 or text == ""):
+    while value != 0 or text == "":
         byte = value % 256
-        text.append( chr(byte) )
+        text.append(chr(byte))
         value >>= 8
     if size:
         need = max(size - len(text), 0)
@@ -43,24 +44,28 @@ def uint2bytes(value, endian, size=None):
             text = reversed(text)
     return "".join(text)
 
+
 def _createStructFormat():
     """
     Create a dictionnary (endian, size_byte) => struct format used
     by bytes2uint() to convert raw data to positive integer.
     """
     format = {
-        BIG_ENDIAN:    {},
+        BIG_ENDIAN: {},
         LITTLE_ENDIAN: {},
     }
     for struct_format in "BHILQ":
         try:
             size = calcsize(struct_format)
-            format[BIG_ENDIAN][size] = '>%s' % struct_format
-            format[LITTLE_ENDIAN][size] = '<%s' % struct_format
+            format[BIG_ENDIAN][size] = ">%s" % struct_format
+            format[LITTLE_ENDIAN][size] = "<%s" % struct_format
         except struct_error:
             pass
     return format
+
+
 _struct_format = _createStructFormat()
+
 
 def bytes2uint(data, endian):
     r"""
@@ -81,7 +86,7 @@ def bytes2uint(data, endian):
     >>> bytes2uint("\xff\xff\xff\xff\xff\xff\xff\xff", BIG_ENDIAN) == (2**64-1)
     True
     """
-    assert 1 <= len(data) <= 32   # arbitrary limit: 256 bits
+    assert 1 <= len(data) <= 32  # arbitrary limit: 256 bits
     try:
         return unpack(_struct_format[endian][len(data)], data)[0]
     except KeyError:
@@ -94,7 +99,6 @@ def bytes2uint(data, endian):
         data = reversed(data)
     for character in data:
         byte = ord(character)
-        value += (byte << shift)
+        value += byte << shift
         shift += 8
     return value
-

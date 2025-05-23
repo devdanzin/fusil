@@ -23,17 +23,17 @@ class NetworkClient(ProjectAgent):
 
     def connect(self, address, family, type, timeout=5.0):
         try:
-            self.info("Create socket (family %s, type %s)" % (
-                family, type))
+            self.info("Create socket (family %s, type %s)" % (family, type))
             self.socket = socket(family, type)
             self.socket.settimeout(timeout)
             self.info("Connect to %s" % formatAddress(family, address))
             self.socket.connect(address)
         except socket_error as err:
-            writeError(self, err, "Unable to connect to %s" %
-                formatAddress(family, address))
+            writeError(
+                self, err, "Unable to connect to %s" % formatAddress(family, address)
+            )
             self.socket = None
-            self.send('application_error', 'Network connection failure')
+            self.send("application_error", "Network connection failure")
 
     def deinit(self):
         if self.socket:
@@ -64,15 +64,16 @@ class NetworkClient(ProjectAgent):
             return False
         self.tx_bytes += len(data)
         if self.log_data_exchange:
-            self.warning("Send bytes: (%s) %r (timeout=%s)" % (
-                len(data), data, timeout))
+            self.warning(
+                "Send bytes: (%s) %r (timeout=%s)" % (len(data), data, timeout)
+            )
         try:
             self.socket.settimeout(timeout)
             self.socket.send(data)
         except socket_error as err:
             self.warning("Send error: %s" % formatError(err))
             self.closeSocket()
-            self.send('session_stop')
+            self.send("session_stop")
             return False
         return True
 
@@ -105,7 +106,7 @@ class NetworkClient(ProjectAgent):
                     break
                 self.warning("Receive error: %s" % formatError(err))
                 self.closeSocket()
-                self.send('session_stop')
+                self.send("session_stop")
                 break
             if not data:
                 break
@@ -116,8 +117,7 @@ class NetworkClient(ProjectAgent):
             self.rx_bytes += data_len
 
         if datas:
-            data = ''.join(datas)
+            data = "".join(datas)
             return data
         else:
             return None
-

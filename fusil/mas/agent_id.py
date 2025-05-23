@@ -11,4 +11,3 @@ class AgentID(object):
     def generate(self):
         self.counter += 1
         return self.counter
-

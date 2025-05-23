@@ -1,10 +1,11 @@
 import sys
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 
 SUPPORT_UID = not RUNNING_WINDOWS
 if SUPPORT_UID:
     from os import getuid
+
 
 def permissionHelp(options):
     """
@@ -15,10 +16,9 @@ def permissionHelp(options):
         return None
     help = []
     if getuid() != 0:
-        help.append('retry as root')
+        help.append("retry as root")
     if not options.unsafe:
-        help.append('use --unsafe option')
+        help.append("use --unsafe option")
     if not help:
         return None
-    return ' or '.join(help)
-
+    return " or ".join(help)

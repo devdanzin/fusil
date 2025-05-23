@@ -26,4 +26,3 @@ class SessionAgent(ProjectAgent):
         session = self.session()
         if session:
             session.unregisterAgent(self, destroy)
-

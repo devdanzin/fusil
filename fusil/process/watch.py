@@ -11,12 +11,16 @@ DEFAULT_EXITCODE_SCORE = 0.50
 DEFAULT_TIMEOUT_SCORE = 1.0
 DEFAULT_SIGNAL_SCORE = 1.0
 
+
 class WatchProcess(ProjectAgent):
-    def __init__(self, process,
-    exitcode_score=DEFAULT_EXITCODE_SCORE,
-    signal_score=DEFAULT_SIGNAL_SCORE,
-    default_score=0.0,
-    timeout_score=DEFAULT_TIMEOUT_SCORE):
+    def __init__(
+        self,
+        process,
+        exitcode_score=DEFAULT_EXITCODE_SCORE,
+        signal_score=DEFAULT_SIGNAL_SCORE,
+        default_score=0.0,
+        timeout_score=DEFAULT_TIMEOUT_SCORE,
+    ):
         self.process = weakref_ref(process)
         project = process.project()
         ProjectAgent.__init__(self, project, "watch:%s" % process.name)
@@ -67,7 +71,7 @@ class WatchProcess(ProjectAgent):
 
     def processDone(self, status):
         self.score = self.computeScore(status)
-        self.send('session_stop')
+        self.send("session_stop")
         self.pid = None
 
     def getScore(self):
@@ -95,4 +99,3 @@ class WatchProcess(ProjectAgent):
 
     def deinit(self):
         self.pid = None
-

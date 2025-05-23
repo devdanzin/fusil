@@ -22,6 +22,7 @@ def pngCRC32(data):
     """
     return crc32(data) & 0xFFFFFFFF
 
+
 def fixPNG(data):
     """
     Fix a mangled PNG picture:
@@ -41,28 +42,27 @@ def fixPNG(data):
     data.write("\x89PNG\r\n\x1a\n")
 
     index = 8
-    while index < (datalen-4):
+    while index < (datalen - 4):
         data.seek(index)
         size = bytes2uint(data.read(4), BIG_ENDIAN)
-        chunksize = size+12
-        if datalen < (index+chunksize):
+        chunksize = size + 12
+        if datalen < (index + chunksize):
             info("fixPNG: Skip invalid chunk at %s" % index)
             break
 
-        data.seek(index+4)
-        crcdata = data.read(chunksize-8)
+        data.seek(index + 4)
+        crcdata = data.read(chunksize - 8)
         newcrc = uint2bytes(pngCRC32(crcdata), BIG_ENDIAN, 4)
 
-        data.seek(index+chunksize-4)
+        data.seek(index + chunksize - 4)
         data.write(newcrc)
 
         index += chunksize
 
-    data.seek(0,0)
+    data.seek(0, 0)
     data = data.read()
     assert len(data) == len(origdata)
 
     # str -> array
-    data = array('B', data)
+    data = array("B", data)
     return data
-

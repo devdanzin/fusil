@@ -40,4 +40,3 @@ class Mailbox:
             return "<Mailbox of %r>" % agent
         else:
             return "<Mailbox>"
-

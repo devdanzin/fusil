@@ -9,7 +9,7 @@ def scoreLogFunc(object, score):
     else:
         return object.warning
 
+
 def normalizeScore(score):
     score = minmax(-1.0, score, 1.0)
     return round(score, 2)
-

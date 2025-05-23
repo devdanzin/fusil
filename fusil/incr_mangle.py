@@ -6,13 +6,16 @@ from fusil.mangle_agent import MangleAgent
 
 MAX_TRY = 25000
 
+
 class IncrMangleError(ValueError):
     pass
+
 
 class DataVersion:
     """
     Immutable data version
     """
+
     def __init__(self, versions, data, operations, dirty_bits):
         self.versions = versions
         self.data = data
@@ -27,12 +30,14 @@ class DataVersion:
         nb_try = 0
         while len(operations) < wanted_len:
             if MAX_TRY <= nb_try:
-                raise IncrMangleError("Unable to create new operation (try: %s)" % nb_try)
+                raise IncrMangleError(
+                    "Unable to create new operation (try: %s)" % nb_try
+                )
             nb_try += 1
             operation = self.createOperation(agent, datalen, dirty_bits)
             if not operation:
                 continue
-            for bit in xrange(operation.offset, operation.offset+operation.size):
+            for bit in xrange(operation.offset, operation.offset + operation.size):
                 dirty_bits.add(bit)
             operations.append(operation)
             nb_try = 0
@@ -41,7 +46,7 @@ class DataVersion:
     def createOperation(self, agent, datalen, dirty_bits):
         operation_cls = choice(agent.operations)
         operation = operation_cls(agent, datalen)
-        for bit in xrange(operation.offset, operation.offset+operation.size):
+        for bit in xrange(operation.offset, operation.offset + operation.size):
             if bit in dirty_bits:
                 return None
         return operation
@@ -61,23 +66,28 @@ class DataVersion:
 
     def __str__(self):
         return "<DataVersion version=%s operations=%s dirty_bits=%s>" % (
-            self.version, len(self.operations), len(self.dirty_bits))
+            self.version,
+            len(self.operations),
+            len(self.dirty_bits),
+        )
 
     def clearCache(self):
         pass
+
 
 class OriginalVersion(DataVersion):
     def __init__(self, versions, data):
         DataVersion.__init__(self, versions, data, tuple(), set())
 
     def createData(self):
-        return array('B', self.data)
+        return array("B", self.data)
 
     def revert(self):
         return self
 
     def __str__(self):
         return "<OriginalVersion>"
+
 
 class ModifiedVersion(DataVersion):
     def __init__(self, versions, operations, dirty_bits):
@@ -86,7 +96,7 @@ class ModifiedVersion(DataVersion):
     def createData(self):
         # Cached result?
         if self.data:
-            return array('B', self.data)
+            return array("B", self.data)
 
         # Get previous complete data
         previous = self
@@ -96,8 +106,8 @@ class ModifiedVersion(DataVersion):
                 break
 
         # Apply new operations (since previous version)
-        data = array('B', previous.data)
-        for operation in self.operations[len(previous.operations):]:
+        data = array("B", previous.data)
+        for operation in self.operations[len(previous.operations) :]:
             operation(data)
 
         # Cache result
@@ -107,12 +117,13 @@ class ModifiedVersion(DataVersion):
     def clearCache(self):
         self.data = None
 
+
 class DataVersions:
     def __init__(self):
         self.versions = []
 
     def getVersionNumber(self):
-        return len(self.versions)+1
+        return len(self.versions) + 1
 
     def addVersion(self, version):
         self.versions.append(version)
@@ -132,11 +143,12 @@ class DataVersions:
 
     def getPrevious(self, version):
         index = self.versions.index(version)
-        return self.versions[index-1]
+        return self.versions[index - 1]
 
     def rollback(self, version_number):
         del self.versions[version_number:]
         return self.versions[-1]
+
 
 class IncrMangle(MangleAgent):
     def __init__(self, project, source):
@@ -157,7 +169,7 @@ class IncrMangle(MangleAgent):
         self.score_diff = None
         if score < 0:
             self.previous_session = "error"
-        elif (self.project().success_score <= score):
+        elif self.project().success_score <= score:
             self.previous_session = "success"
         else:
             self.previous_session = "normal"
@@ -168,9 +180,9 @@ class IncrMangle(MangleAgent):
     def stateText(self):
         text = self.previous_session
         if self.previous_score is not None:
-            text += ", score:%.1f" % (self.previous_score*100)
+            text += ", score:%.1f" % (self.previous_score * 100)
             if self.score_diff is not None:
-                text += ", score diff:%+.1f" % (self.score_diff*100)
+                text += ", score diff:%+.1f" % (self.score_diff * 100)
         return text
 
     def checkPreviousVersion(self, version):
@@ -182,12 +194,18 @@ class IncrMangle(MangleAgent):
 
         # Failure: revert previous change
         if self.previous_session == "error":
-            self.warning("Revert previous version (error): %s (score %s)" % (version, self.stateText()))
+            self.warning(
+                "Revert previous version (error): %s (score %s)"
+                % (version, self.stateText())
+            )
             return version.revert()
 
         # Smaller score
         if self.score_diff is not None and self.score_diff < 0:
-            self.error("Revert previous version (smaller score): %s (score %s)" % (version, self.stateText()))
+            self.error(
+                "Revert previous version (smaller score): %s (score %s)"
+                % (version, self.stateText())
+            )
             return version.revert()
 
         # Too many version: rollback to random version
@@ -196,10 +214,9 @@ class IncrMangle(MangleAgent):
 
         # Valid version: keep it
         previous = version.getPrevious()
-        for operation in version.operations[len(previous.operations):]:
+        for operation in version.operations[len(previous.operations) :]:
             self.warning("New operation: %s" % operation)
-        self.error("Accepted version: %s (%s)" % (
-            version, self.stateText()))
+        self.error("Accepted version: %s (%s)" % (version, self.stateText()))
         return version
 
     def rollbackLast(self):
@@ -231,4 +248,3 @@ class IncrMangle(MangleAgent):
 
         # Create data
         return version.createData()
-

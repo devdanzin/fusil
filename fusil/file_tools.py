@@ -8,6 +8,7 @@ from ptrace.os_tools import RUNNING_LINUX
 if RUNNING_LINUX:
     from ptrace.linux_proc import readProcessLink
 
+
 def safeMkdir(path):
     try:
         mkdir(path)
@@ -17,12 +18,14 @@ def safeMkdir(path):
         else:
             raise
 
+
 def filenameExtension(filename):
     ext = basename(filename)
-    if '.' in ext:
-        return '.'+ext.rsplit('.', 1)[-1]
+    if "." in ext:
+        return "." + ext.rsplit(".", 1)[-1]
     else:
         return None
+
 
 def dumpFileInfo(logger, file_obj):
     try:
@@ -31,7 +34,7 @@ def dumpFileInfo(logger, file_obj):
         logger.info("File object class: %s" % file_obj.__class__.__name__)
         return
     if RUNNING_LINUX:
-        filename = readProcessLink(getpid(), 'fd/%s' % fileno)
+        filename = readProcessLink(getpid(), "fd/%s" % fileno)
         logger.info("File name: %r" % filename)
     logger.info("File descriptor: %s" % fileno)
 
@@ -42,10 +45,10 @@ def dumpFileInfo(logger, file_obj):
     mtime = datetime.fromtimestamp(stat.st_mtime)
     logger.info("File modification: %s" % mtime)
 
+
 def relativePath(path, cwd=None):
     if not cwd:
         cwd = getcwd()
     if path.startswith(cwd):
-        path = path[len(cwd)+1:]
+        path = path[len(cwd) + 1 :]
     return path
-

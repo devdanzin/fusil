@@ -9,16 +9,26 @@ from subprocess import STDOUT, Popen
 # from ptrace.signames import signalName
 from fusil.six import string_types
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 
 if RUNNING_WINDOWS:
     from win32api import GetCurrentProcessId, OpenProcess
     from win32con import PROCESS_ALL_ACCESS
-    from win32process import (BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS,
-                              SetPriorityClass)
+    from win32process import (
+        BELOW_NORMAL_PRIORITY_CLASS,
+        IDLE_PRIORITY_CLASS,
+        SetPriorityClass,
+    )
 else:
-    from resource import (RLIMIT_AS, RLIMIT_CORE, RLIMIT_CPU, RLIMIT_NPROC,
-                          getrlimit, setrlimit)
+    from resource import (
+        RLIMIT_AS,
+        RLIMIT_CORE,
+        RLIMIT_CPU,
+        RLIMIT_NPROC,
+        getrlimit,
+        setrlimit,
+    )
+
     try:
         from os import nice
     except ImportError:
@@ -42,20 +52,24 @@ else:
         setrlimit(key, (soft, hard))
         return soft
 
+
 def limitMemory(nbytes, hard=False):
     if RUNNING_WINDOWS:
         return
     return _setrlimit(RLIMIT_AS, nbytes, hard)
+
 
 def limitUserProcess(nproc, hard=False):
     if RUNNING_WINDOWS:
         return
     return _setrlimit(RLIMIT_NPROC, nproc, hard)
 
+
 def allowCoreDump(hard=False):
     if RUNNING_WINDOWS:
         return
     return _setrlimit(RLIMIT_CORE, -1, hard)
+
 
 def limitCpuTime(seconds, hard=False):
     if RUNNING_WINDOWS:
@@ -64,6 +78,7 @@ def limitCpuTime(seconds, hard=False):
     if isinstance(seconds, float):
         seconds = int(seconds + 0.5)
     return _setrlimit(RLIMIT_CPU, seconds, hard)
+
 
 def beNice(very_nice=False):
     if RUNNING_WINDOWS:
@@ -82,17 +97,20 @@ def beNice(very_nice=False):
             value = 5
         nice(value)
 
+
 def displayProcessStatus(logger, status, prefix="Process"):
     if status == 0:
         logger.info("%s exited normally" % prefix)
     elif status < 0:
         signum = -status
-        logger.error("%s killed by signal %s" %
-            (prefix, signum))
+        logger.error("%s killed by signal %s" % (prefix, signum))
     else:
         logger.warning("%s exited with error code: %s" % (prefix, status))
 
-def runCommand(logger, command, stdin=False, stdout=True, options=None, raise_error=True):
+
+def runCommand(
+    logger, command, stdin=False, stdout=True, options=None, raise_error=True
+):
     """
     Run specified command:
      - logger is an object with a info() method
@@ -108,27 +126,26 @@ def runCommand(logger, command, stdin=False, stdout=True, options=None, raise_er
     if isinstance(command, string_types):
         command_str = repr(command)
     else:
-        command_str = ' '.join(command)
+        command_str = " ".join(command)
         command_str = repr(command_str)
     logger.info("Run the command: %s" % command_str)
     if not options:
         options = {}
     if not stdin:
-        stdin_file =  open(devnull, 'r')
-        options['stdin'] = stdin_file
+        stdin_file = open(devnull, "r")
+        options["stdin"] = stdin_file
     else:
         stdin_file = None
     stdout_file = None
     if not stdout:
-        stdout_file = open(devnull, 'wb')
-        options['stdout'] = stdout_file
-        options['stderr'] = STDOUT
+        stdout_file = open(devnull, "wb")
+        options["stdout"] = stdout_file
+        options["stderr"] = STDOUT
     elif stdout is not True:
-        options['stdout'] = stdout
-        options['stderr'] = STDOUT
-    if ('close_fds' not in options) \
-    and (not RUNNING_WINDOWS):
-        options['close_fds'] = True
+        options["stdout"] = stdout
+        options["stderr"] = STDOUT
+    if ("close_fds" not in options) and (not RUNNING_WINDOWS):
+        options["close_fds"] = True
 
     process = Popen(command, **options)
     status = process.wait()
@@ -141,11 +158,11 @@ def runCommand(logger, command, stdin=False, stdout=True, options=None, raise_er
     if not status:
         return
     if status < 0:
-        errmsg = 'process killed by signal %s' % (-status)
+        errmsg = "process killed by signal %s" % (-status)
     else:
-        errmsg = 'exit code %s' % status
-    raise RuntimeError("Unable to run the command %s: %s" % (
-        command_str, errmsg))
+        errmsg = "exit code %s" % status
+    raise RuntimeError("Unable to run the command %s: %s" % (command_str, errmsg))
+
 
 def locateProgram(program, use_none=False, raise_error=False):
     if isabs(program):
@@ -161,7 +178,7 @@ def locateProgram(program, use_none=False, raise_error=False):
         default = None
     else:
         default = program
-    paths = getenv('PATH')
+    paths = getenv("PATH")
     if not paths:
         if raise_error:
             raise ValueError("Unable to get PATH environment variable")
@@ -173,6 +190,7 @@ def locateProgram(program, use_none=False, raise_error=False):
     if raise_error:
         raise ValueError("Unable to locate program %r in PATH" % program)
     return default
+
 
 def splitCommand(command):
     r"""
@@ -190,14 +208,14 @@ def splitCommand(command):
     arguments = []
     start = 0
     in_quote = None
-    for match in re.finditer(r'''[ \t"']''', command):
+    for match in re.finditer(r"""[ \t"']""", command):
         index = match.start()
         sep = command[index]
         write = False
         if in_quote == sep:
             write = True
             in_quote = None
-        elif sep == ' ':
+        elif sep == " ":
             if not in_quote:
                 write = True
         elif not in_quote:
@@ -211,4 +229,3 @@ def splitCommand(command):
     if start < len(command):
         arguments.append(command[start:])
     return arguments
-

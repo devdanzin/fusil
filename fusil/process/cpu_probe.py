@@ -7,8 +7,7 @@ from fusil.project_agent import ProjectAgent
 
 
 class CpuProbe(ProjectAgent):
-    def __init__(self, project, name,
-    max_load=0.75, max_duration=10.0, max_score=1.0):
+    def __init__(self, project, name, max_load=0.75, max_duration=10.0, max_score=1.0):
         ProjectAgent.__init__(self, project, name)
         self.max_load = max_load
         self.max_duration = max_duration
@@ -39,7 +38,7 @@ class CpuProbe(ProjectAgent):
             self.timeout = None
             return
         if self.timeout is None:
-            self.warning("CPU load: %.1f%%" % (load*100))
+            self.warning("CPU load: %.1f%%" % (load * 100))
             self.timeout = time()
             return
 
@@ -50,11 +49,12 @@ class CpuProbe(ProjectAgent):
 
         # Success
         self.score = self.max_score
-        self.error("CPU load (%.1f%%) bigger than maximum (%.1f%%) during %.1f sec: score=%.1f%%"
-            % (load*100, self.max_load*100, duration, self.score*100))
-        self.send('session_rename', 'cpu_load')
+        self.error(
+            "CPU load (%.1f%%) bigger than maximum (%.1f%%) during %.1f sec: score=%.1f%%"
+            % (load * 100, self.max_load * 100, duration, self.score * 100)
+        )
+        self.send("session_rename", "cpu_load")
         self.load = None
 
     def getScore(self):
         return self.score
-

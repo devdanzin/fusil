@@ -26,6 +26,7 @@ class Logger:
             return
         print(message)
 
+
 class MTA:
     def __init__(self, logger=None):
         if not logger:
@@ -38,9 +39,11 @@ class MTA:
     def deliver(self, message):
         pass
 
+
 class Options:
     def __init__(self):
         self.debug = False
+
 
 class Application:
     def __init__(self):
@@ -49,13 +52,16 @@ class Application:
     def initX11(self):
         pass
 
+
 class Config:
     def __getattr__(self, name):
         return None
 
+
 class Debugger:
     def tracePID(self, agent, pid):
         pass
+
 
 class Project:
     def __init__(self, logger=None):
@@ -71,4 +77,3 @@ class Project:
 
     def unregisterAgent(self, agent):
         pass
-

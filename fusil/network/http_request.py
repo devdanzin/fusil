@@ -29,7 +29,7 @@ class HttpRequest:
             if len(line) == 1:
                 raise SyntaxError("Unable to parse client header: %r" % line[0])
             key, value = line
-            self.headers.append( (key, value) )
+            self.headers.append((key, value))
 
     def parseRequest(self, line):
         # Extract method
@@ -47,4 +47,3 @@ class HttpRequest:
 
         # Rest is the URI
         self.uri = line
-

@@ -5,12 +5,11 @@ from ptrace.os_tools import HAS_PROC
 from fusil.project_agent import ProjectAgent
 
 if HAS_PROC:
-    from ptrace.linux_proc import (
-        ProcError, readProcessStatm, searchProcessByName)
+    from ptrace.linux_proc import ProcError, readProcessStatm, searchProcessByName
 
 from ptrace.process_tools import dumpProcessInfo
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 if HAS_PROC:
     from os import stat
 
@@ -27,11 +26,10 @@ class AttachProcessPID(ProjectAgent):
             name = "pid:%s" % pid
         ProjectAgent.__init__(self, project, name)
         if RUNNING_WINDOWS:
-            raise NotImplementedError(
-                "AttachProcessPID is not supported on Windows")
+            raise NotImplementedError("AttachProcessPID is not supported on Windows")
         self.death_score = 1.0
-        self.show_exit = True   # needed by the debugger
-        self.max_memory = 100*1024*1024
+        self.show_exit = True  # needed by the debugger
+        self.max_memory = 100 * 1024 * 1024
         self.memory_score = 1.0
         self.debugger = project.debugger
         self.dbg_process = None
@@ -80,7 +78,7 @@ class AttachProcessPID(ProjectAgent):
                 return True
         elif HAS_PROC:
             try:
-                stat('/proc/%s' % self.pid)
+                stat("/proc/%s" % self.pid)
                 return True
             except OSError as err:
                 if err.errno != ENOENT:
@@ -107,8 +105,7 @@ class AttachProcessPID(ProjectAgent):
             return False
         if memory < self.max_memory:
             return True
-        self.error("Memory limit reached: %s > %s" % (
-            memory, self.max_memory))
+        self.error("Memory limit reached: %s > %s" % (memory, self.max_memory))
         self.stop(self.memory_score)
         return False
 
@@ -120,14 +117,16 @@ class AttachProcessPID(ProjectAgent):
     def getScore(self):
         return self.score
 
+
 class AttachProcess(AttachProcessPID):
     def __init__(self, project, process_name):
-        AttachProcessPID.__init__(self, project, None, "attach_process:%s" % process_name)
+        AttachProcessPID.__init__(
+            self, project, None, "attach_process:%s" % process_name
+        )
         self.process_name = process_name
         if not HAS_PROC:
             # Missing searchProcessByName() function
-            raise NotImplementedError(
-                "AttachProcess is not supported on your OS")
+            raise NotImplementedError("AttachProcess is not supported on your OS")
 
     def init(self):
         AttachProcessPID.init(self)
@@ -135,6 +134,5 @@ class AttachProcess(AttachProcessPID):
 
     def on_session_start(self):
         pid = searchProcessByName(self.process_name)
-        self.send('process_pid', self, pid)
+        self.send("process_pid", self, pid)
         self.setPid(pid)
-

@@ -3,7 +3,9 @@ from fusil.process.create import CreateProcess
 
 
 class MangleProcess(CreateProcess):
-    def __init__(self, project, arguments, mangle_pattern, use_relative_mangle=True, **kw):
+    def __init__(
+        self, project, arguments, mangle_pattern, use_relative_mangle=True, **kw
+    ):
         CreateProcess.__init__(self, project, arguments, **kw)
         self.orig_cmdline = self.cmdline.arguments
         self.mangle_pattern = mangle_pattern
@@ -26,4 +28,3 @@ class MangleProcess(CreateProcess):
     def on_mangle_filenames(self, filenames):
         self.mangleCmdline(filenames)
         self.createProcess()
-

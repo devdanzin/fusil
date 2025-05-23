@@ -26,16 +26,17 @@ class ProjectDirectory(ProjectAgent, Directory):
         application = self.application()
 
         # Fusil error? Keep the directory
-        if application \
-        and application.exitcode:
+        if application and application.exitcode:
             if verbose:
                 self.warning("Fusil error: keep the directory %s" % self.directory)
             return True
 
         # Not session executed: remove the directory
-        if project \
-        and not project.session_executed \
-        and (not application or not application.options.keep_sessions):
+        if (
+            project
+            and not project.session_executed
+            and (not application or not application.options.keep_sessions)
+        ):
             return False
 
         # Keep generated files?
@@ -59,4 +60,3 @@ class ProjectDirectory(ProjectAgent, Directory):
         keep = self.keepDirectory(verbose=False)
         if not keep:
             self.rmtree()
-

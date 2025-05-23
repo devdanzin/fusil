@@ -8,22 +8,25 @@ from fusil.process.tools import locateProgram, runCommand
 from fusil.six import PY2, b, string_types, text_type
 from fusil.write_code import WriteCode
 
-RUNNING_WINDOWS = sys.platform == 'win32'
+RUNNING_WINDOWS = sys.platform == "win32"
 
 
 class CompilerError(Exception):
     pass
 
+
 GCC_PROGRAM = None
 
-MIN_INT32 = -2**31
-MAX_INT32 = (2**21)-1
+MIN_INT32 = -(2**31)
+MAX_INT32 = (2**21) - 1
+
 
 def encodeUTF32(text):
     data = []
     for character in text:
-        data.append( pack('I', ord(character)) )
-    return b('').join(data)
+        data.append(pack("I", ord(character)))
+    return b("").join(data)
+
 
 def quoteString(text):
     data = []
@@ -31,18 +34,21 @@ def quoteString(text):
         if character == '"':
             data.append('\\"')
         elif character == "\0":
-            data.append('\\0')
+            data.append("\\0")
         elif character == "\n":
-            data.append('\\n')
+            data.append("\\n")
         elif character == "\\":
-            data.append('\\\\')
+            data.append("\\\\")
         elif 32 <= ord(character) <= 127:
             data.append(character)
         else:
             data.append("\\x%02X" % ord(character))
-    return '"'+''.join(data)+'"'
+    return '"' + "".join(data) + '"'
 
-def compileC(logger, c_filename, output_filename, options=None, debug=True, libraries=None):
+
+def compileC(
+    logger, c_filename, output_filename, options=None, debug=True, libraries=None
+):
     """
     Compile a C script.
     Raise CompilerError on failure.
@@ -50,18 +56,16 @@ def compileC(logger, c_filename, output_filename, options=None, debug=True, libr
     global GCC_PROGRAM
     if not GCC_PROGRAM:
         if RUNNING_WINDOWS:
-            program = u"gcc.exe"
+            program = "gcc.exe"
         else:
-            program = u"gcc"
+            program = "gcc"
         GCC_PROGRAM = locateProgram(program, raise_error=True)
-    command = [GCC_PROGRAM,
-        u"-o", output_filename,
-        c_filename]
+    command = [GCC_PROGRAM, "-o", output_filename, c_filename]
     if debug:
-        command.extend((u"-Wall", u"-Wextra", u"-Werror"))
+        command.extend(("-Wall", "-Wextra", "-Werror"))
     if libraries:
         for library in libraries:
-            command.append(u"-l%s" % library)
+            command.append("-l%s" % library)
     if options:
         options = options.split()
         command.extend(options)
@@ -69,6 +73,7 @@ def compileC(logger, c_filename, output_filename, options=None, debug=True, libr
         runCommand(logger, command)
     except RuntimeError as err:
         raise CompilerError("Unable to compile %s: %s" % (basename(c_filename), err))
+
 
 class FunctionC:
     def __init__(self, name, arguments=None, type="void"):
@@ -83,10 +88,10 @@ class FunctionC:
         self.footer = []
 
     def lines(self):
-        yield (0, u"%s %s(%s) {" % (self.type, self.name, ", ".join(self.arguments)))
+        yield (0, "%s %s(%s) {" % (self.type, self.name, ", ".join(self.arguments)))
 
         for variable in self.variables:
-            yield (1, variable + u';')
+            yield (1, variable + ";")
         if self.variables:
             yield None
 
@@ -95,37 +100,38 @@ class FunctionC:
                 yield (1, code)
             else:
                 level, code = code
-                yield (level+1, code)
+                yield (level + 1, code)
 
         if self.footer:
             yield None
         for line in self.footer:
             yield (1, line)
 
-        yield (0, u'}')
+        yield (0, "}")
 
     def callFunction(self, name, arguments, result_variable=None):
         if result_variable:
-            name = u'%s = %s(' % (result_variable, name)
+            name = "%s = %s(" % (result_variable, name)
         else:
-            name = u'%s(' % name
+            name = "%s(" % name
         if arguments:
             self.code.append(name)
-            last_index = len(arguments)-1
+            last_index = len(arguments) - 1
             for index, argument in enumerate(arguments):
                 argument = text_type(argument)
                 if index != last_index:
-                    argument += u','
-                self.code.append( (1, argument) )
-            self.code.append(u');')
+                    argument += ","
+                self.code.append((1, argument))
+            self.code.append(");")
         else:
-            self.code.append(name + u');')
+            self.code.append(name + ");")
 
     def add(self, instr):
-        self.code.append(instr + u';')
+        self.code.append(instr + ";")
 
     def __repr__(self):
         return '<FunctionC "%s %s()">' % (self.type, self.name)
+
 
 class CodeC(WriteCode):
     def __init__(self):
@@ -140,12 +146,12 @@ class CodeC(WriteCode):
         self.functions_list.append(function)
         return function
 
-    def addMain(self, with_argv=False, type=u'int', footer=u'return 0;'):
+    def addMain(self, with_argv=False, type="int", footer="return 0;"):
         if with_argv:
-            arguments = (u'int argc', u'char **argv')
+            arguments = ("int argc", "char **argv")
         else:
             arguments = None
-        main = FunctionC(u'main', arguments, type)
+        main = FunctionC("main", arguments, type)
         if footer:
             footer = text_type(footer)
             main.footer.append(footer)
@@ -157,9 +163,9 @@ class CodeC(WriteCode):
 
     def writeCode(self):
         if self.gnu_source:
-            self.write(0, u"#define _GNU_SOURCE")
+            self.write(0, "#define _GNU_SOURCE")
         for include in self.includes:
-            self.write(0, u"#include %s" % include)
+            self.write(0, "#include %s" % include)
         if self.includes:
             self.emptyLine()
 
@@ -181,19 +187,20 @@ class CodeC(WriteCode):
         self.writeIntoFile(c_filename)
         compileC(logger, c_filename, program_filename, **kw)
 
+
 class FuzzyFunctionC(FunctionC):
     def __init__(self, name, arguments=None, type="void", random_bytes=400):
         FunctionC.__init__(self, name, arguments, type)
         self.bytes_generator = BytesGenerator(random_bytes, random_bytes)
         self.buffer_count = 0
-        self.special_int32 = (0x8000, 0xffff, 0x80000000)
+        self.special_int32 = (0x8000, 0xFFFF, 0x80000000)
 
     def createInt32(self):
         state = randint(1, 3)
         if state == 1:
             return choice(self.special_int32)
         elif state == 2:
-            return (0xffffff00 | randint(0, 255))
+            return 0xFFFFFF00 | randint(0, 255)
         else:
             return randint(MIN_INT32, MAX_INT32)
 
@@ -207,9 +214,8 @@ class FuzzyFunctionC(FunctionC):
         value = self.bytes_generator.createValue()
         size = len(value)
         if PY2:
-            value = ', '.join("0x%02x" % ord(item) for item in value)
+            value = ", ".join("0x%02x" % ord(item) for item in value)
         else:
-            value = ', '.join("0x%02x" % item for item in value)
+            value = ", ".join("0x%02x" % item for item in value)
         self.variables.append("const char %s[] = {%s}" % (name, value))
         return (name, size)
-

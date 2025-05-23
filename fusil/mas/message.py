@@ -4,8 +4,7 @@ class Message:
         self.arguments = arguments
 
     def __repr__(self):
-        return '<Message event=%r arguments#=%s>' % (
-            self.event, len(self.arguments))
+        return "<Message event=%r arguments#=%s>" % (self.event, len(self.arguments))
 
     def __call__(self, agent):
         try:
@@ -14,4 +13,3 @@ class Message:
         except AttributeError:
             return
         function(*self.arguments)
-

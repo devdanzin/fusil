@@ -15,6 +15,7 @@ if RUNNING_PYPY:
 if RUNNING_LINUX:
     from fusil.system_calm import SystemCalm
 
+
 class Project(ProjectAgent):
     """
     A fuzzer project runs fuzzing sessions until we get enough successes or the
@@ -24,8 +25,11 @@ class Project(ProjectAgent):
     Before a session start, the project sleeps until the system load is under
     50% (may change with command line options).
     """
+
     def __init__(self, application):
-        ProjectAgent.__init__(self, self, "project", mta=application.mta(), application=application)
+        ProjectAgent.__init__(
+            self, self, "project", mta=application.mta(), application=application
+        )
         self.config = application.config
         options = application.options
         self.agents = AgentList()
@@ -35,11 +39,12 @@ class Project(ProjectAgent):
             elif not options.slow:
                 self.system_calm = SystemCalm(
                     self.config.fusil_normal_calm_load,
-                    self.config.fusil_normal_calm_sleep)
+                    self.config.fusil_normal_calm_sleep,
+                )
             else:
                 self.system_calm = SystemCalm(
-                    self.config.fusil_slow_calm_load,
-                    self.config.fusil_slow_calm_sleep)
+                    self.config.fusil_slow_calm_load, self.config.fusil_slow_calm_sleep
+                )
         else:
             self.warning("SystemCalm class is not available")
             self.system_calm = None
@@ -55,7 +60,7 @@ class Project(ProjectAgent):
         self.nb_success = 0
         self.session = None
         self.session_index = 0
-        self.session_timeout = None # in second
+        self.session_timeout = None  # in second
 
         # Statistics
         self.session_executed = 0
@@ -112,9 +117,9 @@ class Project(ProjectAgent):
         if logger.filename:
             copyfile(logger.filename, filename)
             logger.unlinkFile()
-            mode = 'a'
+            mode = "a"
         else:
-            mode = 'w'
+            mode = "w"
         logger.file_handler = logger.addFileHandler(filename, mode=mode)
         logger.filename = filename
 
@@ -175,14 +180,13 @@ class Project(ProjectAgent):
 
         # Send 'project_start' and 'session_start' message
         if self.session_index == 1:
-            self.send('project_start')
-        self.send('session_start')
+            self.send("project_start")
+        self.send("session_start")
         text = "Start session"
         if self.max_session:
             percent = self.session_index * 100.0 / self.max_session
             text += " (%.1f%%)" % percent
         self.error(text)
-
 
     def destroySession(self):
         """
@@ -193,7 +197,7 @@ class Project(ProjectAgent):
         # Update statistics
         if not self.application().exitcode:
             self.session_executed += 1
-            self.session_total_duration += (time() - self.session_start)
+            self.session_total_duration += time() - self.session_start
 
         # First deactivate session agents
         self.session.deactivate()
@@ -214,10 +218,10 @@ class Project(ProjectAgent):
         self.mta().clear()
 
     def on_session_done(self, session_score):
-        self.send('project_session_destroy', session_score)
+        self.send("project_session_destroy", session_score)
 
     def on_project_stop(self):
-        self.send('univers_stop')
+        self.send("univers_stop")
 
     def on_univers_stop(self):
         if self.session:
@@ -231,8 +235,10 @@ class Project(ProjectAgent):
             log = self.error
         else:
             log = self.warning
-        log("End of session: score=%.1f%%, duration=%.3f second" % (
-            session_score*100, duration))
+        log(
+            "End of session: score=%.1f%%, duration=%.3f second"
+            % (session_score * 100, duration)
+        )
 
         # Destroy session
         self.destroySession()
@@ -245,17 +251,21 @@ class Project(ProjectAgent):
                 percent = self.nb_success * 100.0 / self.max_success
                 text += "/%s (%.1f%%)" % (self.max_success, percent)
             self.error("Success %s!" % text)
-            if 0 < self.max_success \
-            and self.max_success <= self.nb_success:
-                self.error("Stop! Limited to %s successes, use --success option for more" % self.max_success)
-                self.send('univers_stop')
+            if 0 < self.max_success and self.max_success <= self.nb_success:
+                self.error(
+                    "Stop! Limited to %s successes, use --success option for more"
+                    % self.max_success
+                )
+                self.send("univers_stop")
                 return
 
         # Hit maximum number of session?
-        if 0 < self.max_session \
-        and self.max_session <= self.session_index:
-            self.error("Stop! Limited to %s sessions, use --sessions option for more" % self.max_session)
-            self.send('univers_stop')
+        if 0 < self.max_session and self.max_session <= self.session_index:
+            self.error(
+                "Stop! Limited to %s sessions, use --sessions option for more"
+                % self.max_session
+            )
+            self.send("univers_stop")
             return
 
         # Otherwise: start new session
@@ -271,7 +281,7 @@ class Project(ProjectAgent):
         duration = time() - self.session_start
         if self.session_timeout <= duration:
             self.error("Project session timeout!")
-            self.send('session_stop')
+            self.send("session_stop")
             self.use_timeout = False
 
     def summarize(self):
@@ -282,8 +292,10 @@ class Project(ProjectAgent):
         info = []
         if count:
             duration = self.session_total_duration
-            info.append("%s sessions in %.1f seconds (%.1f ms per session)"
-                % (count, duration, duration * 1000 / count))
+            info.append(
+                "%s sessions in %.1f seconds (%.1f ms per session)"
+                % (count, duration, duration * 1000 / count)
+            )
         duration = time() - self.project_start
         info.append("total %.1f seconds" % duration)
         info.append("aggresssivity: %s" % self.aggressivity)
@@ -296,4 +308,3 @@ class Project(ProjectAgent):
         prefix and make sure that the generated filename is unique.
         """
         return self.directory.uniqueFilename(filename, count=count)
-

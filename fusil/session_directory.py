@@ -17,16 +17,16 @@ from errno import EPERM
 from fusil.unsafe import permissionHelp
 
 # allow letters, digits, understand and dash
-NORMALIZE_REGEX = re.compile(u'[^a-zA-Z0-9_-]')
+NORMALIZE_REGEX = re.compile("[^a-zA-Z0-9_-]")
 
 # len('invalid_mem-access-0x8000000000000000') = 37
 PART_MAXLEN = 40
 
+
 class SessionDirectory(SessionAgent, Directory):
     def __init__(self, session):
         project = session.project()
-        directory = project.createFilename(u'session',
-            count=project.session_index)
+        directory = project.createFilename("session", count=project.session_index)
         Directory.__init__(self, directory)
         SessionAgent.__init__(self, session, "directory:%s" % basename(self.directory))
         self.rename_parts = []
@@ -52,8 +52,10 @@ class SessionDirectory(SessionAgent, Directory):
             if err.errno != EPERM:
                 raise
             help = permissionHelp(self.application().options)
-            message = "You are not allowed to change the owner of the directory %s to %s:%s" \
+            message = (
+                "You are not allowed to change the owner of the directory %s to %s:%s"
                 % (self.directory, uid, gid)
+            )
             if help:
                 message += " (%s)" % help
             raise FusilError(message)
@@ -77,8 +79,7 @@ class SessionDirectory(SessionAgent, Directory):
                 self.warning("Keep the directory %s" % self.directory)
                 return True
 
-        if application.options.keep_generated_files \
-        and not self.isEmpty(True):
+        if application.options.keep_generated_files and not self.isEmpty(True):
             # Project generated some extra files: keep the directory
             self.warning("Keep the non-empty directory %s" % self.directory)
             return True
@@ -98,7 +99,7 @@ class SessionDirectory(SessionAgent, Directory):
 
         # Create the new filenme
         old_directory = self.directory
-        filename = '-'.join(self.rename_parts)
+        filename = "-".join(self.rename_parts)
         self.directory = project_dir.uniqueFilename(filename, save=False)
         self.error("Rename the session directory: %s" % basename(self.directory))
         rename(old_directory, self.directory)
@@ -124,7 +125,7 @@ class SessionDirectory(SessionAgent, Directory):
 
         # Normalize
         orig_part = part
-        part = NORMALIZE_REGEX.sub('_', part)
+        part = NORMALIZE_REGEX.sub("_", part)
         if part != orig_part:
             self.info("Normalize the session name part %r: %r" % (orig_part, part))
 
@@ -134,4 +135,3 @@ class SessionDirectory(SessionAgent, Directory):
             return
         self.rename_set.add(part)
         self.rename_parts.append(part)
-
