@@ -1,11 +1,8 @@
 from weakref import ref as weakref_ref
 
-from ptrace.os_tools import RUNNING_LINUX
-
 from fusil.project_agent import ProjectAgent
 
-if RUNNING_LINUX:
-    from fusil.process.cpu_probe import CpuProbe
+from fusil.process.cpu_probe import CpuProbe
 
 DEFAULT_EXITCODE_SCORE = 0.50
 DEFAULT_TIMEOUT_SCORE = 1.0
@@ -24,10 +21,7 @@ class WatchProcess(ProjectAgent):
         self.process = weakref_ref(process)
         project = process.project()
         ProjectAgent.__init__(self, project, "watch:%s" % process.name)
-        if RUNNING_LINUX and project.config.process_use_cpu_probe:
-            self.cpu = CpuProbe(project, "%s:cpu" % self.name)
-        else:
-            self.cpu = None
+        self.cpu = CpuProbe(project, "%s:cpu" % self.name)
 
         # Score if process exited normally
         self.default_score = default_score

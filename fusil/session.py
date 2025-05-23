@@ -1,16 +1,11 @@
 import re
 from logging import INFO, Formatter
 
-from ptrace.os_tools import RUNNING_PYPY
-
 from fusil.mas.agent_list import AgentList
 from fusil.project_agent import ProjectAgent
 from fusil.score import normalizeScore
 from fusil.session_agent import SessionAgent
 from fusil.session_directory import SessionDirectory
-
-if RUNNING_PYPY:
-    from gc import collect as gc_collect
 
 # Match "[0][session 0010] "
 PREFIX_REGEX = re.compile(r"\[[0-9]\]\[+session [0-9]+\] ")
@@ -96,8 +91,6 @@ class Session(SessionAgent):
         if self.log_handler:
             self.logger.removeFileHandler(self.log_handler)
         self.agents.clear()
-        if RUNNING_PYPY:
-            gc_collect()
 
     def live(self):
         """

@@ -3,10 +3,7 @@ from errno import EEXIST
 from os import fstat, getcwd, getpid, mkdir
 from os.path import basename
 
-from ptrace.os_tools import RUNNING_LINUX
-
-if RUNNING_LINUX:
-    from ptrace.linux_proc import readProcessLink
+from ptrace.linux_proc import readProcessLink
 
 
 def safeMkdir(path):
@@ -33,9 +30,8 @@ def dumpFileInfo(logger, file_obj):
     except AttributeError:
         logger.info("File object class: %s" % file_obj.__class__.__name__)
         return
-    if RUNNING_LINUX:
-        filename = readProcessLink(getpid(), "fd/%s" % fileno)
-        logger.info("File name: %r" % filename)
+    filename = readProcessLink(getpid(), "fd/%s" % fileno)
+    logger.info("File name: %r" % filename)
     logger.info("File descriptor: %s" % fileno)
 
     stat = fstat(fileno)

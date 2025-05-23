@@ -113,13 +113,14 @@ class PythonFuzzerError(Exception):
 
 
 class ListAllModules:
-    def __init__(self, logger, only_c, site_package, blacklist, skip_test):
+    def __init__(self, logger, only_c, site_package, blacklist, skip_test, verbose=False):
         self.logger = logger
         self.only_c = only_c
         self.site_package = site_package
         self.blacklist = blacklist
         self.names = set(sys.builtin_module_names) - {"__main__"}
         self.skip_test = skip_test
+        self.verbose = verbose
 
     def matchModule(self, is_package, name, filename):
         if filename is not None and not self.filter_filename(filename):
@@ -169,7 +170,8 @@ class ListAllModules:
                 )
                 or (package is not None and "pip" in package)
             ):
-                print("SKIPPED", info, file=sys.stderr)
+                if self.verbose:
+                    print("SKIPPED", info, file=sys.stderr)
                 continue
             # print(f"CHECKING {info.name=} {package=} {path=}")
             if not self.is_module_c(info.name, ""):
@@ -218,12 +220,14 @@ class ListAllModules:
                     or "logging" in name
                 ):
                     # Ignore the module and all of its submodules
-                    self.logger.error(f"IGNORED {prefix}:{name}")
+                    if self.verbose:
+                        self.logger.error(f"IGNORED {prefix}:{name}")
                     continue
                 if not self.is_module_c(name, prefix):
                     continue
                 fullname = prefix + name
-                self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
+                if self.verbose:
+                    self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
                 self.names.add(fullname)
         except:
             raise
@@ -231,7 +235,8 @@ class ListAllModules:
     def is_module_c(self, name, prefix):
         is_c = True
         fullname = prefix + name
-        # print(f"TESTING {fullname}")
+        if self.verbose:
+            print(f"TESTING {fullname}:")
         if self.only_c:
             module = None
             if fullname in sys.modules:
@@ -249,12 +254,13 @@ class ListAllModules:
                     module = __import__(fullname)
                 except ImportError as e:
                     print(e)
-                    pass
             if module and hasattr(module, "__file__"):
                 if module.__file__.endswith(("py", "pyo", "pyc", "pyw")):
                     if "__init__" not in module.__file__:
                         is_c = False
                         self.logger.error(f"SKIP PYTHON MODULE {fullname}")
+        if self.verbose:
+            print(f"    IS {fullname} C: {is_c}")
         return is_c
 
     def search(self):
@@ -529,6 +535,7 @@ class PythonSource(ProjectAgent):
                 not self.options.no_site_packages,
                 MODULE_BLACKLIST,
                 self.options.skip_test,
+                verbose=self.options.verbose,
             ).search()
         if self.options.packages != "*":
             print("\nAdding packages...")
@@ -538,6 +545,7 @@ class PythonSource(ProjectAgent):
                 not self.options.no_site_packages,
                 MODULE_BLACKLIST,
                 self.options.skip_test,
+                verbose=self.options.verbose,
             )
             for package in self.options.packages.split(","):
                 package = package.strip().strip("/")
@@ -548,9 +556,11 @@ class PythonSource(ProjectAgent):
                 print(f"Adding package: {package} ({path})")
                 package_walker = all_modules.walk_packages([path], package + ".")
                 self.modules |= set(mod.name for mod in package_walker)
-            print(
-                f"\nKnow modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
-            )
+
+            if self.verbose:
+                print(
+                    f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
+                )
 
         blacklist = self.options.blacklist
         if blacklist:

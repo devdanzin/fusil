@@ -3,7 +3,6 @@ from os.path import normpath
 from sys import executable, getfilesystemencoding
 from sys import path as sys_path
 
-from fusil.python_tools import RUNNING_PYTHON3
 from fusil.write_code import WriteCode
 from fusil.xhost import xhostCommand
 
@@ -146,22 +145,13 @@ class WriteReplayScript(WriteCode):
         self.write(1, "limitCpuTime(timeout)")
 
     def writePrint(self, level, message, arguments=None, file=None):
-        if RUNNING_PYTHON3:
-            message = '"%s"' % message
-        else:
-            message = 'u"%s"' % message
+        message = '"%s"' % message
         if arguments:
             message += " %% (%s)" % arguments
-        if RUNNING_PYTHON3:
-            if file:
-                code = "print (%s, file=%s)" % (message, file)
-            else:
-                code = "print (%s)" % message
+        if file:
+            code = "print (%s, file=%s)" % (message, file)
         else:
-            if file:
-                code = "print >>%s, %s" % (file, message)
-            else:
-                code = "print %s" % message
+            code = "print (%s)" % message
         self.write(level, code)
 
     def safetyConfirmation(self):
@@ -175,11 +165,7 @@ class WriteReplayScript(WriteCode):
         self.writePrint(0, "")
         self.emptyLine()
 
-        if RUNNING_PYTHON3:
-            raw_input = "input"
-        else:
-            raw_input = "raw_input"
-
+        raw_input = "input"
         self.write(0, "try:")
         self.write(1, "answer = None")
         self.write(1, 'while answer not in ("yes", "no", ""):')
@@ -356,10 +342,7 @@ class WriteReplayScript(WriteCode):
 
         self.write(0, "try:")
         self.write(1, "changeUserGroup(uid, gid)")
-        if RUNNING_PYTHON3:
-            self.write(0, "except OSError as err:")
-        else:
-            self.write(0, "except OSError, err:")
+        self.write(0, "except OSError as err:")
         self.writePrint(1, "Error on changing user/group: %s", "err")
         self.write(1, "if getuid() != 0:")
         self.writePrint(2, "=> Retry as root user!")

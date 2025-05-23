@@ -1,8 +1,6 @@
 from shutil import copyfile
 from time import time
 
-from ptrace.os_tools import RUNNING_LINUX, RUNNING_PYPY
-
 from fusil.aggressivity import AggressivityAgent
 from fusil.mas.agent_list import AgentList
 from fusil.process.debugger import Debugger
@@ -10,10 +8,7 @@ from fusil.project_agent import ProjectAgent
 from fusil.project_directory import ProjectDirectory
 from fusil.session import Session
 
-if RUNNING_PYPY:
-    from gc import collect as gc_collect
-if RUNNING_LINUX:
-    from fusil.system_calm import SystemCalm
+from fusil.system_calm import SystemCalm
 
 
 class Project(ProjectAgent):
@@ -33,18 +28,13 @@ class Project(ProjectAgent):
         self.config = application.config
         options = application.options
         self.agents = AgentList()
-        if RUNNING_LINUX:
-            if options.fast:
-                self.system_calm = None
-            elif not options.slow:
-                self.system_calm = SystemCalm(
-                    self.config.fusil_normal_calm_load,
-                    self.config.fusil_normal_calm_sleep,
-                )
-            else:
-                self.system_calm = SystemCalm(
-                    self.config.fusil_slow_calm_load, self.config.fusil_slow_calm_sleep
-                )
+        if options.fast:
+            self.system_calm = None
+        elif not options.slow:
+            self.system_calm = SystemCalm(
+                self.config.fusil_normal_calm_load,
+                self.config.fusil_normal_calm_sleep,
+            )
         else:
             self.warning("SystemCalm class is not available")
             self.system_calm = None
@@ -148,9 +138,6 @@ class Project(ProjectAgent):
             # And then remove the whole directory
             self.directory.rmtree()
         self.directory = None
-
-        if RUNNING_PYPY:
-            gc_collect()
 
     def createSession(self):
         """
