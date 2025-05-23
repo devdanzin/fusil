@@ -1252,10 +1252,7 @@ class WritePythonCode(WriteCode):
 
     def genOpenFile(self):
         filename = choice(self.filenames)
-        if RUNNING_PYTHON3:
-            instr = "open('%s')" % filename
-        else:
-            instr = "open(u'%s')" % filename
+        instr = "open('%s')" % filename
         return [instr]
 
     def genException(self):
