@@ -26,6 +26,9 @@ from random import choice, randint, sample
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import Any, Callable, Generator
 
+# Hide Python warnings on import
+warnings.simplefilter("ignore")
+
 import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.bytes_generator import BytesGenerator
@@ -532,9 +535,6 @@ class Fuzzer(Application):
         # PyPy interact prompt
         # avoid false positive on "# assert did not crash"
         stdout.ignoreRegex(r"^And now for something completely different:")
-
-        # Hide Python warnings on import
-        warnings.simplefilter("ignore")
 
         # import_all()
 
