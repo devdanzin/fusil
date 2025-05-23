@@ -68,11 +68,10 @@ class Application(ApplicationAgent):
             return
         self.agents.remove(agent, destroy)
 
-    def createFuzzerOptions(self, parser, config_output):
+    def createFuzzerOptions(self, parser):
         """
         Create command line options specific to a fuzzer
         """
-        return StringIO()
 
     def createOptionParser(self, output=None):
         """
@@ -85,7 +84,7 @@ class Application(ApplicationAgent):
             action="store_true",
         )
 
-        self.createFuzzerOptions(parser, output)
+        self.createFuzzerOptions(parser)
         config_options = StringIO()
         fuzzer = OptionGroupWithSections(parser, "Fuzzer")
         fuzzer.add_option(

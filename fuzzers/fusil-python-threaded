@@ -394,9 +394,7 @@ class ListAllModules:
 class Fuzzer(Application):
     NAME = "python"
 
-    def createFuzzerOptions(
-        self, parser: ConfigParserWithHelp, config_output: StringIO
-    ) -> StringIO:
+    def createFuzzerOptions(self, parser: ConfigParserWithHelp) -> None:
         input_options = OptionGroupWithSections(parser, "Input")
         input_options.add_option(
             "--modules",
@@ -565,8 +563,6 @@ class Fuzzer(Application):
         options = input_options, running_options, fuzzing_options, config_options
         for option in options:
             parser.add_option_group(option)
-
-        return config_output
 
     def setupProject(self) -> None:
         """Prepare project for fuzzing."""
