@@ -651,7 +651,7 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST,
+                MODULE_BLACKLIST | set(self.options.blacklist.split(",")),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             ).search_modules()
@@ -661,7 +661,7 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST,
+                MODULE_BLACKLIST | set(self.options.blacklist.split(",")),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             )
