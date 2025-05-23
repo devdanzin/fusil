@@ -6,6 +6,7 @@ Use "python" command line program.
 Interesting modules: all modules written in C or having some code written
 in C, see Modules/*.c in Python source code.
 """
+
 from __future__ import annotations
 
 import builtins
@@ -122,8 +123,15 @@ class PythonFuzzerError(Exception):
 
 
 class ListAllModules:
-    def __init__(self, logger: PythonSource, only_c: bool, site_package: bool, blacklist: set[str], skip_test: bool,
-                 verbose=False):
+    def __init__(
+        self,
+        logger: PythonSource,
+        only_c: bool,
+        site_package: bool,
+        blacklist: set[str],
+        skip_test: bool,
+        verbose=False,
+    ):
         self.logger = logger
         self.only_c = only_c
         self.site_package = site_package
@@ -140,9 +148,9 @@ class ListAllModules:
         if is_package:
             return False
         if any(
-                filename.endswith(ext)
-                for ext in (".py", ".pyc", ".pyo")
-                if filename is not None
+            filename.endswith(ext)
+            for ext in (".py", ".pyc", ".pyo")
+            if filename is not None
         ):
             return False
         return True
@@ -157,9 +165,11 @@ class ListAllModules:
         return True
 
     def walk_packages(
-            self, path: list[str] | None = None, prefix: str = "", onerror: Callable | None = None
+        self,
+        path: list[str] | None = None,
+        prefix: str = "",
+        onerror: Callable | None = None,
     ) -> Generator[pkgutil.ModuleInfo]:
-
         def seen(p: str, m: dict[str, bool] = {}) -> bool:
             if p in m:
                 return True
@@ -172,17 +182,17 @@ class ListAllModules:
                 path = getattr(sys.modules[info.name], "__path__", None)
                 package = getattr(sys.modules[info.name], "__package__", None)
             if (
-                    (self.skip_test and "test" in info.name)
-                    or "pip" in info.name
-                    or "logging" in info.name
-                    or "pydoc" in info.name
-                    or "tkinter" in info.name
-                    or (
+                (self.skip_test and "test" in info.name)
+                or "pip" in info.name
+                or "logging" in info.name
+                or "pydoc" in info.name
+                or "tkinter" in info.name
+                or (
                     not self.site_package
                     and path is not None
                     and any("site-packages" in p for p in path)
-            )
-                    or (package is not None and "pip" in package)
+                )
+                or (package is not None and "pip" in package)
             ):
                 if self.verbose:
                     print("SKIPPED", info, file=sys.stderr)
@@ -217,21 +227,21 @@ class ListAllModules:
                 return
         try:
             for loader, name, is_package in self.walk_packages(
-                    None, onerror=lambda x: None
+                None, onerror=lambda x: None
             ):
                 if name.endswith("_d"):
                     # Ignore Debian debug modules
                     # (e.g. ignore "_bisect_d", the real module is "_bisect)
                     continue
                 if (
-                        name in self.blacklist
-                        or prefix in self.blacklist
-                        or prefix.split(".")[0] in self.blacklist
-                        or name.split(".")[0] in self.blacklist
-                        or "test" in name
-                        or "idlelib" in name
-                        or "pydoc" in name
-                        or "logging" in name
+                    name in self.blacklist
+                    or prefix in self.blacklist
+                    or prefix.split(".")[0] in self.blacklist
+                    or name.split(".")[0] in self.blacklist
+                    or "test" in name
+                    or "idlelib" in name
+                    or "pydoc" in name
+                    or "logging" in name
                 ):
                     # Ignore the module and all of its submodules
                     if self.verbose:
@@ -286,7 +296,9 @@ class ListAllModules:
 class Fuzzer(Application):
     NAME = "python"
 
-    def createFuzzerOptions(self, parser: ConfigParserWithHelp, config_output: StringIO) -> StringIO:
+    def createFuzzerOptions(
+        self, parser: ConfigParserWithHelp, config_output: StringIO
+    ) -> StringIO:
         input_options = OptionGroupWithSections(parser, "Input")
         input_options.add_option(
             "--modules",
@@ -365,21 +377,21 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--functions-number",
             help="Number of function calls to generate per module (default: %d)"
-                 % DEFAULT_NB_CALL,
+            % DEFAULT_NB_CALL,
             type="int",
             default=DEFAULT_NB_CALL,
         )
         fuzzing_options.add_option(
             "--methods-number",
             help="Number of method calls to create for each class or object (default: %d)"
-                 % DEFAULT_NB_METHOD,
+            % DEFAULT_NB_METHOD,
             type="int",
             default=DEFAULT_NB_METHOD,
         )
         fuzzing_options.add_option(
             "--classes-number",
             help="Number of classes to fuzz per module (default: %d)"
-                 % DEFAULT_NB_CLASS,
+            % DEFAULT_NB_CLASS,
             type="int",
             default=DEFAULT_NB_CLASS,
         )
@@ -427,7 +439,7 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--filenames",
             help="Names separated by commas of readable files (default: %s)"
-                 % FILENAMES,
+            % FILENAMES,
             type="str",
             default=FILENAMES,
         )
@@ -441,7 +453,7 @@ class Fuzzer(Application):
         config_options.add_option(
             "--config-file",
             help="Name of the configuration file to be read or written (default: %s)"
-                 % createFilename(),
+            % createFilename(),
             type="str",
             default=createFilename(),
         )
@@ -666,8 +678,13 @@ class PythonProcess(CreateProcess):
 
 class WritePythonCode(WriteCode):
     def __init__(
-            self, parent: PythonSource, filename: str, module: ModuleType, module_name: str, threads: bool = True,
-            _async: bool = True
+        self,
+        parent: PythonSource,
+        filename: str,
+        module: ModuleType,
+        module_name: str,
+        threads: bool = True,
+        _async: bool = True,
     ):
         WriteCode.__init__(self)
         self.filename = filename
@@ -694,14 +711,17 @@ class WritePythonCode(WriteCode):
             self.genRawString,
             self.genWeirdType,
         )
-        self.simple_argument_generators: tuple[Callable[[], list[str]], ...] = self.hashable_argument_generators + (
-            self.genBufferObject,
-            self.genInterestingValues,
-            self.genWeirdClass,
-            self.genWeirdInstance,
-            self.genWeirdType,
-            self.genWeirdUnion,
-            self.genTrickyObjects,
+        self.simple_argument_generators: tuple[Callable[[], list[str]], ...] = (
+            self.hashable_argument_generators
+            + (
+                self.genBufferObject,
+                self.genInterestingValues,
+                self.genWeirdClass,
+                self.genWeirdInstance,
+                self.genWeirdType,
+                self.genWeirdUnion,
+                self.genTrickyObjects,
+            )
         )
         self.complex_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genList,
@@ -948,7 +968,9 @@ class WritePythonCode(WriteCode):
             methods[name] = attr
         return methods
 
-    def _createArgument(self, generators: tuple[Callable[[], list[str]], ...]) -> list[str]:
+    def _createArgument(
+        self, generators: tuple[Callable[[], list[str]], ...]
+    ) -> list[str]:
         callback = choice(generators)
         value = callback()
         for item in value:
@@ -971,8 +993,15 @@ class WritePythonCode(WriteCode):
             generators = self.simple_argument_generators
         return self._createArgument(generators)
 
-    def callFunction(self, prefix: str | None, func_index: int, func_name: str, func: Callable, min_arg: int,
-                     obj_name: str | None = None) -> None:
+    def callFunction(
+        self,
+        prefix: str | None,
+        func_index: int,
+        func_name: str,
+        func: Callable,
+        min_arg: int,
+        obj_name: str | None = None,
+    ) -> None:
         if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
             return
         min_arg, max_arg = get_arg_number(func, func_name, min_arg)
@@ -1111,15 +1140,15 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
     def writeCode(
-            self,
-            prefix: str,
-            object: Any,
-            functions: list[str],
-            classes: list[str],
-            objects: list[str],
-            func_min_arg: int,
-            nb_call: int,
-            obj_name: str | None = None,
+        self,
+        prefix: str,
+        object: Any,
+        functions: list[str],
+        classes: list[str],
+        objects: list[str],
+        func_min_arg: int,
+        nb_call: int,
+        obj_name: str | None = None,
     ) -> None:
         if functions:
             for index in range(nb_call):
@@ -1205,9 +1234,9 @@ class WritePythonCode(WriteCode):
 
     def genRawString(self) -> list[str]:
         sequences = (
-                [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
-                + sorted(LETTERS)
-                + ["."] * 10
+            [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
+            + sorted(LETTERS)
+            + ["."] * 10
         )
         special = ["+", "?", "*"]
         result = []
@@ -1285,7 +1314,9 @@ class WritePythonCode(WriteCode):
     def genException(self) -> list[str]:
         return ["Exception('pouet')"]
 
-    def _genList(self, open_text: str, close_text: str, empty: str, is_dict: bool = False) -> list[str]:
+    def _genList(
+        self, open_text: str, close_text: str, empty: str, is_dict: bool = False
+    ) -> list[str]:
         # 90% of the time generate values of the same type
         same_type = randint(0, 9) != 0
         nb_item = randint(0, 9)
@@ -1323,8 +1354,11 @@ class WritePythonCode(WriteCode):
         lines[-1] += close_text
         return lines
 
-    def createDictItem(self, key_callback: Callable[[], list[str]] | None = None,
-                       value_callback: Callable[[], list[str]] | None = None) -> list[str]:
+    def createDictItem(
+        self,
+        key_callback: Callable[[], list[str]] | None = None,
+        value_callback: Callable[[], list[str]] | None = None,
+    ) -> list[str]:
         if key_callback:
             key = key_callback()
         else:
