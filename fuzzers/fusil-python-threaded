@@ -813,6 +813,7 @@ class WritePythonCode(WriteCode):
         threads: bool = True,
         _async: bool = True,
     ):
+        """Initialize the Python code writer with parent, file, module, and options."""
         WriteCode.__init__(self)
         self.filename = filename
         self.filenames = parent.filenames
@@ -892,6 +893,7 @@ class WritePythonCode(WriteCode):
         self.write(level, code)
 
     def writeSource(self) -> None:
+        """Generate the complete Python source file for fuzzing."""
         self.createFile(self.filename)
         self.write(0, "from gc import collect")
         self.write(0, "from sys import stderr")
@@ -1002,6 +1004,7 @@ class WritePythonCode(WriteCode):
         self.close()
 
     def writeCallMethod(self) -> None:
+        """Write the Python code for the 'callMethod' helper function."""
         self.write(0, 'funcname = "%s.%%s()" %% name' % self.module_name)
         self.write(0, 'message = "[%s] %s" % (prefix, funcname)')
         self.writePrint(0, "message")
@@ -1036,6 +1039,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "return result")
 
     def getFunctions(self) -> tuple[list[str], list[str], list[str]]:
+        """Extract functions, classes, and objects from the current module."""
         classes = []
         functions = []
         objects = []
@@ -1067,6 +1071,7 @@ class WritePythonCode(WriteCode):
         return functions, classes, objects
 
     def getMethods(self, object: Any, class_name: str) -> dict[str, Any]:
+        """Extract callable methods from an object or class, respecting blacklists."""
         try:
             key = "%s:%s" % (self.module_name, class_name)
             blacklist = BLACKLIST[key]
@@ -1099,6 +1104,7 @@ class WritePythonCode(WriteCode):
     def _createArgument(
         self, generators: tuple[Callable[[], list[str]], ...]
     ) -> list[str]:
+        """Create a single argument using a randomly chosen generator."""
         callback = choice(generators)
         value = callback()
         for item in value:
@@ -1107,12 +1113,15 @@ class WritePythonCode(WriteCode):
         return value
 
     def createArgument(self) -> list[str]:
+        """Create a general argument using simple argument generators."""
         return self._createArgument(self.simple_argument_generators)
 
     def createHashableArgument(self) -> list[str]:
+        """Create a hashable argument using hashable argument generators."""
         return self._createArgument(self.hashable_argument_generators)
 
     def createComplexArgument(self) -> list[str]:
+        """Create a potentially complex argument, choosing between simple or complex generators."""
         if randint(0, 9) < 9:
             # 10%
             generators = self.complex_argument_generators
@@ -1130,6 +1139,7 @@ class WritePythonCode(WriteCode):
         min_arg: int,
         obj_name: str | None = None,
     ) -> None:
+        """Write code to call a function or method with generated arguments."""
         if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
             return
         min_arg, max_arg = get_arg_number(func, func_name, min_arg)
@@ -1203,12 +1213,14 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
     def writeArgument(self, level: int, last_char: str = ",") -> None:
+        """Write a generated argument to the source file."""
         lines = self.createComplexArgument()
         lines[-1] += last_char
         for line in lines:
             self.write(level, line)
 
     def useClass(self, cls_index: int, cls: type, class_name: str) -> None:
+        """Write code to instantiate a class and call its methods."""
         nb_arg = class_arg_number(class_name, cls)
 
         prefix = "o%s" % (1 + cls_index)
@@ -1242,6 +1254,7 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
     def useObject(self, obj_index: int, obj: Any, obj_name: str) -> None:
+        """Write code to call methods on an existing module-level object."""
         prefix = "obj%s" % (1 + obj_index)
         self.writePrint(
             0,
@@ -1278,6 +1291,7 @@ class WritePythonCode(WriteCode):
         nb_call: int,
         obj_name: str | None = None,
     ) -> None:
+        """Generate code to call functions, instantiate classes, or use objects."""
         if functions:
             for index in range(nb_call):
                 func_name = choice(functions)
@@ -1300,9 +1314,11 @@ class WritePythonCode(WriteCode):
                 self.useObject(index, obj, object_name)
 
     def genNone(self) -> list[str]:
+        """Generate a 'None' value."""
         return ["None"]
 
     def genTricky(self) -> list[str]:
+        """Generate a 'tricky' or problematic Python object."""
         return [
             choice(
                 [
@@ -1325,29 +1341,35 @@ class WritePythonCode(WriteCode):
         ]
 
     def genBool(self) -> list[str]:
+        """Generate a boolean value (True or False)."""
         if randint(0, 1) == 1:
             return ["True"]
         else:
             return ["False"]
 
     def genSmallUint(self) -> list[str]:
+        """Generate a small unsigned integer string."""
         return [self.smallint_generator.createValue()]
 
     def genInt(self) -> list[str]:
+        """Generate an integer string."""
         return [self.int_generator.createValue()]
 
     def genBytes(self) -> list[str]:
+        """Generate a bytes string literal."""
         # Bytes string
-        bytes = self.bytes_generator.createValue()
-        text = "".join("\\x%02X" % byte for byte in bytes)
+        bytes_val = self.bytes_generator.createValue()
+        text = "".join("\\x%02X" % byte for byte in bytes_val)
         text = 'b"%s"' % text
         return [text]
 
     def genUnixPath(self) -> list[str]:
+        """Generate a Unix-like path string."""
         path = self.unix_path_generator.createValue()
         return ['"%s"' % path]
 
     def _genUnicode(self, generator: UnicodeGenerator) -> list[str]:
+        """Helper to generate an escaped Unicode string literal."""
         # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
@@ -1355,12 +1377,15 @@ class WritePythonCode(WriteCode):
         return [text]
 
     def genLetterDigit(self) -> list[str]:
+        """Generate a string of letters and digits."""
         return self._genUnicode(self.letters_generator)
 
     def genString(self) -> list[str]:
+        """Generate a general Unicode string."""
         return self._genUnicode(self.unicode_generator)
 
     def genRawString(self) -> list[str]:
+        """Generate a raw string, potentially for regex patterns."""
         sequences = (
             [r"\d", r"\D", r"\w", r"\W", r"\s", r"\S", r"\b", r"\B", r"\A", r"\Z"]
             + sorted(LETTERS)
@@ -1375,39 +1400,48 @@ class WritePythonCode(WriteCode):
         return [f'r"{"".join(result)}"']
 
     def genSurrogates(self) -> list[str]:
+        """Generate a string containing Unicode surrogate pairs."""
         text = choice(SURROGATES)
         return [text]
 
     def genInterestingValues(self) -> list[str]:
+        """Generate an 'interesting' predefined value."""
         interesting = choice(INTERESTING)
         return [interesting]
 
     def genTrickyObjects(self) -> list[str]:
+        """Generate a name of a 'tricky' predefined object."""
         tricky = choice(fusil.python.tricky_weird.tricky_objects_names)
         return [tricky]
 
     def genTrickyNumpy(self) -> list[str]:
+        """Generate a name of a 'tricky' predefined NumPy object."""
         tricky = choice(fusil.python.tricky_weird.tricky_numpy_names)
         return [tricky]
 
     def genTrickyTemplate(self) -> list[str]:
+        """Generate a predefined template string."""
         tricky = choice(TEMPLATES)
         return [tricky]
 
     def genWeirdClass(self) -> list[str]:
+        """Generate a reference to a 'weird' predefined class."""
         weird_class_name = choice(fusil.python.tricky_weird.weird_names)
         return [f"weird_classes['{weird_class_name}']"]
 
     def genWeirdInstance(self) -> list[str]:
+        """Generate a reference to an instance of a 'weird' predefined class."""
         weird_class_name = choice(fusil.python.tricky_weird.weird_instance_names)
         return [f"weird_instances['{weird_class_name}']"]
 
     def genWeirdType(self) -> list[str]:
+        """Generate a type hint involving a 'weird' predefined class."""
         weird_class_name = choice(fusil.python.tricky_weird.weird_names)
         type_name = choice(fusil.python.tricky_weird.type_names)
         return [f"{type_name}[weird_classes['{weird_class_name}']]"]
 
     def genWeirdUnion(self) -> list[str]:
+        """Generate a union type hint involving 'weird' predefined classes."""
         weird_class_name1 = choice(fusil.python.tricky_weird.weird_names)
         weird_class_name2 = choice(fusil.python.tricky_weird.weird_names)
         type_name = choice(fusil.python.tricky_weird.type_names)
@@ -1416,35 +1450,43 @@ class WritePythonCode(WriteCode):
         ]
 
     def genBufferObject(self) -> list[str]:
+        """Generate a string representing a buffer-like object."""
         text = choice(BUFFER_OBJECTS)
         return [text]
 
     def genAsciiString(self) -> list[str]:
+        """Generate an ASCII string."""
         return self._genUnicode(self.ascii_generator)
 
     def genFloat(self) -> list[str]:
+        """Generate a float string."""
         int_part = self.float_int_generator.createValue()
         float_part = self.float_float_generator.createValue()
         return ["%s.%s" % (int_part, float_part)]
 
     def genExistingFilename(self) -> list[str]:
+        """Generate a string of an existing filename."""
         filename = choice(self.filenames)
         return ["'%s'" % filename]
 
     def genErrback(self) -> list[str]:
+        """Generate the name of the error callback function."""
         return ["%s" % ERRBACK_NAME]
 
     def genOpenFile(self) -> list[str]:
+        """Generate code to open an existing file."""
         filename = choice(self.filenames)
         instr = "open('%s')" % filename
         return [instr]
 
     def genException(self) -> list[str]:
+        """Generate an Exception instance string."""
         return ["Exception('pouet')"]
 
     def _genList(
         self, open_text: str, close_text: str, empty: str, is_dict: bool = False
     ) -> list[str]:
+        """Helper to generate code for lists, tuples, or dictionaries."""
         # 90% of the time generate values of the same type
         same_type = randint(0, 9) != 0
         nb_item = randint(0, 9)
@@ -1487,6 +1529,7 @@ class WritePythonCode(WriteCode):
         key_callback: Callable[[], list[str]] | None = None,
         value_callback: Callable[[], list[str]] | None = None,
     ) -> list[str]:
+        """Generate a key-value pair for a dictionary literal."""
         if key_callback:
             key = key_callback()
         else:
@@ -1500,12 +1543,15 @@ class WritePythonCode(WriteCode):
         return key
 
     def genList(self) -> list[str]:
+        """Generate a list literal string."""
         return self._genList("[", "]", "[]")
 
     def genTuple(self) -> list[str]:
+        """Generate a tuple literal string."""
         return self._genList("(", ")", "tuple()")
 
     def genDict(self) -> list[str]:
+        """Generate a dictionary literal string."""
         return self._genList("{", "}", "{}", True)
 
 
@@ -1529,6 +1575,7 @@ def remove_logging_pycache() -> None:
 
 
 def print_running_time() -> str:
+    """Calculate and return a string with total and user running times."""
     raw_utime = resource.getrusage(resource.RUSAGE_SELF).ru_utime
     user_time = str(datetime.timedelta(0, round(raw_utime, 2)))
     total_time = str(datetime.timedelta(0, round(time.time() - time_start, 2)))
