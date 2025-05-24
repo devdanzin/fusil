@@ -295,7 +295,7 @@ class ListAllModules:
                 print(f"    Import failed for {fullname}: {e}")
             return None
 
-    def _discover_modules(
+    def discover_modules(
         self,
         path: list[str] | None = None,
         prefix: str = "",
@@ -385,7 +385,7 @@ class ListAllModules:
         self._seen_paths.update(new_paths)
 
         if new_paths:
-            yield from self._discover_modules(new_paths, info.name + ".", onerror)
+            yield from self.discover_modules(new_paths, info.name + ".", onerror)
 
     def search_modules(self, prefix: str = "") -> set[str]:
         """
@@ -397,7 +397,7 @@ class ListAllModules:
         Returns:
             set of module names that passed all filters
         """
-        for info in self._discover_modules(onerror=lambda x: None):
+        for info in self.discover_modules(onerror=lambda x: None):
             fullname = prefix + info.name
             if self.verbose:
                 self.logger.error(f"ADDING {fullname}: {prefix}+{info.name}")
@@ -703,7 +703,7 @@ class PythonSource(ProjectAgent):
                 pack = __import__(package)
                 path = pack.__path__[0]
                 print(f"Adding package: {package} ({path})")
-                package_walker = all_modules._discover_modules([path], package + ".")
+                package_walker = all_modules.discover_modules([path], package + ".")
                 self.modules |= set(mod.name for mod in package_walker)
 
             if self.options.verbose:
@@ -896,9 +896,9 @@ class WritePythonCode(WriteCode):
             except AttributeError:
                 # Attribute listed in dir() but not actually gettable (e.g., from __all__ but not defined)
                 continue
-            except Exception:
+            except Exception as e:
                 self.parent_python_source.warning(
-                    f"Could not getattr {name} from {self.module_name}"
+                    f"Could not getattr {name} from {self.module_name}: {e}"
                 )
                 continue
 
@@ -992,7 +992,10 @@ class WritePythonCode(WriteCode):
                 attr = getattr(obj_instance_or_class, name, None)
                 if attr is None or not callable(attr):
                     continue
-            except Exception:  # getattr itself might fail
+            except Exception as e:  # getattr itself might fail
+                self.parent_python_source.warning(
+                    f"Could not getattr {name} from {self.module_name}: {e}"
+                )
                 continue
             methods[name] = attr
         return methods
@@ -1493,12 +1496,12 @@ def remove_logging_pycache() -> None:
     for entry in pycache.iterdir():
         try:
             entry.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error deleting file {entry.name}: {e}")
     try:
         pycache.rmdir()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error removing directory {pycache.name}: {e}")
     importlib.reload(logging)
 
 
