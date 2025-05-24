@@ -119,6 +119,32 @@ class FusilConfig:
             "debugger", "trace_forks", DEFAULTS["debugger_trace_forks"]
         )
 
+        # Initialize attributes used in fusil-python-threaded
+        self.blacklist = ""
+        self.classes_number = 0
+        self.debug = False
+        self.filenames = ""
+        self.functions_number = 0
+        self.fuzz_exceptions = False
+        self.methods_number = 0
+        self.modules = "*"
+        self.no_async = False
+        self.no_numpy = False
+        self.no_site_packages = False
+        self.no_threads = False
+        self.no_tstrings = False
+        self.objects_number = 0
+        self.only_c = False
+        self.packages = "*"
+        self.python = ""
+        self.record_high_cpu = False
+        self.record_timeouts = False
+        self.show_stdout = False
+        self.skip_test = False
+        self.test_private = False
+        self.timeout = 0
+        self.verbose = False
+
         # Options from command line
         options: optparse.Values
 

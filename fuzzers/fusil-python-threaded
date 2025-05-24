@@ -54,9 +54,9 @@ warnings.simplefilter("ignore")
 import fusil.python.tricky_weird
 from fusil.application import Application
 from fusil.config import (
-    ConfigParserWithHelp,
     FusilConfig,
     OptionGroupWithSections,
+    OptionParserWithSections,
     createFilename,
 )
 from fusil.process.create import CreateProcess
@@ -74,7 +74,6 @@ from fusil.python.blacklists import (
 )
 from fusil.python.mangle import mangle_loop, mangle_obj
 from fusil.write_code import WriteCode
-
 
 ERRBACK_NAME_CONST = "errback"
 CALL_REPETITION_COUNT_CONST = 65
@@ -412,7 +411,7 @@ class Fuzzer(Application):
 
     NAME = "python"
 
-    def createFuzzerOptions(self, parser: ConfigParserWithHelp) -> None:
+    def createFuzzerOptions(self, parser: OptionParserWithSections) -> None:
         """Create command-line options for the fuzzer configuration."""
         input_options = OptionGroupWithSections(parser, "Input")
         input_options.add_option(
@@ -697,7 +696,7 @@ class PythonSource(ProjectAgent):
                 pack = __import__(package)
                 path = pack.__path__[0]
                 print(f"Adding package: {package} ({path})")
-                package_walker = all_modules.walk_packages([path], package + ".")
+                package_walker = all_modules._discover_modules([path], package + ".")
                 self.modules |= set(mod.name for mod in package_walker)
 
             if self.options.verbose:
@@ -705,9 +704,9 @@ class PythonSource(ProjectAgent):
                     f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
                 )
 
-        blacklist = self.options.blacklist
-        if blacklist:
-            blacklist = set(blacklist.split(","))
+        blacklist_str = self.options.blacklist
+        if blacklist_str:
+            blacklist = set(blacklist_str.split(","))
             removed = self.modules & blacklist
             self.error("Blacklist modules: %s" % removed)
             self.modules = self.modules - blacklist
@@ -717,8 +716,7 @@ class PythonSource(ProjectAgent):
         for name in self.modules_list:
             self.info("Python module: %s" % name)
 
-        self.filenames = self.options.filenames
-        self.filenames = self.filenames.split(",")
+        self.filenames = self.options.filenames.split(",")
         for filename in self.filenames:
             if not isabs(filename):
                 raise ValueError(
@@ -1196,7 +1194,9 @@ class WritePythonCode(WriteCode):
 
         self.emptyLine()
 
-    def _fuzz_one_class(self, class_idx: int, class_name_str: str, class_type: type) -> None:
+    def _fuzz_one_class(
+        self, class_idx: int, class_name_str: str, class_type: type
+    ) -> None:
         """Generates code to instantiate a class and fuzz its methods."""
         prefix = f"c{class_idx + 1}"
         instance_var_name = f"instance_{prefix}"
@@ -1288,7 +1288,9 @@ class WritePythonCode(WriteCode):
         self.write(0, "collect()")
         self.emptyLine()
 
-    def _write_arguments_for_call_lines(self, num_args: int, base_indent_level: int) -> None:
+    def _write_arguments_for_call_lines(
+        self, num_args: int, base_indent_level: int
+    ) -> None:
         """Generates and writes argument lines for a function/method call."""
         for i in range(num_args):
             arg_lines = self.arg_generator.create_complex_argument()
