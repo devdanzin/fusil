@@ -659,7 +659,12 @@ class PythonSource(ProjectAgent):
 
     def __init__(self, project: Project, options: FusilConfig):
         ProjectAgent.__init__(self, project, "python_source")
+        self.module: ModuleType | None = None
+        self.module_name = ""
+        self.write: WritePythonCode | None = None
+        self.filename = ""
         self.options = options
+
         if self.options.modules != "*":
             self.modules = set()
             for module in self.options.modules.split(","):
@@ -678,6 +683,7 @@ class PythonSource(ProjectAgent):
                 self.options.skip_test,
                 verbose=self.options.verbose,
             ).search_modules()
+
         if self.options.packages != "*":
             print("\nAdding packages...")
             all_modules = ListAllModules(
@@ -689,6 +695,7 @@ class PythonSource(ProjectAgent):
                 self.options.skip_test,
                 verbose=self.options.verbose,
             )
+
             for package in self.options.packages.split(","):
                 package = package.strip().strip("/")
                 if not len(package):
@@ -736,12 +743,16 @@ class PythonSource(ProjectAgent):
         self.module_name = module_name
         self.debug("Import %s" % self.module_name)
         self.module = __import__(self.module_name)
+
         for name in self.module_name.split(".")[1:]:
             self.module = getattr(self.module, name)
+        assert isinstance(self.module, ModuleType)
+
         try:
             self.warning("Module filename: %s" % self.module.__file__)
         except AttributeError:
             pass
+
         self.write = WritePythonCode(
             self,
             self.filename,
@@ -778,6 +789,7 @@ class PythonSource(ProjectAgent):
         self.error(print_running_time())
         self.send("session_rename", name)
 
+        assert isinstance(self.write, WritePythonCode)
         self.write.generate_fuzzing_script()
         self.send("python_source", self.filename)
 
