@@ -43,6 +43,7 @@ import warnings
 from os.path import exists as path_exists
 from os.path import isabs
 from random import choice, randint
+from textwrap import dedent
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import Any, Callable, Generator
 
@@ -988,15 +989,22 @@ class WritePythonCode(WriteCode):
 
     def _write_script_header_and_imports(self):
         """Writes standard imports and initial setup code to the generated script."""
-        self.write(0, "from gc import collect")
-        self.write(0, "from sys import stderr, path as sys_path")
-        self.write(0, "from os.path import dirname")
-        self.write(0, "import inspect")
-        self.write(0, "import time")
-        self.write(0, "import sys")
-        self.write(0, "from threading import Thread")
-        self.write(0, "from unittest.mock import MagicMock")
-        self.write(0, "import asyncio")
+        self.write(
+            0,
+            dedent(
+                """\
+                from gc import collect
+                from sys import stderr, path as sys_path
+                from os.path import dirname
+                import inspect
+                import time
+                import sys
+                from threading import Thread
+                from unittest.mock import MagicMock
+                import asyncio
+                """
+            ),
+        )
         if not self.options.no_tstrings and _ARG_GEN_USE_TEMPLATES:
             self.write(0, "from string.templatelib import Interpolation, Template")
 
@@ -1017,22 +1025,42 @@ class WritePythonCode(WriteCode):
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
             self.emptyLine()
 
-        self.write(0, f"def {ERRBACK_NAME_CONST}(*args, **kw):")
-        self.write(1, "    raise ValueError('errback called')")
-        self.emptyLine()
-
-        self.write(0, "class Liar1:\n    def __eq__(self, other):\n        return True")
-        self.write(
-            0, "class Liar2:\n    def __eq__(self, other):\n        return False"
-        )
-        self.write(0, "liar1, liar2 = Liar1(), Liar2()")
-        self.emptyLine()
         self.write(
             0,
-            f"class Evil:\n    def __eq__(self, other):\n        for attr in dir(other):\n            try: other.__dict__[attr] = {ERRBACK_NAME_CONST}\n            except: pass",
+            dedent(
+                f"""\
+                def {ERRBACK_NAME_CONST}(*args, **kw):
+                    raise ValueError('errback called')
+                """
+            ),
         )
-        self.write(0, "evil = Evil()")
         self.emptyLine()
+
+        self.write(
+            0,
+            dedent(
+                f"""\
+                class Liar1:
+                    def __eq__(self, other):
+                        return True
+                
+                class Liar2:
+                    def __eq__(self, other):
+                        return False
+                
+                liar1, liar2 = Liar1(), Liar2()
+                
+                class Evil:
+                    def __eq__(self, other):
+                        for attr in dir(other):
+                            try: other.__dict__[attr] = {ERRBACK_NAME_CONST}
+                            except: pass
+                
+                evil = Evil()
+                
+                """
+            ),
+        )
 
         if USE_MANGLE_FEATURE:
             self.write(0, mangle_obj)
