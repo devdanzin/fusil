@@ -1,3 +1,10 @@
+"""
+Python Fuzzer Blacklists
+
+This module defines the blacklists used by the Fusil Python fuzzer to filter out
+dangerous, problematic, or irrelevant functions, methods, classes, and modules.
+"""
+
 MODULE_BLACKLIST = {
     "logging",
     "pydoc",

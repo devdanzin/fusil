@@ -1,3 +1,12 @@
+"""
+Tricky and Weird Objects for Python Fuzzing
+
+This module defines problematic Python objects, classes, and edge cases designed to
+trigger bugs during fuzzing. It contains boundary values like maximum integers,
+weird class hierarchies with custom metaclasses, circular references, and other
+pathological objects that can expose vulnerabilities in Python code and C extensions.
+"""
+
 from _decimal import Decimal
 from collections import Counter, OrderedDict, deque
 from queue import Queue
@@ -5,8 +14,8 @@ from queue import Queue
 sequences = [Queue, deque, frozenset, list, set, str, tuple]
 bytes_ = [bytearray, bytes]
 numbers = [Decimal, complex, float, int]
-# dicts = [Counter, OrderedDict, dict]
-dicts = [OrderedDict, dict]
+dicts = [Counter, OrderedDict, dict]
+# dicts = [OrderedDict, dict]
 bases = sequences + bytes_ + numbers + dicts + [object]
 weird_names = [f"weird_{cls.__name__}" for cls in bases]
 weird_instance_names = [f"{name}_empty" for name in weird_names]

@@ -1,3 +1,17 @@
+"""
+Argument Generator for Python Fuzzing
+
+This module provides the ArgumentGenerator class which creates diverse Python values
+and expressions for fuzzing function calls. It generates a wide range of argument types
+including primitives, collections, edge cases, malformed data, and problematic objects
+designed to trigger bugs in Python modules and C extensions.
+
+The generator produces Python source code strings representing arguments. It supports
+everything from simple values like integers and strings to complex nested structures,
+NumPy arrays, template strings, and specially crafted "tricky" objects that can expose
+vulnerabilities through unusual type interactions and boundary conditions.
+"""
+
 from __future__ import annotations
 
 from random import choice, randint, sample

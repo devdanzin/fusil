@@ -12,7 +12,7 @@ Key Features:
 - Generation of complex argument combinations including edge cases and malformed data
 - Thread-based and async execution for concurrent testing
 - Support for numpy arrays and template strings when available
-- Comprehensive blacklisting system to avoid dangerous or irrelevant functions
+- Blacklisting system to avoid dangerous or irrelevant functions and modules
 - Resource monitoring and timeout handling
 - Configurable fuzzing parameters (function calls, methods, classes, objects)
 

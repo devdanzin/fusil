@@ -1,5 +1,10 @@
 """
-Constants and functions to determine numbers of arguments.
+Argument Number Detection for Python Fuzzing
+
+This module determines the correct number of arguments for Python functions, methods,
+and classes during fuzzing operations. It uses static analysis, documentation parsing,
+and predefined mappings to figure out minimum and maximum argument counts, then
+randomizes within and outside those bounds to test edge cases and invalid calls.
 """
 
 import inspect
@@ -208,6 +213,7 @@ CLASS_NB_ARG = {
 
 
 def parseArguments(arguments, defaults):
+    """Parse function arguments from a string, extracting defaults."""
     for arg in arguments.split(","):
         arg = arg.strip(" \n[]")
         if not arg:
@@ -220,6 +226,8 @@ def parseArguments(arguments, defaults):
 
 def parsePrototype(doc):
     r"""
+    Extract function prototype information from docstring.
+
     >>> parsePrototype("test([x])")
     ((), None, ('x',), {})
     >>> parsePrototype('dump(obj, file, protocol=0)')
@@ -274,10 +282,12 @@ def parsePrototype(doc):
 
 def parseDocumentation(doc, max_var_arg):
     """
+    Parse documentation to determine min/max argument counts.
+
     Arguments:
      - doc: documentation string
      - max_var_arg: maximum number of arguments for variable argument,
-       eg. test(*args).
+       e.g., test(*args).
     """
     prototype = parsePrototype(doc)
     if not prototype:
@@ -292,8 +302,9 @@ def parseDocumentation(doc, max_var_arg):
 
 
 def get_arg_number(func, func_name, min_arg):
+    """Determine argument count range for a function or method."""
     try:
-        # Known method of arguments?
+        # Known number of arguments?
         value = METHODS_NB_ARG[func_name]
         if isinstance(value, tuple):
             min_arg, max_arg = value
@@ -321,8 +332,7 @@ def get_arg_number(func, func_name, min_arg):
 
 
 def class_arg_number(class_name, cls):
-    import inspect
-
+    """Determine argument count range for a class constructor."""
     if class_name in CLASS_NB_ARG:
         min_args, max_args = CLASS_NB_ARG[class_name]
         nb_arg = randint(min_args, max_args)
