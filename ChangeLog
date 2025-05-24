@@ -4,8 +4,8 @@ Changelog
 Fusil 1.6 (Unreleased)
 ----------------------
 
- * added the fusil-python-threaded fuzzer, where new development will
-   happen.
+ * added the fusil-python-threaded fuzzer (based on fusil-python),
+   where new development will happen.
  * fusil-python-threaded: added threading in generated code.
  * fusil-python-threaded: added new kinds of tricky objects and
    interesting values.
@@ -15,6 +15,10 @@ Fusil 1.6 (Unreleased)
  * removed PyPy workarounds.
  * removed Python 2 support.
  * removed Windows support.
+ * Refactored fusil-python-threaded, moving a lot of its contents
+   to modules in fusil/python.
+ * Improved handling and added features to config file handling.
+ * Added typing to fusil-python-threaded and some modules.
 
 Fusil 1.5 (2013-03-05)
 ----------------------
