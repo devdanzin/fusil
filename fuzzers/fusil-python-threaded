@@ -33,6 +33,7 @@ from __future__ import annotations
 import builtins
 import datetime
 import inspect
+import pathlib
 import pkgutil
 import random
 import resource
@@ -85,23 +86,28 @@ from fusil.unicode_generator import (
 )
 from fusil.write_code import WriteCode
 
-try:
-    import numpy
 
-    print(f"Numpy {numpy.__version__} is available, using it to build tricky arrays.")
-    USE_NUMPY = True
-except ImportError:
-    print("Numpy is not available.")
-    USE_NUMPY = False
+ERRBACK_NAME_CONST = "errback"
+CALL_REPETITION_COUNT_CONST = 65
+USE_MANGLE_FEATURE = False
 
 try:
     from fusil.python.template_strings import TEMPLATES
 
     print("Template strings available.")
-    USE_TEMPLATE_STRINGS = True
+    _ARG_GEN_USE_TEMPLATES = True
 except ImportError:
     print("Template strings not available.")
-    USE_TEMPLATE_STRINGS = False
+    _ARG_GEN_USE_TEMPLATES = False
+
+try:
+    import numpy  # type: ignore
+
+    print(f"Numpy {numpy.__version__} is available, using it to build tricky arrays.")
+    _ARG_GEN_USE_NUMPY = True
+except ImportError:
+    print("Numpy is not available.")
+    _ARG_GEN_USE_NUMPY = False
 
 print(sys.version)
 
@@ -221,7 +227,7 @@ class ListAllModules:
             if is_package or not self._is_c_module(name, prefix):
                 return False
 
-        search_targets = [name, package, filename, prefix]
+        search_targets = [name, package, pathlib.Path(filename).name, prefix]
         if any(
             blacklist_entry in target
             for blacklist_entry in self.blacklist
@@ -680,7 +686,8 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST | set(self.options.blacklist.split(",")),
+                MODULE_BLACKLIST
+                | set(name for name in self.options.blacklist.split(",") if name),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             ).search_modules()
@@ -690,7 +697,8 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST | set(self.options.blacklist.split(",")),
+                MODULE_BLACKLIST
+                | set(name for name in self.options.blacklist.split(",") if name),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             )
@@ -784,7 +792,7 @@ class PythonSource(ProjectAgent):
         self.error(print_running_time())
         self.send("session_rename", name)
 
-        self.write.writeSource()
+        self.write.generate_fuzzing_script()
         self.send("python_source", self.filename)
 
         # unload new modules
@@ -801,25 +809,35 @@ class PythonProcess(CreateProcess):
         self.createProcess()
 
 
-class WritePythonCode(WriteCode):
-    """Generates Python source code with randomized function calls for fuzzing."""
+class ArgumentGenerator:
+    """Handles the generation of diverse argument types for fuzzing."""
 
-    def __init__(
-        self,
-        parent: PythonSource,
-        filename: str,
-        module: ModuleType,
-        module_name: str,
-        threads: bool = True,
-        _async: bool = True,
-    ):
-        """Initialize the Python code writer with parent, file, module, and options."""
-        WriteCode.__init__(self)
-        self.filename = filename
-        self.filenames = parent.filenames
-        self.options = parent.options
-        self.threads = threads
-        self._async = _async
+    def __init__(self, options: FusilConfig, filenames: list[str]):
+        """
+        Initialize the ArgumentGenerator.
+
+        Args:
+            options: Fuzzer configuration options.
+            filenames: A list of existing filenames to use for file arguments.
+        """
+        self.options = options
+        self.filenames = filenames
+        self.errback_name = ERRBACK_NAME_CONST
+
+        # Initialize generators for various data types
+        self.smallint_generator = IntegerRangeGenerator(-19, 19)
+        self.int_generator = IntegerGenerator(20)
+        self.bytes_generator = BytesGenerator(0, 20)
+        self.unicode_generator = UnicodeGenerator(1, 20, UNICODE_65535)
+        self.ascii_generator = UnicodeGenerator(0, 20, ASCII8)
+        self.unix_path_generator = UnixPathGenerator(100)
+        self.letters_generator = UnicodeGenerator(
+            1, 8, LETTERS | DECIMAL_DIGITS | ASCII8
+        )
+        self.float_int_generator = IntegerGenerator(4)
+        self.float_float_generator = UnsignedGenerator(4)
+
+        # Define categories of argument generators
         self.hashable_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genNone,
             self.genBool,
@@ -834,7 +852,6 @@ class WritePythonCode(WriteCode):
             self.genFloat,
             self.genExistingFilename,
             self.genErrback,
-            #            self.genOpenFile,
             self.genException,
             self.genRawString,
             self.genWeirdType,
@@ -846,7 +863,6 @@ class WritePythonCode(WriteCode):
                 self.genInterestingValues,
                 self.genWeirdClass,
                 self.genWeirdInstance,
-                self.genWeirdType,
                 self.genWeirdUnion,
                 self.genTrickyObjects,
             )
@@ -863,455 +879,44 @@ class WritePythonCode(WriteCode):
             self.genWeirdUnion,
             self.genTrickyObjects,
         )
-        if not self.options.no_numpy and USE_NUMPY:
+
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
             self.complex_argument_generators += (self.genTrickyNumpy,)
-        if not self.options.no_tstrings and USE_TEMPLATE_STRINGS:
+        if not self.options.no_tstrings and _ARG_GEN_USE_TEMPLATES:
             self.complex_argument_generators += (self.genTrickyTemplate,)
-        self.smallint_generator = IntegerRangeGenerator(-19, 19)
-        self.int_generator = IntegerGenerator(20)
-        self.bytes_generator = BytesGenerator(0, 20)
-        self.unicode_generator = UnicodeGenerator(1, 20, UNICODE_65535)
-        self.ascii_generator = UnicodeGenerator(0, 20, ASCII8)
-        self.unix_path_generator = UnixPathGenerator(100)
-        self.letters_generator = UnicodeGenerator(
-            1, 8, LETTERS | DECIMAL_DIGITS | ASCII8
-        )
-        self.float_int_generator = IntegerGenerator(4)
-        self.float_float_generator = UnsignedGenerator(4)
-        self.module = module
-        self.module_name = module_name
 
-        self.functions, self.classes, self.objects = self.getFunctions()
-        if not self.functions and not self.classes and not self.objects:
-            raise PythonFuzzerError(
-                "Module %s has no function, no class and no object!" % self.module_name
-            )
-
-    def writePrint(self, level: int, arguments: str) -> None:
-        """Write a print statement to stderr at the specified indentation level."""
-        code = "print (%s, file=stderr)" % arguments
-        self.write(level, code)
-
-    def writeSource(self) -> None:
-        """Generate the complete Python source file for fuzzing."""
-        self.createFile(self.filename)
-        self.write(0, "from gc import collect")
-        self.write(0, "from sys import stderr")
-        self.write(0, "import inspect")
-        self.write(0, "import time")
-        self.write(0, "import sys")
-        self.write(0, "from threading import Thread")
-        self.write(0, "from unittest.mock import MagicMock")
-        self.write(0, "import asyncio")
-        if not self.options.no_tstrings and USE_TEMPLATE_STRINGS:
-            self.write(0, "from string.templatelib import Interpolation, Template")
-        self.writePrint(0, '"import %s"' % self.module_name)
-        self.write(0, "import %s" % self.module_name)
-        self.emptyLine()
-        self.write(0, fusil.python.tricky_weird.weird_classes)
-        self.emptyLine()
-        self.write(0, fusil.python.tricky_weird.tricky_typing)
-        self.emptyLine()
-        self.write(0, fusil.python.tricky_weird.tricky_objects)
-        self.emptyLine()
-        if not self.options.no_numpy and USE_NUMPY:
-            self.write(0, fusil.python.tricky_weird.tricky_numpy)
-            self.emptyLine()
-        self.write(0, "def %s(*args, **kw):" % ERRBACK_NAME)
-        self.write(1, "raise ValueError('error')")
-        self.emptyLine()
-        if self.threads:
-            self.write(0, "alive = []")
-        if self._async:
-            self.write(0, "_async = []")
-        self.write(0, "lst = list(range(10))")
-        self.write(0, "lst.append(lst)")
-        self.write(0, "class Liar1:")
-        self.write(1, "def __eq__(self, other):")
-        self.write(2, "return True")
-        self.emptyLine()
-        self.write(0, "class Liar2:")
-        self.write(1, "def __eq__(self, other):")
-        self.write(2, "return False")
-        self.emptyLine()
-        self.write(0, "liar1, liar2 = Liar1(), Liar2()")
-        self.emptyLine()
-        self.write(
-            0,
-            "\nclass Evil:\n    def __eq__(self, other):\n"
-            "        for attr in dir(other):\n"
-            "            try:\n"
-            "                other.__dict__[attr] = %s\n"
-            "            except:\n"
-            "                pass\n"
-            "evil = Evil()" % ERRBACK_NAME,
-        )
-        self.emptyLine()
-        if USE_MANGLE:
-            self.emptyLine()
-            self.write(0, mangle_obj)
-        self.emptyLine()
-        self.write(0, "def callMethod(prefix, object, name, *arguments):")
-        level = self.addLevel(1)
-        self.writeCallMethod()
-        self.restoreLevel(level)
-        self.emptyLine()
-
-        self.write(0, "def callFunc(prefix, name, *arguments):")
-        self.write(
-            1, "return callMethod(prefix, %s, name, *arguments)" % self.module_name
-        )
-        self.emptyLine()
-
-        self.write(0, "obj = %s" % self.module_name)
-
-        self.writeCode(
-            "",
-            self.module,
-            self.functions,
-            self.classes,
-            self.objects,
-            1,
-            self.options.functions_number,
-        )
-        self.emptyLine()
-        if self.threads:
-            self.write(0, "for obj in alive:")
-            self.write(1, "try:")
-            self.write(2, "print('START', obj)")
-            self.write(2, "obj.start()")
-            self.write(1, "except Exception:")
-            self.write(2, "pass")
-            self.write(0, "for obj in alive:")
-            self.write(1, "try:")
-            self.write(2, "print('JOIN', obj)")
-            self.write(2, "obj.join()")
-            self.write(1, "except Exception:")
-            self.write(2, "pass")
-            self.emptyLine()
-        if self._async:
-            self.write(0, "async def main_async():")
-            self.write(
-                1,
-                "await asyncio.gather(*[asyncio.to_thread(x) for x in _async], return_exceptions=True)",
-            )
-            self.emptyLine()
-            self.write(0, "runner = asyncio.Runner()")
-            self.write(0, "loop = runner.get_loop()")
-            # self.write(0, "loop.set_task_factory(asyncio.eager_task_factory)")
-            self.write(0, "runner.run(main_async())")
-            self.emptyLine()
-        self.close()
-
-    def writeCallMethod(self) -> None:
-        """Write the Python code for the 'callMethod' helper function."""
-        self.write(0, 'funcname = "%s.%%s()" %% name' % self.module_name)
-        self.write(0, 'message = "[%s] %s" % (prefix, funcname)')
-        self.writePrint(0, "message")
-        self.write(0, "try:")
-        self.write(1, "func = getattr(object, name)")
-        self.write(1, "for x in range(65):")
-        self.write(2, "result = func(*arguments)")
-
-        exceptions = "(Exception, SystemExit, KeyboardInterrupt)"
-        self.write(0, "except %s as err:" % exceptions)
-        self.write(1, "try:")
-        self.write(2, "errmsg = repr(err)")
-        self.write(1, "except ValueError as e:")
-        self.write(2, "errmsg = repr(e)")
-        self.write(1, "errmsg = errmsg.encode('ASCII', 'replace')")
-        self.writePrint(
-            1,
-            '"[%s] %s => %s: %s" % (prefix, funcname, err.__class__.__name__, errmsg)',
-        )
-        self.write(1, "result = None")
-
-        self.writePrint(0, '"[%s] -garbage collector-" % prefix')
-        self.write(0, "collect()   # explicit call to the garbage collector")
-        if self.threads:
-            self.write(0, "try:")
-            self.write(1, "if result:")
-            self.write(
-                2, "alive.append(Thread(target=func, args=arguments, name=message))"
-            )
-            self.write(0, "except:")
-            self.write(1, "pass")
-        self.write(0, "return result")
-
-    def getFunctions(self) -> tuple[list[str], list[str], list[str]]:
-        """Extract functions, classes, and objects from the current module."""
-        classes = []
-        functions = []
-        objects = []
-        try:
-            blacklist = BLACKLIST[self.module_name]
-        except KeyError:
-            blacklist = set()
-        blacklist |= METHOD_BLACKLIST
-
-        names = set(dir(self.module))
-        names -= {"__builtins__", "__doc__", "__file__", "__name__"}
-        names -= {"True", "None", "False"}
-        if not self.options.fuzz_exceptions:
-            # We could filter all Exception subclasses and instances from the set
-            names -= EXCEPTION_NAMES
-        names -= blacklist
-        for name in names:
-            try:
-                attr = getattr(self.module, name)
-            except AttributeError:
-                # attribute listed in __all__, but not declared in the module?
-                continue
-            if isinstance(attr, (FunctionType, BuiltinFunctionType)):
-                functions.append(name)
-            elif isinstance(attr, type) or inspect.isclass(attr):
-                classes.append(name)
-            else:
-                objects.append(name)
-        return functions, classes, objects
-
-    def getMethods(self, object: Any, class_name: str) -> dict[str, Any]:
-        """Extract callable methods from an object or class, respecting blacklists."""
-        try:
-            key = "%s:%s" % (self.module_name, class_name)
-            blacklist = BLACKLIST[key]
-        except KeyError:
-            blacklist = set()
-        blacklist |= METHOD_BLACKLIST
-        methods: dict[str, Callable] = {}
-        if type(object) in {int, str}:
-            return methods
-        is_exception = isinstance(object, type) and issubclass(object, BaseException)
-        is_exception = is_exception or isinstance(object, BaseException)
-        for name in dir(object):
-            if name in blacklist:
-                continue
-            if (not self.options.test_private) and name.startswith("__"):
-                continue
-            if is_exception and name == "__init__":
-                continue
-            try:
-                attr = getattr(object, name, None)
-                if attr is None:
-                    continue
-                if not callable(attr):
-                    continue
-            except Exception:
-                continue
-            methods[name] = attr
-        return methods
-
-    def _createArgument(
+    def _create_argument_from_list(
         self, generators: tuple[Callable[[], list[str]], ...]
     ) -> list[str]:
-        """Create a single argument using a randomly chosen generator."""
+        """Helper to create a single argument using a randomly chosen generator from a list."""
         callback = choice(generators)
         value = callback()
         for item in value:
             if not isinstance(item, str):
-                raise ValueError("%s returned type %s" % (callback, type(item)))
+                raise ValueError(
+                    f"Generator {callback.__name__} returned non-string type {type(item)}"
+                )
         return value
 
-    def createArgument(self) -> list[str]:
+    def create_simple_argument(self) -> list[str]:
         """Create a general argument using simple argument generators."""
-        return self._createArgument(self.simple_argument_generators)
+        return self._create_argument_from_list(self.simple_argument_generators)
 
-    def createHashableArgument(self) -> list[str]:
+    def create_hashable_argument(self) -> list[str]:
         """Create a hashable argument using hashable argument generators."""
-        return self._createArgument(self.hashable_argument_generators)
+        return self._create_argument_from_list(self.hashable_argument_generators)
 
-    def createComplexArgument(self) -> list[str]:
-        """Create a potentially complex argument, choosing between simple or complex generators."""
-        if randint(0, 9) < 9:
-            # 10%
+    def create_complex_argument(self) -> list[str]:
+        """Create a potentially complex argument."""
+        if randint(1, 10) == 1:  # 10% chance for complex
             generators = self.complex_argument_generators
-        else:
-            # 90%
+        else:  # 90% chance for simple
             generators = self.simple_argument_generators
-        return self._createArgument(generators)
+        return self._create_argument_from_list(generators)
 
-    def callFunction(
-        self,
-        prefix: str | None,
-        func_index: int,
-        func_name: str,
-        func: Callable,
-        min_arg: int,
-        obj_name: str | None = None,
-    ) -> None:
-        """Write code to call a function or method with generated arguments."""
-        if func_name.lower() in {"abort", "systemerror", "fatal", "critical", "assert"}:
-            return
-        min_arg, max_arg = get_arg_number(func, func_name, min_arg)
-
-        if randint(0, 19) < 1:
-            nb_arg = 0
-        elif randint(0, 19) < 2:
-            nb_arg = 1
-        elif randint(0, 19) < 3:
-            nb_arg = max_arg + 1
-        elif min_arg == max_arg:
-            nb_arg = min_arg
-        else:
-            nb_arg = randint(min_arg, max_arg)
-
-        if prefix:
-            prefix += str(1 + func_index)
-            first_line = 'res = callMethod("%s", obj, "%s"' % (prefix, func_name)
-        else:
-            prefix = "f%s" % (1 + func_index)
-            first_line = 'res = callFunc("%s", "%s"' % (prefix, func_name)
-        if nb_arg:
-            self.write(0, first_line + ",")
-            level = self.addLevel(1)
-            last_char = ","
-            for index in range(nb_arg):
-                if index == nb_arg - 1:
-                    last_char = ")"
-                self.writeArgument(1, last_char)
-            self.restoreLevel(level)
-        else:
-            self.write(0, first_line + ")")
-        if self.threads:
-            self.emptyLine()
-            first_line = "alive.append(Thread(target=obj.%s, name='%s', args=(" % (
-                func_name,
-                f"{prefix}:{func_name}",
-            )
-            self.write(0, "if hasattr(obj, '%s'):" % (func_name,))
-            if nb_arg:
-                self.write(1, first_line)
-                last_char = ","
-                for index in range(nb_arg):
-                    if index == nb_arg - 1:
-                        last_char = ",)))"
-                    self.writeArgument(1, last_char)
-            else:
-                self.write(1, first_line + ")))")
-        if self._async:
-            self.emptyLine()
-            self.write(0, "def %s_%s():" % (prefix, func_name))
-            self.write(1, "print('Start async calling %s_%s')" % (prefix, func_name))
-            self.write(1, "time.sleep(%s)" % (random.random() / 100))
-            # self.write(1, "await asyncio.sleep(%s)" % (random.random() / 100))
-            first_line = "try: obj.%s(" % func_name
-            if nb_arg:
-                self.write(1, first_line)
-                level = self.addLevel(1)
-                last_char = ","
-                for index in range(nb_arg):
-                    if index == nb_arg - 1:
-                        last_char = ")"
-                    self.writeArgument(1, last_char)
-                self.restoreLevel(level)
-            else:
-                self.write(1, first_line + ")")
-            self.write(1, "except Exception: pass")
-            self.write(1, "print('End async calling %s_%s')" % (prefix, func_name))
-
-            self.write(0, "_async.append(%s_%s)" % (prefix, func_name))
-        self.emptyLine()
-
-    def writeArgument(self, level: int, last_char: str = ",") -> None:
-        """Write a generated argument to the source file."""
-        lines = self.createComplexArgument()
-        lines[-1] += last_char
-        for line in lines:
-            self.write(level, line)
-
-    def useClass(self, cls_index: int, cls: type, class_name: str) -> None:
-        """Write code to instantiate a class and call its methods."""
-        nb_arg = class_arg_number(class_name, cls)
-
-        prefix = "o%s" % (1 + cls_index)
-        self.writePrint(0, '"[%s] Create object %s"' % (prefix, 1 + cls_index))
-
-        obj_name = "obj"
-        self.write(0, '%s = callFunc("%s", "%s",' % (obj_name, prefix, class_name))
-        for index in range(nb_arg):
-            self.write(2, "# argument %s/%s" % (1 + index, nb_arg))
-            self.writeArgument(2)
-        self.write(1, ")")
-        if USE_MANGLE:
-            self.write(0, mangle_loop % nb_arg)
-        methods = sorted(self.getMethods(cls, class_name).keys())
-        if methods:
-            self.write(0, "if obj is not None:")
-            level = self.addLevel(1)
-            self.writeCode(
-                prefix + "m",
-                cls,
-                methods,
-                list(),
-                list(),
-                0,
-                self.options.methods_number,
-            )
-            self.write(0, "del %s" % obj_name)
-            self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
-            self.write(0, "collect()   # explicit call to the garbage collector")
-            self.restoreLevel(level)
-        self.emptyLine()
-
-    def useObject(self, obj_index: int, obj: Any, obj_name: str) -> None:
-        """Write code to call methods on an existing module-level object."""
-        prefix = "obj%s" % (1 + obj_index)
-        self.writePrint(
-            0,
-            '"[%s] Call methods on object %s (%s)"' % (prefix, 1 + obj_index, obj_name),
-        )
-        self.write(0, "obj = %s.%s" % (self.module_name, obj_name))
-        methods = self.getMethods(obj, obj_name)
-        if methods:
-            self.write(0, "if obj is not None:")
-            level = self.addLevel(1)
-            self.writeCode(
-                prefix + "m",
-                obj,
-                sorted(methods.keys()),
-                list(),
-                list(),
-                0,
-                self.options.methods_number,
-                obj_name,
-            )
-            self.writePrint(0, '"[%s] -garbage collector -"' % prefix)
-            self.write(0, "collect()   # explicit call to the garbage collector")
-            self.restoreLevel(level)
-        self.emptyLine()
-
-    def writeCode(
-        self,
-        prefix: str,
-        object: Any,
-        functions: list[str],
-        classes: list[str],
-        objects: list[str],
-        func_min_arg: int,
-        nb_call: int,
-        obj_name: str | None = None,
-    ) -> None:
-        """Generate code to call functions, instantiate classes, or use objects."""
-        if functions:
-            for index in range(nb_call):
-                func_name = choice(functions)
-                func = getattr(object, func_name)
-                self.callFunction(
-                    prefix, index, func_name, func, func_min_arg, obj_name
-                )
-        if classes:
-            self.nb_class = self.options.classes_number
-            for index in range(self.nb_class):
-                class_name = choice(classes)
-                cls = getattr(object, class_name)
-                self.useClass(index, cls, class_name)
-        if objects:
-            for index in range(self.options.objects_number):
-                object_name = choice(objects)
-                obj = getattr(object, object_name)
-                if object_name in OBJECT_BLACKLIST or isinstance(obj, ModuleType):
-                    continue
-                self.useObject(index, obj, object_name)
+    # --- Individual Argument Generation Methods ---
+    # These methods return a list of strings, where each string is a line of Python code
+    # representing the argument. For multi-line arguments (like dicts), the list will have multiple items.
 
     def genNone(self) -> list[str]:
         """Generate a 'None' value."""
@@ -1342,10 +947,7 @@ class WritePythonCode(WriteCode):
 
     def genBool(self) -> list[str]:
         """Generate a boolean value (True or False)."""
-        if randint(0, 1) == 1:
-            return ["True"]
-        else:
-            return ["False"]
+        return [choice(["True", "False"])]
 
     def genSmallUint(self) -> list[str]:
         """Generate a small unsigned integer string."""
@@ -1357,32 +959,28 @@ class WritePythonCode(WriteCode):
 
     def genBytes(self) -> list[str]:
         """Generate a bytes string literal."""
-        # Bytes string
         bytes_val = self.bytes_generator.createValue()
-        text = "".join("\\x%02X" % byte for byte in bytes_val)
-        text = 'b"%s"' % text
-        return [text]
+        text = "".join(f"\\x{byte:02X}" for byte in bytes_val)
+        return [f'b"{text}"']
 
     def genUnixPath(self) -> list[str]:
         """Generate a Unix-like path string."""
         path = self.unix_path_generator.createValue()
-        return ['"%s"' % path]
+        return [f'"{path}"']
 
-    def _genUnicode(self, generator: UnicodeGenerator) -> list[str]:
+    def _gen_unicode_internal(self, generator: UnicodeGenerator) -> list[str]:
         """Helper to generate an escaped Unicode string literal."""
-        # (Unicode) character string
         text = generator.createValue()
         text = escapeUnicode(text)
-        text = '"%s"' % text
-        return [text]
+        return [f'"{text}"']
 
     def genLetterDigit(self) -> list[str]:
         """Generate a string of letters and digits."""
-        return self._genUnicode(self.letters_generator)
+        return self._gen_unicode_internal(self.letters_generator)
 
     def genString(self) -> list[str]:
         """Generate a general Unicode string."""
-        return self._genUnicode(self.unicode_generator)
+        return self._gen_unicode_internal(self.unicode_generator)
 
     def genRawString(self) -> list[str]:
         """Generate a raw string, potentially for regex patterns."""
@@ -1392,37 +990,34 @@ class WritePythonCode(WriteCode):
             + ["."] * 10
         )
         special = ["+", "?", "*"]
-        result = []
-        for x in range(randint(3, 20)):
-            result.append("".join(sample(sequences, randint(1, 3))))
-            if randint(0, 9) > 8:
-                result.append(choice(special))
-        return [f'r"{"".join(result)}"']
+        result_parts = []
+        for _ in range(randint(3, 20)):
+            result_parts.append("".join(sample(sequences, randint(1, 3))))
+            if randint(0, 9) > 8:  # ~10% chance to add a special char
+                result_parts.append(choice(special))
+        return [f'r"{"".join(result_parts)}"']
 
     def genSurrogates(self) -> list[str]:
         """Generate a string containing Unicode surrogate pairs."""
-        text = choice(SURROGATES)
-        return [text]
+        return [choice(SURROGATES)]
 
     def genInterestingValues(self) -> list[str]:
         """Generate an 'interesting' predefined value."""
-        interesting = choice(INTERESTING)
-        return [interesting]
+        return [choice(INTERESTING)]
 
     def genTrickyObjects(self) -> list[str]:
-        """Generate a name of a 'tricky' predefined object."""
-        tricky = choice(fusil.python.tricky_weird.tricky_objects_names)
-        return [tricky]
+        """Generate a name of a 'tricky' predefined object from tricky_weird."""
+        tricky_name = choice(fusil.python.tricky_weird.tricky_objects_names)
+        return [tricky_name]
 
     def genTrickyNumpy(self) -> list[str]:
-        """Generate a name of a 'tricky' predefined NumPy object."""
-        tricky = choice(fusil.python.tricky_weird.tricky_numpy_names)
-        return [tricky]
+        """Generate a name of a 'tricky' predefined NumPy object from tricky_weird."""
+        tricky_name = choice(fusil.python.tricky_weird.tricky_numpy_names)
+        return [tricky_name]
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""
-        tricky = choice(TEMPLATES)
-        return [tricky]
+        return [choice(TEMPLATES)]
 
     def genWeirdClass(self) -> list[str]:
         """Generate a reference to a 'weird' predefined class."""
@@ -1431,8 +1026,8 @@ class WritePythonCode(WriteCode):
 
     def genWeirdInstance(self) -> list[str]:
         """Generate a reference to an instance of a 'weird' predefined class."""
-        weird_class_name = choice(fusil.python.tricky_weird.weird_instance_names)
-        return [f"weird_instances['{weird_class_name}']"]
+        weird_instance_name = choice(fusil.python.tricky_weird.weird_instance_names)
+        return [f"weird_instances['{weird_instance_name}']"]
 
     def genWeirdType(self) -> list[str]:
         """Generate a type hint involving a 'weird' predefined class."""
@@ -1451,108 +1046,771 @@ class WritePythonCode(WriteCode):
 
     def genBufferObject(self) -> list[str]:
         """Generate a string representing a buffer-like object."""
-        text = choice(BUFFER_OBJECTS)
-        return [text]
+        return [choice(BUFFER_OBJECTS)]
 
     def genAsciiString(self) -> list[str]:
         """Generate an ASCII string."""
-        return self._genUnicode(self.ascii_generator)
+        return self._gen_unicode_internal(self.ascii_generator)
 
     def genFloat(self) -> list[str]:
         """Generate a float string."""
         int_part = self.float_int_generator.createValue()
         float_part = self.float_float_generator.createValue()
-        return ["%s.%s" % (int_part, float_part)]
+        return [f"{int_part}.{float_part}"]
 
     def genExistingFilename(self) -> list[str]:
         """Generate a string of an existing filename."""
+        if not self.filenames:
+            return ['"NO_FILE_AVAILABLE"']
         filename = choice(self.filenames)
-        return ["'%s'" % filename]
+        # Ensure filename is a valid string literal, escaping backslashes and quotes
+        return [
+            f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+        ]
 
     def genErrback(self) -> list[str]:
         """Generate the name of the error callback function."""
-        return ["%s" % ERRBACK_NAME]
+        return [self.errback_name]
 
     def genOpenFile(self) -> list[str]:
         """Generate code to open an existing file."""
+        if not self.filenames:
+            return ["open('NO_FILE_AVAILABLE')"]  # Fallback
         filename = choice(self.filenames)
-        instr = "open('%s')" % filename
-        return [instr]
+        filename_literal = f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+        return [f"open({filename_literal})"]
 
     def genException(self) -> list[str]:
         """Generate an Exception instance string."""
-        return ["Exception('pouet')"]
+        return ["Exception('fuzzer_generated_exception')"]
 
-    def _genList(
-        self, open_text: str, close_text: str, empty: str, is_dict: bool = False
+    def _gen_collection_internal(
+        self, open_text: str, close_text: str, empty_repr: str, is_dict: bool = False
     ) -> list[str]:
         """Helper to generate code for lists, tuples, or dictionaries."""
-        # 90% of the time generate values of the same type
-        same_type = randint(0, 9) != 0
+        same_type = randint(1, 10) != 1  # 90% same_type
         nb_item = randint(0, 9)
-        if not nb_item:
-            return [empty]
-        items = []
-        if same_type:
-            if is_dict:
-                key_callback = choice(self.hashable_argument_generators)
-            value_callback = choice(self.simple_argument_generators)
-            for index in range(nb_item):
-                if is_dict:
-                    item = self.createDictItem(key_callback, value_callback)
-                else:
-                    item = value_callback()
-                items.append(item)
-        else:
-            for index in range(nb_item):
-                if is_dict:
-                    item = self.createDictItem()
-                else:
-                    item = self.createArgument()
-                items.append(item)
-        lines: list[str] = []
-        for item_index, item_lines in enumerate(items):
-            if item_index:
-                lines[-1] += ","
-                for index, line in enumerate(item_lines):
-                    # Add ' ' suffix to all lines
-                    item_lines[index] = " " + line
-            lines.extend(item_lines)
-        if nb_item == 1 and empty == "tuple()":
-            lines[-1] += ","
-        lines[0] = open_text + lines[0]
-        lines[-1] += close_text
-        return lines
 
-    def createDictItem(
+        if not nb_item:
+            return [empty_repr]
+
+        items_code_lines: list[list[str]] = []
+        if same_type:
+            key_generator_func = self.create_hashable_argument if is_dict else None
+            value_generator_func = self.create_simple_argument
+
+            for _ in range(nb_item):
+                if is_dict and key_generator_func:
+                    current_item_lines = self._create_dict_item_lines(
+                        key_generator_func, value_generator_func
+                    )
+                else:
+                    current_item_lines = value_generator_func()
+                items_code_lines.append(current_item_lines)
+        else:  # Mixed types
+            for _ in range(nb_item):
+                if is_dict:
+                    current_item_lines = self._create_dict_item_lines()
+                else:
+                    current_item_lines = self.create_simple_argument()
+                items_code_lines.append(current_item_lines)
+
+        if not items_code_lines:
+            return [empty_repr]
+
+        final_lines: list[str] = []
+        first_item_code = "".join(items_code_lines[0])
+        final_lines.append(open_text + first_item_code)
+
+        for item_lines_list in items_code_lines[1:]:
+            item_code = "".join(item_lines_list)
+            final_lines[-1] += ","
+            final_lines.append(" " + item_code)
+
+        if nb_item == 1 and empty_repr == "tuple()":
+            final_lines[-1] += ","
+        final_lines[-1] += close_text
+        return final_lines
+
+    def _create_dict_item_lines(
         self,
-        key_callback: Callable[[], list[str]] | None = None,
-        value_callback: Callable[[], list[str]] | None = None,
+        key_generator_func: Callable[[], list[str]] | None = None,
+        value_generator_func: Callable[[], list[str]] | None = None,
     ) -> list[str]:
-        """Generate a key-value pair for a dictionary literal."""
-        if key_callback:
-            key = key_callback()
-        else:
-            key = self.createHashableArgument()
-        if value_callback:
-            value = value_callback()
-        else:
-            value = self.createArgument()
-        key[-1] += ": " + value[0]
-        key.extend(value[1:])
-        return key
+        """Generate a key-value pair for a dictionary literal as a list of code lines."""
+        key_lines = (
+            key_generator_func()
+            if key_generator_func
+            else self.create_hashable_argument()
+        )
+        value_lines = (
+            value_generator_func()
+            if value_generator_func
+            else self.create_simple_argument()
+        )
+
+        key_code = " ".join(key_lines)
+        value_code = " ".join(value_lines)
+        return [f"{key_code}: {value_code}"]
 
     def genList(self) -> list[str]:
         """Generate a list literal string."""
-        return self._genList("[", "]", "[]")
+        return self._gen_collection_internal("[", "]", "[]")
 
     def genTuple(self) -> list[str]:
         """Generate a tuple literal string."""
-        return self._genList("(", ")", "tuple()")
+        return self._gen_collection_internal("(", ")", "tuple()")
 
     def genDict(self) -> list[str]:
         """Generate a dictionary literal string."""
-        return self._genList("{", "}", "{}", True)
+        return self._gen_collection_internal("{", "}", "{}", True)
+
+
+class PythonFuzzerError(Exception):
+    """Custom exception raised when fuzzer encounters unrecoverable errors."""
+
+
+class WritePythonCode(WriteCode):
+    """Generates Python source code with randomized function calls for fuzzing."""
+
+    def __init__(
+        self,
+        parent_python_source: PythonSource,
+        filename: str,
+        module: ModuleType,
+        module_name: str,
+        threads: bool = True,
+        _async: bool = True,
+    ):
+        """Initialize the Python code writer."""
+        super().__init__()  # Initialize base WriteCode
+        self.parent_python_source = parent_python_source
+        self.options = parent_python_source.options
+        self.filenames = parent_python_source.filenames
+        self.module = module
+        self.module_name = module_name
+        self.enable_threads = threads
+        self.enable_async = _async
+        self.generated_filename = filename
+
+        self.arg_generator = ArgumentGenerator(self.options, self.filenames)
+
+        self.module_functions: list[str]
+        self.module_classes: list[str]
+        self.module_objects: list[str]
+        self.module_functions, self.module_classes, self.module_objects = (
+            self._get_module_members()
+        )
+
+        if (
+            not self.module_functions
+            and not self.module_classes
+            and not self.module_objects
+        ):
+            raise PythonFuzzerError(
+                f"Module {self.module_name} has no function, no class, and no object to fuzz!"
+            )
+
+    def write_print_to_stderr(self, level: int, arguments_str: str) -> None:
+        """Write a print statement to stderr at the specified indentation level."""
+        code = f"print({arguments_str}, file=stderr)"
+        self.write(level, code)
+
+    def _get_module_members(self) -> tuple[list[str], list[str], list[str]]:
+        """Extracts fuzzable functions, classes, and objects from the current module."""
+        _EXCEPTION_NAMES = EXCEPTION_NAMES
+
+        classes = []
+        functions = []
+        objects = []
+        try:
+            module_blacklist = BLACKLIST.get(self.module_name, set())
+        except KeyError:
+            module_blacklist = set()
+
+        current_blacklist = module_blacklist | METHOD_BLACKLIST
+
+        names = set(dir(self.module))
+        names -= {
+            "__builtins__",
+            "__doc__",
+            "__file__",
+            "__name__",
+            "__package__",
+            "__loader__",
+            "__spec__",
+        }
+        names -= {"True", "None", "False"}
+
+        if not self.options.fuzz_exceptions:
+            names -= _EXCEPTION_NAMES
+
+        names -= current_blacklist
+
+        for name in sorted(list(names)):
+            if name.startswith("_") and not self.options.test_private:
+                if not (name.startswith("__") and name.endswith("__")):
+                    continue
+
+            try:
+                attr = getattr(self.module, name)
+            except AttributeError:
+                # Attribute listed in dir() but not actually gettable (e.g., from __all__ but not defined)
+                continue
+            except Exception:
+                self.parent_python_source.warning(
+                    f"Could not getattr {name} from {self.module_name}"
+                )
+                continue
+
+            if isinstance(attr, (FunctionType, BuiltinFunctionType)):
+                functions.append(name)
+            elif isinstance(attr, type) or inspect.isclass(attr):
+                if (
+                    not self.options.fuzz_exceptions
+                    and isinstance(attr, type)
+                    and issubclass(attr, BaseException)
+                    and attr.__name__ in _EXCEPTION_NAMES
+                ):
+                    continue
+                classes.append(name)
+            else:
+                if isinstance(attr, ModuleType):
+                    continue
+                if (
+                    not self.options.fuzz_exceptions
+                    and isinstance(attr, BaseException)
+                    and attr.__class__.__name__ in _EXCEPTION_NAMES
+                ):
+                    continue
+                objects.append(name)
+        return functions, classes, objects
+
+    def _get_object_methods(
+        self, obj_instance_or_class: Any, owner_name: str
+    ) -> dict[str, Callable]:
+        """Extracts callable methods from an object or class, respecting blacklists."""
+        methods: dict[str, Callable] = {}
+        if type(obj_instance_or_class) in {
+            int,
+            str,
+            float,
+            bool,
+            bytes,
+            tuple,
+            list,
+            dict,
+            set,
+            type(None),
+        }:
+            return methods
+
+        try:
+            key = f"{self.module_name}:{owner_name}"
+            blacklist = BLACKLIST.get(key, set())
+        except KeyError:
+            blacklist = set()
+        blacklist |= METHOD_BLACKLIST
+
+        is_exception_type_or_instance = (
+            isinstance(obj_instance_or_class, type)
+            and issubclass(obj_instance_or_class, BaseException)
+        ) or isinstance(obj_instance_or_class, BaseException)
+
+        for name in dir(obj_instance_or_class):
+            if name in blacklist:
+                continue
+            if (
+                (not self.options.test_private)
+                and name.startswith("__")
+                and not name.endswith("__")
+            ):
+                if name not in {
+                    "__init__",
+                    "__call__",
+                    "__getitem__",
+                    "__setitem__",
+                    "__iter__",
+                    "__next__",
+                    "__len__",
+                    "__contains__",
+                    "__eq__",
+                    "__lt__",
+                    "__gt__",
+                    "__le__",
+                    "__ge__",
+                    "__repr__",
+                    "__str__",
+                }:
+                    continue
+
+            if (
+                is_exception_type_or_instance and name == "__init__"
+            ):  # Avoid re-initing exceptions in a simple way
+                continue
+
+            try:
+                attr = getattr(obj_instance_or_class, name, None)
+                if attr is None or not callable(attr):
+                    continue
+            except Exception:  # getattr itself might fail or be fuzzed
+                continue
+            methods[name] = attr
+        return methods
+
+    def _write_script_header_and_imports(self):
+        """Writes standard imports and initial setup code to the generated script."""
+        self.write(0, "from gc import collect")
+        self.write(0, "from sys import stderr, path as sys_path")
+        self.write(0, "from os.path import dirname")
+        self.write(0, "import inspect")
+        self.write(0, "import time")
+        self.write(0, "import sys")
+        self.write(0, "from threading import Thread")
+        self.write(0, "from unittest.mock import MagicMock")
+        self.write(0, "import asyncio")
+        if not self.options.no_tstrings and _ARG_GEN_USE_TEMPLATES:
+            self.write(0, "from string.templatelib import Interpolation, Template")
+
+        self.write_print_to_stderr(0, f'"Importing target module: {self.module_name}"')
+        self.write(0, f"import {self.module_name}")
+        self.emptyLine()
+
+    def _write_tricky_definitions(self):
+        """Writes definitions for 'tricky' classes and objects."""
+        self.write(0, fusil.python.tricky_weird.weird_classes)
+        self.emptyLine()
+        self.write(0, fusil.python.tricky_weird.tricky_typing)
+        self.emptyLine()
+        self.write(0, fusil.python.tricky_weird.tricky_objects)
+        self.emptyLine()
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
+            self.write(0, "import numpy")
+            self.write(0, fusil.python.tricky_weird.tricky_numpy)
+            self.emptyLine()
+
+        self.write(0, f"def {ERRBACK_NAME_CONST}(*args, **kw):")
+        self.write(1, "    raise ValueError('errback called')")
+        self.emptyLine()
+
+        self.write(0, "class Liar1:\n    def __eq__(self, other):\n        return True")
+        self.write(
+            0, "class Liar2:\n    def __eq__(self, other):\n        return False"
+        )
+        self.write(0, "liar1, liar2 = Liar1(), Liar2()")
+        self.emptyLine()
+        self.write(
+            0,
+            f"class Evil:\n    def __eq__(self, other):\n        for attr in dir(other):\n            try: other.__dict__[attr] = {ERRBACK_NAME_CONST}\n            except: pass",
+        )
+        self.write(0, "evil = Evil()")
+        self.emptyLine()
+
+        if USE_MANGLE_FEATURE:
+            self.write(0, mangle_obj)
+        self.emptyLine()
+
+    def _write_helper_call_functions(self):
+        """Writes the callMethod and callFunc helper functions into the script."""
+        self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
+        current_level = self.addLevel(1)
+        self.write(
+            0,
+            f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
+        )
+        self.write(0, 'message = f"[{prefix}] {func_display_name}"')
+        self.write(0, "SENTINEL_VALUE = object()")
+        self.write_print_to_stderr(0, "message")
+        self.write(0, "result = SENTINEL_VALUE")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, "func_to_run = getattr(obj_to_call, method_name)")
+        self.write(0, f"for _ in range({CALL_REPETITION_COUNT_CONST}):")
+        self.write(1, "result = func_to_run(*arguments)")
+        self.restoreLevel(current_level + 1)
+        self.write(0, "except (Exception, SystemExit, KeyboardInterrupt) as err:")
+        self.addLevel(1)
+        self.write(0, "try:")
+        self.write(1, "errmsg = repr(err)")
+        self.write(0, "except Exception as e_repr:")
+        self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
+        self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
+        self.write_print_to_stderr(
+            0,
+            'f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}"',
+        )
+        self.write(0, "result = SENTINEL_VALUE")
+        self.restoreLevel(current_level + 1)
+
+        self.write_print_to_stderr(0, 'f"[{prefix}] -explicit garbage collection-"')
+        self.write(0, "collect()")
+
+        if self.enable_threads:
+            self.write(0, "if result is not SENTINEL_VALUE:")
+            self.write(
+                1,
+                "fuzzer_threads_alive.append(Thread(target=func_to_run, args=arguments, name=message))",
+            )
+        self.write(0, "return result")
+        self.restoreLevel(current_level)
+        self.emptyLine()
+
+        self.write(0, "def callFunc(prefix, func_name_str, *arguments):")
+        self.write(
+            1,
+            f"return callMethod(prefix, {self.module_name}, func_name_str, *arguments)",
+        )
+        self.emptyLine()
+
+    def _write_main_fuzzing_logic(self):
+        """Writes the core fuzzing loops for functions, classes, and objects."""
+        self.write(0, f"fuzz_target_module = {self.module_name}")
+        self.emptyLine()
+
+        if self.enable_threads:
+            self.write(0, "fuzzer_threads_alive = []")
+        if self.enable_async:
+            self.write(0, "fuzzer_async_tasks = []")
+        self.emptyLine()
+
+        if self.module_functions:
+            self.write_print_to_stderr(
+                0,
+                f'"--- Fuzzing {len(self.module_functions)} functions in {self.module_name} ---"',
+            )
+            for i in range(self.options.functions_number):
+                func_name = choice(self.module_functions)
+                try:
+                    func_obj = getattr(self.module, func_name)
+                except AttributeError:
+                    continue  # Should not happen if _get_module_members is correct
+
+                prefix = f"f{i + 1}"
+                self._generate_and_write_call(
+                    prefix=prefix,
+                    callable_name=func_name,
+                    callable_obj=func_obj,
+                    min_arg_count=1,
+                    target_obj_expr="fuzz_target_module",
+                    is_method_call=False,
+                )
+        self.emptyLine()
+
+        # Fuzz classes (instantiate and call methods)
+        if self.module_classes:
+            self.write_print_to_stderr(
+                0,
+                f'"--- Fuzzing {len(self.module_classes)} classes in {self.module_name} ---"',
+            )
+            for i in range(self.options.classes_number):
+                if not self.module_classes:
+                    break
+                class_name = choice(self.module_classes)
+                try:
+                    class_obj = getattr(self.module, class_name)
+                except AttributeError:
+                    continue
+
+                self._fuzz_one_class(
+                    class_idx=i, class_name_str=class_name, class_type=class_obj
+                )
+        self.emptyLine()
+
+        if self.module_objects:
+            self.write_print_to_stderr(
+                0,
+                f'"--- Fuzzing {len(self.module_objects)} objects in {self.module_name} ---"',
+            )
+            for i in range(self.options.objects_number):
+                if not self.module_objects:
+                    break
+                obj_name = choice(self.module_objects)
+                if obj_name in OBJECT_BLACKLIST:
+                    continue
+                try:
+                    obj_instance = getattr(self.module, obj_name)
+                except AttributeError:
+                    continue
+                if isinstance(obj_instance, ModuleType):
+                    continue
+
+                self._fuzz_one_module_object(
+                    obj_idx=i, obj_name_str=obj_name, obj_instance=obj_instance
+                )
+
+        self.emptyLine()
+
+    def _fuzz_one_class(self, class_idx: int, class_name_str: str, class_type: type):
+        """Generates code to instantiate a class and fuzz its methods."""
+        prefix = f"c{class_idx + 1}"
+        instance_var_name = f"instance_{prefix}"
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Attempting to instantiate class: {class_name_str}"'
+        )
+
+        num_constructor_args = class_arg_number(class_name_str, class_type)
+
+        self.write(0, f"{instance_var_name} = None # Initialize instance variable")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(
+            0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
+        )
+        self._write_arguments_for_call_lines(num_constructor_args, 1)
+        self.write(0, ")")
+        if USE_MANGLE_FEATURE:
+            self.write(0, mangle_loop % num_constructor_args)
+        self.restoreLevel(self.base_level - 1)  # Exit try
+        self.write(0, "except Exception as e_instantiate:")
+        self.write_print_to_stderr(
+            1,
+            f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}}"',
+        )
+        self.emptyLine()
+
+        self.write(0, f"if {instance_var_name} is not None:")
+        current_level = self.addLevel(1)
+        methods = self._get_object_methods(class_type, class_name_str)
+
+        if methods:
+            self.write_print_to_stderr(
+                0,
+                f'"[{prefix}] Fuzzing {len(methods)} methods on instance of {class_name_str}"',
+            )
+            for m_idx in range(self.options.methods_number):
+                method_name = choice(list(methods.keys()))
+                method_obj = methods[method_name]
+
+                self._generate_and_write_call(
+                    prefix=f"{prefix}m{m_idx + 1}",
+                    callable_name=method_name,
+                    callable_obj=method_obj,
+                    min_arg_count=0,
+                    target_obj_expr=instance_var_name,
+                    is_method_call=True,
+                )
+        self.write(0, f"del {instance_var_name} # Cleanup instance")
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] -explicit garbage collection for class instance-"'
+        )
+        self.write(0, "collect()")
+        self.restoreLevel(current_level)
+        self.emptyLine()
+
+    def _fuzz_one_module_object(
+        self, obj_idx: int, obj_name_str: str, obj_instance: Any
+    ):
+        """Generates code to fuzz methods of a given module-level object."""
+        prefix = f"obj{obj_idx + 1}"
+        obj_expr_in_script = f"fuzz_target_module.{obj_name_str}"
+
+        self.write_print_to_stderr(
+            0,
+            f'"[{prefix}] Fuzzing methods on module object: {obj_name_str} ({type(obj_instance).__name__})"',
+        )
+
+        methods = self._get_object_methods(obj_instance, obj_name_str)
+        if methods:
+            self.write_print_to_stderr(
+                0, f'"[{prefix}] Found {len(methods)} methods for {obj_name_str}"'
+            )
+            for m_idx in range(self.options.methods_number):
+                method_name = choice(list(methods.keys()))
+                method_obj = methods[method_name]
+
+                self._generate_and_write_call(
+                    prefix=f"{prefix}m{m_idx + 1}",
+                    callable_name=method_name,
+                    callable_obj=method_obj,
+                    min_arg_count=0,
+                    target_obj_expr=obj_expr_in_script,
+                    is_method_call=True,
+                )
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] -explicit garbage collection for module object bindings-"'
+        )
+        self.write(0, "collect()")
+        self.emptyLine()
+
+    def _write_arguments_for_call_lines(self, num_args: int, base_indent_level: int):
+        """Generates and writes argument lines for a function/method call."""
+        for i in range(num_args):
+            arg_lines = self.arg_generator.create_complex_argument()
+            last_char = "," if i < num_args - 1 else ""
+
+            if not arg_lines:
+                self.write(base_indent_level, f"None{last_char} # Empty arg generated")
+                continue
+
+            self.write(
+                base_indent_level,
+                arg_lines[0] + (last_char if len(arg_lines) == 1 else ""),
+            )
+            for arg_line_part in arg_lines[1:]:
+                self.write(
+                    base_indent_level,
+                    arg_line_part
+                    + (last_char if arg_line_part == arg_lines[-1] else ""),
+                )
+
+    def _generate_and_write_call(
+        self,
+        prefix: str,
+        callable_name: str,
+        callable_obj: Callable,
+        min_arg_count: int,
+        target_obj_expr: str,  # e.g., "fuzz_target_module" or "instance_var"
+        is_method_call: bool,
+    ):
+        """Generates code for a single function or method call, including async/thread wrappers."""
+
+        if callable_name.lower() in {
+            "abort",
+            "systemerror",
+            "fatal",
+            "critical",
+            "assert",
+        }:
+            return
+
+        min_arg, max_arg = get_arg_number(callable_obj, callable_name, min_arg_count)
+
+        rand_choice = randint(0, 19)
+        if rand_choice < 1:  # 0 (5%)
+            num_args = 0
+        elif rand_choice < 2:  # 1 (5%)
+            num_args = 1
+        elif rand_choice < 3:  # max_arg + 1 (5%)
+            num_args = max_arg + 1
+        elif min_arg == max_arg:
+            num_args = min_arg
+        else:  # (remaining 85%)
+            num_args = randint(min_arg, max_arg)
+
+        call_prefix = (
+            f'callMethod("{prefix}", {target_obj_expr}, "{callable_name}"'
+            if is_method_call
+            else f'callFunc("{prefix}", "{callable_name}"'
+        )
+
+        self.write(0, f"res_{prefix} = {call_prefix},")
+        self._write_arguments_for_call_lines(num_args, 1)
+        self.write(0, ")")
+        self.emptyLine()
+
+        if self.enable_threads:
+            self.write(0, "try:")
+            self.addLevel(1)
+            arg_expr_list = []
+            for _ in range(num_args):
+                arg_lines = self.arg_generator.create_simple_argument()
+                arg_expr_list.append(" ".join(arg_lines))
+
+            args_tuple_str = f"({', '.join(arg_expr_list)}{',' if len(arg_expr_list) == 1 and num_args == 1 else ''})"
+
+            self.write(
+                0, f"thread_target_func = getattr({target_obj_expr}, '{callable_name}')"
+            )
+            self.write(
+                0,
+                f"thread_obj = Thread(target=thread_target_func, args={args_tuple_str}, name='{prefix}_{callable_name}')",
+            )
+            self.write(0, "fuzzer_threads_alive.append(thread_obj)")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, "except Exception as e_thread_create:")
+            self.write_print_to_stderr(
+                1,
+                f'"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
+            )
+            self.emptyLine()
+
+        if self.enable_async:
+            async_func_name = f"async_call_{prefix}_{callable_name}"
+            self.write(0, f"def {async_func_name}():")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"Starting async task: {async_func_name}"')
+            self.write(0, f"time.sleep({random.random() / 1000:.6f}) # Small delay")
+            self.write(0, "try:")
+            self.addLevel(1)
+            arg_expr_list_async = []
+            for _ in range(num_args):
+                arg_lines = self.arg_generator.create_simple_argument()
+                arg_expr_list_async.append(" ".join(arg_lines))
+
+            args_str_async = ", ".join(arg_expr_list_async)
+
+            self.write(
+                0, f"getattr({target_obj_expr}, '{callable_name}')({args_str_async})"
+            )
+            self.addLevel(-1)
+            self.write(0, "except Exception as e_async_call:")
+            self.write_print_to_stderr(
+                1,
+                f'"[{prefix}] Exception in async task {async_func_name}: {{e_async_call.__class__.__name__}}"',
+            )
+            self.write_print_to_stderr(0, f'"Ending async task: {async_func_name}"')
+            self.addLevel(-1)  # Exit def
+            self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
+            self.emptyLine()
+
+    def _write_concurrency_finalization(self):
+        """Writes code to start/join threads and run asyncio tasks."""
+        if self.enable_threads:
+            self.write_print_to_stderr(
+                0, '"--- Starting and Joining Fuzzer Threads ---"'
+            )
+            self.write(0, "for t_obj in fuzzer_threads_alive:")
+            self.write(1, "try:")
+            self.write_print_to_stderr(2, 'f"Starting thread: {t_obj.name}"')
+            self.write(2, "t_obj.start()")
+            self.write(1, "except Exception as e_thread_start:")
+            self.write_print_to_stderr(
+                2,
+                'f"Failed to start thread {t_obj.name}: {e_thread_start.__class__.__name__}"',
+            )
+            self.write(0, "for t_obj in fuzzer_threads_alive:")
+            self.write(1, "try:")
+            self.write_print_to_stderr(2, 'f"Joining thread: {t_obj.name}"')
+            self.write(2, "t_obj.join(timeout=1.0) # Add timeout to join")
+            self.write(1, "except Exception as e_thread_join:")
+            self.write_print_to_stderr(
+                2,
+                'f"Failed to join thread {t_obj.name}: {e_thread_join.__class__.__name__}"',
+            )
+            self.emptyLine()
+
+        if self.enable_async:
+            self.write_print_to_stderr(0, '"--- Running Fuzzer Async Tasks ---"')
+            self.write(0, "async def main_async_fuzzer_tasks():")
+            self.write(1, "if not fuzzer_async_tasks: return")
+            self.write(
+                1,
+                "task_objects = [asyncio.to_thread(func) for func in fuzzer_async_tasks]",
+            )
+            self.write(1, "await asyncio.gather(*task_objects, return_exceptions=True)")
+            self.emptyLine()
+            # self.write(0, "asyncio.run(main_async_fuzzer_tasks())") # Python 3.7+
+            self.write(0, "runner = asyncio.Runner()")
+            self.write(0, "try:")
+            self.write(1, "runner.run(main_async_fuzzer_tasks())")
+            self.write(0, "finally:")
+            self.write(1, "runner.close()")
+            self.emptyLine()
+
+    def generate_fuzzing_script(self) -> None:
+        """Creates and writes the entire fuzzing script to the specified file."""
+        self.createFile(self.generated_filename)
+
+        self._write_script_header_and_imports()
+        self._write_tricky_definitions()
+        self._write_helper_call_functions()
+        self._write_main_fuzzing_logic()
+        self._write_concurrency_finalization()
+
+        self.write_print_to_stderr(
+            0, f'"--- Fuzzing script generation for {self.module_name} complete ---"'
+        )
+        self.close()
 
 
 def remove_logging_pycache() -> None:
