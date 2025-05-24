@@ -1,31 +1,32 @@
 #!/usr/bin/env python
 """
-Fusil Python Module Fuzzer - Threaded Edition
+Fusil Python Fuzzer
 
-A comprehensive fuzzing framework for testing Python modules by generating random
-function calls with diverse argument types. This fuzzer targets modules written
-in C or containing C extensions to discover crashes, memory leaks, and other
-vulnerabilities through systematic exploration of API surfaces.
+A Python fuzzer based on the fusil fuzzing framework for testing Python modules
+by generating random function and method calls with diverse argument types.
+This fuzzer targets Python modules to discover crashes and other issues through
+exploration of API surfaces.
 
 Key Features:
-- Automatic discovery and filtering of Python modules (stdlib, site-packages, C-only)
-- Generation of complex argument combinations including edge cases and malformed data
-- Thread-based and async execution for concurrent testing
-- Support for numpy arrays and template strings when available
-- Blacklisting system to avoid dangerous or irrelevant functions and modules
+- Discovery and filtering of Python modules (stdlib, site-packages, C-only)
+- Generation of complex arguments, including edge cases and malformed data
+- Thread-based and async execution, mostly targeting free-threaded builds
+- Support for numpy arrays and template strings (PEP 750) when available
+- Blacklisting system to filter out dangerous or irrelevant functions and modules
 - Resource monitoring and timeout handling
 - Configurable fuzzing parameters (function calls, methods, classes, objects)
 
 The fuzzer generates Python source code that imports target modules and executes
 randomized function calls, capturing crashes and unexpected behaviors for analysis.
 It's particularly effective at finding issues in C extension modules where memory
-safety bugs are more common.
+safety bugs are more common. Stressing and exercising the core interpreter can
+also find crashes.
 
 Usage:
-    python fusil-python-threaded.py [options]
+    python fusil-python-threaded [options]
 
 Example:
-    python fusil-python-threaded.py --only-c --timeout 300 --modules json,sqlite3
+    python fusil-python-threaded --only-c --timeout 300 --modules json,sqlite3
 """
 
 from __future__ import annotations
@@ -138,14 +139,12 @@ def import_all() -> None:
 class PythonFuzzerError(Exception):
     """Custom exception raised when fuzzer encounters unrecoverable errors."""
 
-    pass
-
 
 class ListAllModules:
     """
     Discovers and filters Python modules suitable for fuzzing.
 
-    This class provides functionality to scan the Python module ecosystem,
+    This class provides functionality to scan the available Python modules,
     applying various filters to identify modules that are appropriate for
     fuzzing operations. It can filter based on module type (C vs Python),
     location (site-packages vs stdlib), and custom blacklists.
@@ -234,7 +233,7 @@ class ListAllModules:
             prefix: Module prefix
 
         Returns:
-            True if the module is a C extension, False if it's Python
+            True if the module is a (probable) C extension, False if it's Python
         """
         fullname = prefix + name
 
@@ -975,14 +974,14 @@ class WritePythonCode(WriteCode):
 
             if (
                 is_exception_type_or_instance and name == "__init__"
-            ):  # Avoid re-initing exceptions in a simple way
+            ):  # Avoid re-initing exceptions
                 continue
 
             try:
                 attr = getattr(obj_instance_or_class, name, None)
                 if attr is None or not callable(attr):
                     continue
-            except Exception:  # getattr itself might fail or be fuzzed
+            except Exception:  # getattr itself might fail
                 continue
             methods[name] = attr
         return methods
