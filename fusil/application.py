@@ -259,7 +259,7 @@ class Application(ApplicationAgent):
         # Application objects
         self.exitcode = 0
         self.interrupted = False
-        self.project = None
+        self.project: Project | None = None
         self._setup_x11 = False
         self.options = None
 

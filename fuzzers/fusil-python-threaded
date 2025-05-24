@@ -586,6 +586,7 @@ class Fuzzer(Application):
     def setupProject(self) -> None:
         """Initialize the fuzzing project with process monitoring and output analysis."""
         project = self.project
+        assert isinstance(project, Project)
 
         project.error(f"Start time: {time.asctime()}")
         project.error("Use python interpreter: %s" % self.options.python)
@@ -916,9 +917,9 @@ class WritePythonCode(WriteCode):
 
     def _get_object_methods(
         self, obj_instance_or_class: Any, owner_name: str
-    ) -> dict[str, Callable]:
+    ) -> dict[str, Callable[..., Any]]:
         """Extracts callable methods from an object or class, respecting blacklists."""
-        methods: dict[str, Callable] = {}
+        methods: dict[str, Callable[..., Any]] = {}
         if type(obj_instance_or_class) in {
             int,
             str,
@@ -986,7 +987,7 @@ class WritePythonCode(WriteCode):
             methods[name] = attr
         return methods
 
-    def _write_script_header_and_imports(self):
+    def _write_script_header_and_imports(self) -> None:
         """Writes standard imports and initial setup code to the generated script."""
         self.write(
             0,
@@ -1011,7 +1012,7 @@ class WritePythonCode(WriteCode):
         self.write(0, f"import {self.module_name}")
         self.emptyLine()
 
-    def _write_tricky_definitions(self):
+    def _write_tricky_definitions(self) -> None:
         """Writes definitions for 'tricky' classes and objects."""
         self.write(0, fusil.python.tricky_weird.weird_classes)
         self.emptyLine()
@@ -1065,7 +1066,7 @@ class WritePythonCode(WriteCode):
             self.write(0, mangle_obj)
         self.emptyLine()
 
-    def _write_helper_call_functions(self):
+    def _write_helper_call_functions(self) -> None:
         """Writes the callMethod and callFunc helper functions into the script."""
         self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
         current_level = self.addLevel(1)
@@ -1117,7 +1118,7 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
-    def _write_main_fuzzing_logic(self):
+    def _write_main_fuzzing_logic(self) -> None:
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self.write(0, f"fuzz_target_module = {self.module_name}")
         self.emptyLine()
@@ -1195,7 +1196,7 @@ class WritePythonCode(WriteCode):
 
         self.emptyLine()
 
-    def _fuzz_one_class(self, class_idx: int, class_name_str: str, class_type: type):
+    def _fuzz_one_class(self, class_idx: int, class_name_str: str, class_type: type) -> None:
         """Generates code to instantiate a class and fuzz its methods."""
         prefix = f"c{class_idx + 1}"
         instance_var_name = f"instance_{prefix}"
@@ -1254,7 +1255,7 @@ class WritePythonCode(WriteCode):
 
     def _fuzz_one_module_object(
         self, obj_idx: int, obj_name_str: str, obj_instance: Any
-    ):
+    ) -> None:
         """Generates code to fuzz methods of a given module-level object."""
         prefix = f"obj{obj_idx + 1}"
         obj_expr_in_script = f"fuzz_target_module.{obj_name_str}"
@@ -1287,7 +1288,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "collect()")
         self.emptyLine()
 
-    def _write_arguments_for_call_lines(self, num_args: int, base_indent_level: int):
+    def _write_arguments_for_call_lines(self, num_args: int, base_indent_level: int) -> None:
         """Generates and writes argument lines for a function/method call."""
         for i in range(num_args):
             arg_lines = self.arg_generator.create_complex_argument()
@@ -1312,11 +1313,11 @@ class WritePythonCode(WriteCode):
         self,
         prefix: str,
         callable_name: str,
-        callable_obj: Callable,
+        callable_obj: Callable[..., Any],
         min_arg_count: int,
         target_obj_expr: str,  # e.g., "fuzz_target_module" or "instance_var"
         is_method_call: bool,
-    ):
+    ) -> None:
         """Generates code for a single function or method call, including async/thread wrappers."""
 
         if callable_name.lower() in {
@@ -1408,7 +1409,7 @@ class WritePythonCode(WriteCode):
             self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
             self.emptyLine()
 
-    def _write_concurrency_finalization(self):
+    def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
         if self.enable_threads:
             self.write_print_to_stderr(

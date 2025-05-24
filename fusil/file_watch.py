@@ -28,8 +28,8 @@ class FileWatch(ProjectAgent):
         self._need_compile = True
         # Minimum number of lines:
         # eg. (10, -0.2) to add -20% to score if there is fewer than 10 lines
-        self.min_nb_line = None
-        self.max_nb_line = (100, 1.0)
+        self.min_nb_line: tuple[int, float] | None = None
+        self.max_nb_line: tuple[int, float] | None = (100, 1.0)
         self.last_seed = None
         self.log_not_matching = False
         self.show_matching = False
