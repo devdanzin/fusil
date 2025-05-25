@@ -51,6 +51,8 @@ class AggressivityAgent(ProjectAgent):
             return
         self.writeGraphData(self.last_session_index + 1, 0.0)
         self.writeGraphData(self.last_session_index + 1, 0.0)
+        self.graph_data.close()
+        self.graph_data = None
 
     def writeGraphData(self, session_index, score):
         self.last_session_index = session_index

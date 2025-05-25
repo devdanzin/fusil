@@ -123,6 +123,7 @@ class Project(ProjectAgent):
         self._destroyed = True
 
         # Destroy all project agents
+        self.aggressivity.destroy()
         self.aggressivity = None
         self.debugger = None
         for agent in self.application().agents:
