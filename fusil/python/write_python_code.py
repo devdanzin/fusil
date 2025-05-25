@@ -644,7 +644,7 @@ class WritePythonCode(WriteCode):
             self.write(0, "except Exception as e_thread_create:")
             self.write_print_to_stderr(
                 1,
-                f'"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
+                f'f"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
             )
             self.emptyLine()
 
@@ -670,7 +670,7 @@ class WritePythonCode(WriteCode):
             self.write(0, "except Exception as e_async_call:")
             self.write_print_to_stderr(
                 1,
-                f'"[{prefix}] Exception in async task {async_func_name}: {{e_async_call.__class__.__name__}}"',
+                f'f"[{prefix}] Exception in async task {async_func_name}: {{e_async_call.__class__.__name__}}"',
             )
             self.write_print_to_stderr(0, f'"Ending async task: {async_func_name}"')
             self.addLevel(-1)  # Exit def
