@@ -717,6 +717,8 @@ class WritePythonCode(WriteCode):
             self.write(0, "runner = asyncio.Runner()")
             self.write(0, "try:")
             self.write(1, "runner.run(main_async_fuzzer_tasks())")
+            self.write(0, "except Exception as e_async_runner_run:")
+            self.write(1, "print(f'Exception in async runner: {{e_async_runner_run.__class__.__name__}} {{e}}')")
             self.write(0, "finally:")
             self.write(1, "runner.close()")
             self.emptyLine()
