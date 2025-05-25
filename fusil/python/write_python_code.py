@@ -623,6 +623,12 @@ class WritePythonCode(WriteCode):
         self.write(0, ")")
         self.emptyLine()
 
+        if self.enable_threads or self.enable_async:
+            self.write(
+                0, f"target_func = getattr({target_obj_expr}, '{callable_name}')"
+            )
+        self.emptyLine()
+
         if self.enable_threads:
             self.write(0, "try:")
             self.addLevel(1)
@@ -634,11 +640,8 @@ class WritePythonCode(WriteCode):
             args_tuple_str = f"({', '.join(arg_expr_list)}{',' if len(arg_expr_list) == 1 and num_args == 1 else ''})"
 
             self.write(
-                0, f"thread_target_func = getattr({target_obj_expr}, '{callable_name}')"
-            )
-            self.write(
                 0,
-                f"thread_obj = Thread(target=thread_target_func, args={args_tuple_str}, name='{prefix}_{callable_name}')",
+                f"thread_obj = Thread(target=target_func, args={args_tuple_str}, name='{prefix}_{callable_name}')",
             )
             self.write(0, "fuzzer_threads_alive.append(thread_obj)")
             self.restoreLevel(self.base_level - 1)
@@ -665,7 +668,7 @@ class WritePythonCode(WriteCode):
             args_str_async = ", ".join(arg_expr_list_async)
 
             self.write(
-                0, f"getattr({target_obj_expr}, '{callable_name}')({args_str_async})"
+                0, f"target_func({args_str_async})"
             )
             self.addLevel(-1)
             self.write(0, "except Exception as e_async_call:")
