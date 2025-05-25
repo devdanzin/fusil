@@ -22,16 +22,16 @@ from fusil.bytes_generator import BytesGenerator
 from fusil.config import FusilConfig
 from fusil.python.template_strings import TEMPLATES
 from fusil.python.unicode import escapeUnicode
-from fusil.python.values import SURROGATES, INTERESTING, BUFFER_OBJECTS
+from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 from fusil.unicode_generator import (
-    IntegerRangeGenerator,
-    IntegerGenerator,
-    UnicodeGenerator,
-    UNICODE_65535,
     ASCII8,
-    UnixPathGenerator,
-    LETTERS,
     DECIMAL_DIGITS,
+    LETTERS,
+    UNICODE_65535,
+    IntegerGenerator,
+    IntegerRangeGenerator,
+    UnicodeGenerator,
+    UnixPathGenerator,
     UnsignedGenerator,
 )
 
