@@ -667,7 +667,7 @@ class WritePythonCode(WriteCode):
             async_func_name = f"async_call_{prefix}_{callable_name}"
             self.write(0, "if target_func is not None:")
             self.addLevel(1)
-            self.write(0, f"def {async_func_name}():")
+            self.write(0, f"def {async_func_name}(target_func=target_func):")
             self.addLevel(1)
             self.write_print_to_stderr(0, f'"Starting async task: {async_func_name}"')
             self.write(0, f"time.sleep({random.random() / 1000:.6f}) # Small delay")
