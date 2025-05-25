@@ -14,8 +14,9 @@ from fusil.process.create import CreateProcess
 from fusil.process.stdout import WatchStdout
 from fusil.process.watch import WatchProcess
 from fusil.project import Project
+from fusil.python.python_source import PythonSource
 from fusil.python.utils import print_running_time
-from fusil.python.write_python_code import PythonSource, time_start
+from fusil.python.write_python_code import time_start
 
 print(sys.version)
 

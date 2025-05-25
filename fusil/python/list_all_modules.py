@@ -4,9 +4,10 @@ import pathlib
 import pkgutil
 import sys
 from types import ModuleType
-from typing import Any, Callable, Generator
+from typing import TYPE_CHECKING, Any, Callable, Generator
 
-from fusil.python.write_python_code import PythonSource
+if TYPE_CHECKING:
+    from fusil.python.python_source import PythonSource
 
 
 class ListAllModules:
@@ -29,7 +30,7 @@ class ListAllModules:
 
     def __init__(
         self,
-        logger: PythonSource,
+        logger: "PythonSource",
         only_c: bool,
         site_package: bool,
         blacklist: set[str],
