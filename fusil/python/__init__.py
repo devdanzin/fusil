@@ -103,6 +103,12 @@ class Fuzzer(Application):
             default=False,
         )
         running_options.add_option(
+            "--exitcode-score",
+            help="Score for exitcode (default: 0.0)",
+            type="float",
+            default=0.0,
+        )
+        running_options.add_option(
             "--record-high-cpu",
             help="Consider high CPU usage an error (default: False)",
             action="store_true",
@@ -225,7 +231,7 @@ class Fuzzer(Application):
             timeout=self.options.timeout,
         )
         process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
-        options = {"exitcode_score": 0}
+        options = {"exitcode_score": self.options.exitcode_score}
         if not self.options.record_timeouts:
             options["timeout_score"] = 0
         watch = WatchProcess(process, **options)

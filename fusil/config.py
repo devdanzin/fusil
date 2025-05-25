@@ -144,6 +144,7 @@ class FusilConfig:
         self.test_private = False
         self.timeout = 0
         self.verbose = False
+        self.exitcode_score = 0.0
 
         # Options from command line
         options: optparse.Values
