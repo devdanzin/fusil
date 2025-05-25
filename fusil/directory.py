@@ -34,11 +34,13 @@ class Directory:
 
     def isEmpty(self, ignore_generated=False):
         try:
-            for entry in scandir(self.directory):
+            entries = scandir(self.directory)
+            for entry in entries:
                 if entry.name in (".", ".."):
                     continue
                 if entry.name in self.files and ignore_generated:
                     continue
+                entries.close()
                 return False
             return True
         except OSError as e:
