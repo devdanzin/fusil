@@ -129,8 +129,9 @@ class WritePythonCode(WriteCode):
             "__package__",
             "__loader__",
             "__spec__",
+            "__cached__",
         }
-        names -= {"True", "None", "False"}
+        names -= {"True", "None", "False", "Ellipsis"}
 
         if not self.options.fuzz_exceptions:
             names -= _EXCEPTION_NAMES
@@ -733,7 +734,7 @@ class WritePythonCode(WriteCode):
         self._write_main_fuzzing_logic()
         self._write_concurrency_finalization()
 
-        self.write_print_to_stderr(
-            0, f'"--- Fuzzing script generation for {self.module_name} complete ---"'
+        self.parent_python_source.warning(
+            f'"--- Fuzzing script generation for {self.module_name} complete ---"'
         )
         self.close()
