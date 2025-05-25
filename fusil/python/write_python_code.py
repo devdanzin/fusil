@@ -624,12 +624,22 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         if self.enable_threads or self.enable_async:
+            self.write(0, "target_func = None")
+            self.write(0, "try:")
             self.write(
-                0, f"target_func = getattr({target_obj_expr}, '{callable_name}')"
+                1, f"target_func = getattr({target_obj_expr}, '{callable_name}')"
+            )
+            self.write(0, "except Exception as e_get_target_func:")
+            self.write_print_to_stderr(
+                1,
+                f'f"[{prefix}] Failed to get attribute {callable_name} from {target_obj_expr}: '
+                f'{{e_get_target_func.__class__.__name__}} {{e_get_target_func}}"',
             )
         self.emptyLine()
 
         if self.enable_threads:
+            self.write(0, "if target_func is not None:")
+            self.addLevel(1)
             self.write(0, "try:")
             self.addLevel(1)
             arg_expr_list = []
@@ -650,10 +660,13 @@ class WritePythonCode(WriteCode):
                 1,
                 f'f"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
             )
+            self.addLevel(-1)
             self.emptyLine()
 
         if self.enable_async:
             async_func_name = f"async_call_{prefix}_{callable_name}"
+            self.write(0, "if target_func is not None:")
+            self.addLevel(1)
             self.write(0, f"def {async_func_name}():")
             self.addLevel(1)
             self.write_print_to_stderr(0, f'"Starting async task: {async_func_name}"')
@@ -679,6 +692,7 @@ class WritePythonCode(WriteCode):
             self.write_print_to_stderr(0, f'"Ending async task: {async_func_name}"')
             self.addLevel(-1)  # Exit def
             self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
+            self.addLevel(-1)
             self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
