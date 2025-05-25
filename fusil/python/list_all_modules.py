@@ -6,7 +6,7 @@ import sys
 from types import ModuleType
 from typing import Any, Callable, Generator
 
-from python import PythonSource
+from fusil.python.write_python_code import PythonSource
 
 
 class ListAllModules:
