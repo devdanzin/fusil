@@ -738,6 +738,6 @@ class WritePythonCode(WriteCode):
         self._write_concurrency_finalization()
 
         self.parent_python_source.warning(
-            f'"--- Fuzzing script generation for {self.module_name} complete ---"'
+            f'--- Fuzzing script generation for {self.module_name} complete ---'
         )
         self.close()
