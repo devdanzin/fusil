@@ -22,7 +22,7 @@ DEFAULTS = {
     "process_use_cpu_probe": True,
     "process_max_memory": 2000 * 1024 * 1024,
     "process_core_dump": True,
-    "process_max_user_process": 1000,
+    "process_max_user_process": 5000,
     "process_user": "fusil",
     "process_uid": None,
     "process_group": "fusil",
