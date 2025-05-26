@@ -11,14 +11,24 @@ Fusil 1.6 (Unreleased)
    interesting values.
  * fusil-python-threaded: added async calling of code.
  * fusil-python-threaded: added object mangling.
- * fusil-python-threaded: improved handling of config files.
  * removed PyPy workarounds.
  * removed Python 2 support.
  * removed Windows support.
- * Refactored fusil-python-threaded, moving a lot of its contents
-   to modules in fusil/python.
- * Improved handling and added features to config file handling.
- * Added typing to fusil-python-threaded and some modules.
+ * fusil-python-threaded: major refactoring, moving its core logic
+   into modules under fusil/python.
+ * fusil-python-threaded: improved handling and added features to
+   config file handling.
+ * Added typing and docstrings to fusil-python-threaded and some
+   modules.
+ * fusil-python-threaded: improved module discovery and filtering.
+ * fusil-python-threaded: improved blacklists, allowing to add
+   modules to it from the CLI.
+ * fusil-python-threaded: added many new CLI options, including
+   --packages, --exitcode-score, number of cases to generate etc.
+ * fusil-python-threaded: enhanced discovery of argument number
+   per call, as well as adding that information for many cases.
+ * fusil-python-threaded: adapted to allow running with ASAN.
+ * fusil-python-threaded: added better diagnostics for crashes.
 
 Fusil 1.5 (2013-03-05)
 ----------------------
