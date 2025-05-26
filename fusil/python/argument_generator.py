@@ -20,7 +20,6 @@ from typing import Callable
 import fusil.python
 from fusil.bytes_generator import BytesGenerator
 from fusil.config import FusilConfig
-from fusil.python.template_strings import TEMPLATES
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 from fusil.unicode_generator import (
@@ -36,6 +35,11 @@ from fusil.unicode_generator import (
 )
 
 ERRBACK_NAME_CONST = "errback"
+
+try:
+    from fusil.python.template_strings import TEMPLATES
+except ImportError:
+    TEMPLATES = None
 
 
 class ArgumentGenerator:
@@ -119,7 +123,7 @@ class ArgumentGenerator:
 
         if not self.options.no_numpy and use_numpy:
             self.complex_argument_generators += (self.genTrickyNumpy,)
-        if not self.options.no_tstrings and use_templates:
+        if not self.options.no_tstrings and use_templates and TEMPLATES:
             self.complex_argument_generators += (self.genTrickyTemplate,)
 
     def _create_argument_from_list(
