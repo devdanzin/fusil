@@ -45,7 +45,7 @@ except ImportError:
 
 time_start = time.time()
 USE_MANGLE_FEATURE = False
-CALL_REPETITION_COUNT_CONST = 65
+CALL_REPETITION_COUNT_CONST = 3
 ERRBACK_NAME_CONST = "errback"
 EXCEPTION_NAMES = {
     cls.__name__
