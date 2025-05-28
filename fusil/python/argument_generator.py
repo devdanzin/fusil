@@ -108,6 +108,9 @@ class ArgumentGenerator:
                 self.genTrickyObjects,
             )
         )
+        if not self.options.no_numpy and use_numpy:
+            self.simple_argument_generators += (self.genTrickyNumpy,) * 50
+            self.simple_argument_generators += (self.genH5PyObject,) * 50
         self.complex_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genList,
             self.genTuple,
@@ -122,7 +125,8 @@ class ArgumentGenerator:
         )
 
         if not self.options.no_numpy and use_numpy:
-            self.complex_argument_generators += (self.genTrickyNumpy,)
+            self.simple_argument_generators += (self.genH5PyObject,) * 50
+            self.complex_argument_generators += (self.genTrickyNumpy,) * 50
         if not self.options.no_tstrings and use_templates and TEMPLATES:
             self.complex_argument_generators += (self.genTrickyTemplate,)
 
@@ -255,6 +259,11 @@ class ArgumentGenerator:
         """Generate a name of a 'tricky' predefined NumPy object from tricky_weird."""
         tricky_name = choice(fusil.python.tricky_weird.tricky_numpy_names)
         return [tricky_name]
+
+    def genH5PyObject(self) -> list[str]:
+        """Generate a name of a 'tricky' predefined h5py object from tricky_weird."""
+        tricky_name = choice(fusil.python.tricky_weird.tricky_h5py_names)
+        return [f"h5py_tricky_objects.get('{tricky_name}')"]
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""

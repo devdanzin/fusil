@@ -290,6 +290,11 @@ class WritePythonCode(WriteCode):
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
             self.emptyLine()
 
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
+            self.write(0, "# Executing HDF5 tricky object generation code")
+            self.write(0, fusil.python.tricky_weird.tricky_h5py_code)
+            self.emptyLine()
+
         self.write(
             0,
             dedent(
