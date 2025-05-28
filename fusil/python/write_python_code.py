@@ -333,6 +333,8 @@ class WritePythonCode(WriteCode):
 
     def _write_helper_call_functions(self) -> None:
         """Writes the callMethod and callFunc helper functions into the script."""
+        self.write(0, "SENTINEL_VALUE = object()")
+        self.emptyLine()
         self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
         current_level = self.addLevel(1)
         self.write(
@@ -340,7 +342,6 @@ class WritePythonCode(WriteCode):
             f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
         )
         self.write(0, 'message = f"[{prefix}] {func_display_name}"')
-        self.write(0, "SENTINEL_VALUE = object()")
         self.write_print_to_stderr(0, "message")
         self.write(0, "result = SENTINEL_VALUE")
         self.write(0, "try:")
@@ -491,7 +492,7 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
-        self.write(0, f"if {instance_var_name} is not None:")
+        self.write(0, f"if {instance_var_name} is not SENTINEL_VALUE and {instance_var_name} is not None:")
         current_level = self.addLevel(1)
         methods = self._get_object_methods(class_type, class_name_str)
 
