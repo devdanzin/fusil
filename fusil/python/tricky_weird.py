@@ -969,6 +969,33 @@ tricky_h5py_names = [
     # Link objects themselves (obtained via get(..., getlink=True))
     "h5_softlink_object_itself",      # The h5py.SoftLink instance
     "h5_extlink_object_itself",       # The h5py.ExternalLink instance
+
+# Additions to tricky_h5py_names for Specific Bug Replication Scenarios
+
+    # For Issue 135 & Compound Type tests
+    "h5_dset_scalar_compound_for_itemget", # A scalar dataset with compound type
+
+    # For Issue 211 & Array Dtype tests
+    "h5_dset_array_dtype_for_scalar_assign_error", # e.g., shape=(10,), dtype='(3,)i4'
+    "h5_dset_array_dtype_for_element_write",
+
+    # For Issue #1475
+    "h5_dset_null_dataspace_for_storage_check", # Created with shape=None
+
+    # For Issue #1547
+    "h5_dset_uint64_for_large_py_int",
+
+    # For Issue #1593 (dataset structure, actual indexing is a dynamic operation)
+    "h5_dset_for_issue1593_fancy_setitem", # e.g., shape (5, 10, 2)
+
+    # For Issue #1852 (GC Close Bug) - the file itself is the primary tricky object
+    "h5_file_for_issue1852_gc_close_test",
+
+    # For Issue #2549 (Zero-size resizable)
+    "h5_dset_zerosize_resizable_for_write_test", # e.g., shape=(0,), maxshape=(None,)
+
+    # Note: Issue #2558 (libver with core driver) is covered by dynamic file creation (Category A additions to AG)
+    # and the existing "h5_file_libver_*" objects, if they use the core driver.
 ]
 
 tricky_h5py_code = """
@@ -2075,6 +2102,79 @@ else: # Fallback if _h5_main_file or _h5_external_target_file is None
     print(f"H5_F_ERROR: Main or External HDF5 file for tricky link objects could not be created.", file=sys.stderr)
     _f_names_to_none = [name for name in tricky_h5py_names if "link" in name]
     for _name in _f_names_to_none:
+         if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
+
+
+# --- Additions to tricky_h5py_code for Specific Bug Replication Scenarios ---
+# Assumes _h5_main_file, _h5_create_core_file, _h5_unique_name,
+# h5py_tricky_objects, _h5_internal_files_to_keep_open_ are available.
+
+if _h5_main_file:
+    # For Issue 135
+    try:
+        _dt_scalar_compound_g = numpy.dtype([('x', 'i4'), ('y', 'f2')])
+        _data_scalar_compound_g = numpy.array((10, 3.5), dtype=_dt_scalar_compound_g)
+        h5py_tricky_objects["h5_dset_scalar_compound_for_itemget"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_scalar_comp_g'), data=_data_scalar_compound_g
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_scalar_compound_for_itemget"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue 211
+    try:
+        _dt_array_g = numpy.dtype('(3,)i4')
+        h5py_tricky_objects["h5_dset_array_dtype_for_scalar_assign_error"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_arrdt_sclr_assign'), shape=(5,), dtype=_dt_array_g
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_array_dtype_for_scalar_assign_error"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+    try:
+        _dt_array_g2 = numpy.dtype('(2,)f8')
+        h5py_tricky_objects["h5_dset_array_dtype_for_element_write"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_arrdt_el_write'), shape=(7,), dtype=_dt_array_g2
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_array_dtype_for_element_write"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue #1475
+    try:
+        h5py_tricky_objects["h5_dset_null_dataspace_for_storage_check"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_null_space_g'), shape=None, dtype='i1'
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_null_dataspace_for_storage_check"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue #1547
+    try:
+        h5py_tricky_objects["h5_dset_uint64_for_large_py_int"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_u64_large_py'), shape=(5,), dtype=numpy.uint64
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_uint64_for_large_py_int"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue #1593
+    try:
+        h5py_tricky_objects["h5_dset_for_issue1593_fancy_setitem"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_fancy1593'), shape=(5, 10, 3), dtype=numpy.int8, fillvalue=0
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_for_issue1593_fancy_setitem"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue #1852 (GC Close Bug) - Create a dedicated file for this test.
+    try:
+        # This file will be manipulated by specific fuzzing logic later.
+        # We use core driver for speed, backing_store=True to ensure it's a distinct file entity if reopened by name.
+        h5py_tricky_objects["h5_file_for_issue1852_gc_close_test"] = _h5_create_core_file(
+            name_suffix="gc_close_1852", mode='w', backing_store=True
+        )
+    except Exception as e: h5py_tricky_objects["h5_file_for_issue1852_gc_close_test"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+    # For Issue #2549
+    try:
+        h5py_tricky_objects["h5_dset_zerosize_resizable_for_write_test"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_zero_resize_2549'), shape=(0,), maxshape=(None,), chunks=(1,), dtype='f4'
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_zerosize_resizable_for_write_test"] = None; print(f"H5_G_WARN: {e}", file=sys.stderr)
+
+else: # Fallback if _h5_main_file is None
+    print(f"H5_G_ERROR: _h5_main_file was not created. Cannot add Category G dataset objects.", file=sys.stderr)
+    # Populate relevant keys with None
+    _g_names_to_none = [name for name in tricky_h5py_names if "_for_" in name and "_g" in name or "1852" in name or "2549" in name]
+    for _name in _g_names_to_none:
          if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
 
 

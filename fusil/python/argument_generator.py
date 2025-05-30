@@ -14,6 +14,7 @@ vulnerabilities through unusual type interactions and boundary conditions.
 
 from __future__ import annotations
 
+import sys
 from random import choice, randint, random, sample, uniform
 from typing import Callable
 import uuid
@@ -874,6 +875,56 @@ class ArgumentGenerator:
 
         helper_call_expr = f"_fusil_h5_get_link_target_in_file({parent_group_expr_str}, h5py_tricky_objects, h5py_runtime_objects)"
         return helper_call_expr
+
+    # In ArgumentGenerator class:
+    def genDataForFancyIndexing_expr(self, block_shape_expr_str: str, dtype_expr_str: str) -> str:
+        """Generates numpy array expression for RHS of fancy indexing setitem."""
+        # block_shape_expr_str is an expression like "tuple(variable_block_shape_list)"
+        # dtype_expr_str is like "numpy.uint8"
+        return f"numpy.random.randint(0, 255, size=({block_shape_expr_str}), dtype={dtype_expr_str})"
+
+    def genLargePythonInt_expr(self) -> str:
+        """Generates a string representation of a large Python integer."""
+        return str(choice([
+            2 ** 63 - 1, 2 ** 63, 2 ** 63 + 1,
+            2 ** 64 - 1, 2 ** 64,
+            sys.maxsize, sys.maxsize + 1  # Requires sys import in generated script
+        ]))
+
+    def genArrayForArrayDtypeElement_expr(self, element_shape_tuple_expr_str: str, base_dtype_expr_str: str) -> str:
+        """
+        Generates a Python expression string that, when executed in the fuzz script,
+        creates a NumPy array suitable for an element of an array dtype.
+
+        Args:
+            element_shape_tuple_expr_str: Python expression string for the shape tuple
+                                          of a single element of the array dtype
+                                          (e.g., "ctx_p_el_shape_tuple").
+            base_dtype_expr_str: Python expression string for the base dtype of the
+                                 array elements (e.g., "ctx_p_base_dt_expr" or "'i4'").
+        """
+        # The generated expression will use numpy.prod on the runtime shape tuple
+        # and then reshape. It assumes 'numpy' is imported in the generated script.
+
+        # Ensure base_dtype_expr_str is treated as a dtype object at runtime
+        # If it's already a string like "'i4'", it's fine. If it's a variable name,
+        # that variable should hold a dtype object or string.
+
+        # Example: if element_shape_tuple_expr_str is " (3,2) " (runtime value)
+        # and base_dtype_expr_str is " 'i4' " (runtime value)
+        # this will generate:
+        # "numpy.arange(numpy.prod((3,2))).astype(numpy.dtype('i4')).reshape((3,2))"
+
+        # We need to ensure that base_dtype_expr_str results in a valid dtype for astype.
+        # If ctx_p_base_dt_expr is already a string like "'i4'", it's fine.
+        # If it's a variable holding a dtype object, that's also fine.
+
+        # The expression constructs the array at runtime in the generated script
+        return (
+            f"numpy.arange(int(numpy.prod({element_shape_tuple_expr_str})))"
+            f".astype({base_dtype_expr_str})"
+            f".reshape({element_shape_tuple_expr_str})"
+        )
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""
