@@ -620,10 +620,10 @@ class ArgumentGenerator:
 
         slices = []
         for _ in range(int(dataset_rank)):
-            choice = randint(0, 3)
-            if choice == 0:
+            choice_int = randint(0, 3)
+            if choice_int == 0:
                 slices.append(":")  # Full slice for this axis
-            elif choice == 1:
+            elif choice_int == 1:
                 slices.append(str(randint(0, 5)))  # Single index
             else:  # start:stop or start:stop:step
                 start = randint(0, 10)
@@ -684,6 +684,86 @@ class ArgumentGenerator:
     def genH5PyAsStrErrors_expr(self) -> str:
         errors = ['strict', 'ignore', 'replace', 'xmlcharrefreplace', 'bogus_error_handler']
         return f"'{choice(errors)}'"
+
+    # In ArgumentGenerator class:
+
+    def genH5PyFieldNameForSlicing_expr(self, dataset_fields_keys_expr_str: str) -> str:
+        """
+        Generates a field name string or a list of field name strings for slicing,
+        given a string expression that evaluates to the dataset's field keys.
+        Args:
+            dataset_fields_keys_expr_str: Python expression string for dataset.dtype.fields.keys()
+                                         e.g., f"list({ctx_p}_dtype_obj.fields.keys())"
+        """
+        # This code will run in the fuzzer (generator side), but the expression it returns
+        # will run in the fuzzed script.
+        # It needs to return a Python expression that uses dataset_fields_keys_expr_str.
+
+        # Python code to be embedded in the generated script:
+        # This lambda will be defined and called in the generated script.
+        # It picks one or more fields from the runtime list of field keys.
+        lambda_expr = f"""
+(lambda fields_keys:
+    (choice(fields_keys) if random() < 0.7 else \
+     list(sample(fields_keys, k=min(len(fields_keys), randint(1,3))))) \
+    if fields_keys and len(fields_keys) > 0 else \
+    choice(["non_existent_field", "another_bad_field"])
+)({dataset_fields_keys_expr_str})
+"""
+        # Cleanup the multiline string for embedding
+        return " ".join(lambda_expr.strip().splitlines())
+
+    def genH5PyMultiBlockSlice_expr(self, dataset_1d_len_expr_str: str = "100") -> str:
+        """
+        Generates a Python expression string that creates an h5py.MultiBlockSlice object.
+        Args:
+            dataset_1d_len_expr_str: Optional string expression for the length of a 1D dataset,
+                                     used to help generate valid parameters.
+        """
+        # This generates the code to *create* a MultiBlockSlice object in the target script.
+        # The parameters will be randomized.
+        # The lambda ensures parameters are generated at runtime in the fuzzed script.
+        # dataset_1d_len_expr_str is the name of the variable holding the length.
+        lambda_expr = f"""
+(lambda L: h5py.MultiBlockSlice(
+    start=randint(0, max(0, L//2 if L else 10)),
+    count=randint(1, max(1, L//4 if L else 5)) if random() < 0.8 else None,
+    stride=randint(0, max(1, L//5 if L else 8)) if random() < 0.9 else 1,
+    block=randint(1, max(1, L//5 if L else 8)) if random() < 0.8 else 1
+))({dataset_1d_len_expr_str} if isinstance({dataset_1d_len_expr_str}, int) else 100)
+"""
+        # Note: The (L if L else 100) etc. is to handle if length is 0 or None, providing defaults.
+        # This lambda will be called with the runtime length of the dataset.
+        return " ".join(lambda_expr.strip().splitlines())
+
+    def genH5PyRegionReferenceForSlicing_expr(self, dataset_expr_str: str, dataset_rank_expr_str: str) -> str:
+        """
+        Generates an expression that creates a RegionReference from a given dataset.
+        Args:
+            dataset_expr_str: Expression string for the dataset instance.
+            dataset_rank_expr_str: Expression string for the dataset's rank.
+        """
+        # This creates a string that, when run, will access .regionref with a random slice
+        # The _fusil_h5_create_dynamic_slice_for_rank helper is ideal here.
+        slice_generating_call = f"_fusil_h5_create_dynamic_slice_for_rank({dataset_rank_expr_str})"
+        return f"{dataset_expr_str}.regionref[{slice_generating_call}]"
+
+    def genAdvancedSliceArgument_expr(self, dataset_expr_str: str, dataset_rank_expr_str: str,
+                                      dataset_fields_keys_expr_str: str) -> str:
+        """
+        Chooses among generating a basic slice, field name, MultiBlockSlice, or RegionReference.
+        """
+        choice = random()
+        if choice < 0.4:  # Basic slice (using the helper we defined for rank-aware slices)
+            return f"_fusil_h5_create_dynamic_slice_for_rank({dataset_rank_expr_str})"
+        elif choice < 0.6:  # Field name slice (most effective if dataset_fields_keys_expr_str is valid)
+            return self.genH5PyFieldNameForSlicing_expr(dataset_fields_keys_expr_str)
+        elif choice < 0.8:  # MultiBlockSlice (using dataset length, simplified to rank for now)
+            # For MultiBlockSlice, .indices(length) is key. We'll use dataset_rank_expr_str as a proxy for typical length.
+            return self.genH5PyMultiBlockSlice_expr(
+                f"({dataset_rank_expr_str} * 10 if isinstance({dataset_rank_expr_str},int) else 100)")
+        else:  # RegionReference
+            return self.genH5PyRegionReferenceForSlicing_expr(dataset_expr_str, dataset_rank_expr_str)
 
     def genNumpyValueForComparison_expr(self, dataset_dtype_expr_str: str) -> str:
         # Generate a scalar or small array for comparison

@@ -168,7 +168,7 @@ class WritePythonCode(WriteCode):
                     and attr.__name__ in _EXCEPTION_NAMES
                 ):
                     continue
-                classes.append(name)
+                if name == "Dataset": classes.append(name)
             else:
                 if isinstance(attr, ModuleType):
                     continue
@@ -218,25 +218,25 @@ class WritePythonCode(WriteCode):
             if (
                 (not self.options.test_private)
                 and name.startswith("__")
-                and not name.endswith("__")
+                # and not name.endswith("__")
             ):
-                if name not in {
-                    "__init__",
-                    "__call__",
-                    "__getitem__",
-                    "__setitem__",
-                    "__iter__",
-                    "__next__",
-                    "__len__",
-                    "__contains__",
-                    "__eq__",
-                    "__lt__",
-                    "__gt__",
-                    "__le__",
-                    "__ge__",
-                    "__repr__",
-                    "__str__",
-                }:
+                # if name not in {
+                #     "__init__",
+                #     "__call__",
+                #     "__getitem__",
+                #     "__setitem__",
+                #     "__iter__",
+                #     "__next__",
+                #     "__len__",
+                #     "__contains__",
+                #     "__eq__",
+                #     "__lt__",
+                #     "__gt__",
+                #     "__le__",
+                #     "__ge__",
+                #     "__repr__",
+                #     "__str__",
+                # }:
                     continue
 
             if (
@@ -685,6 +685,85 @@ class WritePythonCode(WriteCode):
                    f"except Exception as e_op_ctx: print(f'''DS_OP_CTX_ERR ({dset_name_for_log}): {{e_op_ctx}}''', file=sys.stderr)")
         self.emptyLine()
 
+        # --- Advanced Slicing Operations ---
+        if random() < 0.5 and f"{ctx_p}_shape is not None":  # 50% chance to try advanced slicing
+            self.write(0, "# --- Advanced Slicing Attempt ---")
+
+            # Prepare context strings for ArgumentGenerator
+            dset_fields_keys_expr = f"list({ctx_p}_dtype_obj.fields.keys()) if {ctx_p}_is_compound and {ctx_p}_dtype_obj.fields else []"
+            # Note: {ctx_p}_rank is already defined as a variable in generated code.
+
+            adv_slice_arg_expr = self.arg_generator.genAdvancedSliceArgument_expr(
+                f"{ctx_p}_target_dset",  # Pass the dataset variable name itself
+                f"{ctx_p}_rank",
+                dset_fields_keys_expr
+            )
+
+            # Ensure the expression for field keys is evaluated first if needed by AG's generated lambda
+            self.write(0, f"try: {ctx_p}_dset_fields_keys = {dset_fields_keys_expr}")  # Evaluate field keys
+            self.write(0, f"except Exception: {ctx_p}_dset_fields_keys = []")
+
+            self.write(0, f"try:")
+            self.addLevel(1)
+            # The adv_slice_arg_expr might itself be a complex expression (like an IIFE lambda)
+            # that uses {ctx_p}_rank and {ctx_p}_dset_fields_keys internally.
+            self.write(0, f"{ctx_p}_adv_slice_obj = {adv_slice_arg_expr}")
+            self.write_print_to_stderr(0,
+                                       f"f'DS_ADV_SLICE ({dset_name_for_log}): Attempting slice with {{repr({ctx_p}_adv_slice_obj)}}'")
+
+            # Attempt read
+            self.write(0, f"if not {ctx_p}_is_empty_dataspace:")  # Reading from empty might error differently
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_read_data = {ctx_p}_target_dset[{ctx_p}_adv_slice_obj]")
+            self.write_print_to_stderr(0,
+                                       f"f'DS_ADV_SLICE_READ ({dset_name_for_log}): Sliced data shape {{getattr({ctx_p}_read_data, \"shape\", \"N/A\")}}'")
+            self.restoreLevel(self.base_level - 1)
+
+            # Attempt write (if not a field name slice, or if field name slice and data is compatible)
+            # Generating compatible data for write with advanced slices is very complex.
+            # For now, let's try writing a scalar or a small compatible array if the read succeeded and gave us a shape.
+            self.write(0,
+                       f"if not {ctx_p}_is_empty_dataspace and hasattr({ctx_p}_target_dset, 'readonly') and not {ctx_p}_target_dset.readonly:")
+            self.addLevel(1)  # Start of write block if
+            self.write(0, f"try:")  # Try for write
+            self.addLevel(1)
+            self.write(0, f"# Preparing data for advanced slice write...")
+            self.write(0, f"{ctx_p}_data_for_write = None")
+            self.write(0,
+                       f"if hasattr({ctx_p}_read_data, 'shape') and hasattr({ctx_p}_read_data, 'dtype'):")  # If read gave array
+            self.addLevel(1)
+            self.write(0, f"if product(getattr({ctx_p}_read_data, 'shape', (0,))) > 0:")  # If read data is not empty
+            self.addLevel(1)
+            # Create compatible data based on what was read (shape and dtype)
+            self.write(0, f"{ctx_p}_data_for_write = numpy.zeros_like({ctx_p}_read_data)")  # Or random, or from AG
+            self.write_print_to_stderr(0,
+                                       f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated zeros_like data with shape {{{ctx_p}_data_for_write.shape}}'")
+            self.restoreLevel(self.base_level - 1)
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, f"elif {ctx_p}_dtype_obj is not None:")  # Fallback: scalar based on dataset dtype
+            self.addLevel(1)
+            self.write(0,
+                       f"{ctx_p}_data_for_write = numpy.array(0, dtype={ctx_p}_dtype_obj).item() if {ctx_p}_dtype_obj.kind not in 'SUOV' else (b'' if {ctx_p}_dtype_obj.kind == 'S' else '')")
+            self.write_print_to_stderr(0,
+                                       f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated scalar data {{{ctx_p}_data_for_write!r}}'")
+            self.restoreLevel(self.base_level - 1)
+
+            self.write(0, f"if {ctx_p}_data_for_write is not None:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_target_dset[{ctx_p}_adv_slice_obj] = {ctx_p}_data_for_write")
+            self.write_print_to_stderr(0,
+                                       f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Write attempted with data {{{ctx_p}_data_for_write!r}}'")
+            self.restoreLevel(self.base_level - 1)  # Exit if data_for_write
+            self.restoreLevel(self.base_level - 1)  # Exit try for write
+            self.write(0,
+                       f"except Exception as e_adv_write: print(f'DS_ADV_SLICE_WRITE_ERR ({dset_name_for_log}) for slice {{{ctx_p}_adv_slice_obj!r}}: {{e_adv_write}}', file=sys.stderr)")
+            self.restoreLevel(self.base_level - 1)  # Exit if writable block
+
+            self.restoreLevel(self.base_level - 1)  # Exit try for adv_slice_obj
+            self.write(0,
+                       f"except Exception as e_adv_slice: print(f'DS_ADV_SLICE_ERR ({dset_name_for_log}) with slice obj {{repr(locals().get('{ctx_p}_adv_slice_obj', 'ERROR_GETTING_SLICE_OBJ'))}}: {{e_adv_slice}}', file=sys.stderr)")
+            self.emptyLine()
+
         # --- Operations (within the 'if target_dset is not None:' block) ---
 
         # Access common properties
@@ -721,8 +800,9 @@ class WritePythonCode(WriteCode):
             self.write(0, f"try:")
             self.addLevel(1)
             self.write(0, f"{ctx_p}_astype_view = {ctx_p}_target_dset.astype({astype_dtype_expr})")
+            escaped_astype_dtype_expr = "{" + astype_dtype_expr + "}"
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASTYPE ({dset_name_for_log}): view created with dtype {astype_dtype_expr}. View repr: {{repr({ctx_p}_astype_view)}}'''")
+                                       f"f'''DS_ASTYPE ({dset_name_for_log}): view created with dtype {escaped_astype_dtype_expr}. View repr: {{repr({ctx_p}_astype_view)}}'''")
             self.write(0,
                        f"if not {ctx_p}_is_scalar and {ctx_p}_shape and product({ctx_p}_shape) > 0 :")  # product from h5py._hl.base
             self.addLevel(1)
@@ -735,7 +815,7 @@ class WritePythonCode(WriteCode):
                                        f"f'''DS_ASTYPE ({dset_name_for_log}): converted to numpy array with shape {{ {ctx_p}_arr_from_astype.shape }}'''")
             self.restoreLevel(self.base_level - 1)  # Exit try for astype
             self.write(0,
-                       f"except Exception as e_astype: print(f'''DS_ASTYPE_ERR ({dset_name_for_log}) with dtype {astype_dtype_expr}: {{e_astype}}''', file=sys.stderr)")
+                       f"except Exception as e_astype: print(f'''DS_ASTYPE_ERR ({dset_name_for_log}) with dtype {escaped_astype_dtype_expr}: {{e_astype}}''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if shape is not None
         self.emptyLine()
 

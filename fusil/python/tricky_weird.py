@@ -922,6 +922,20 @@ tricky_h5py_names = [
     "h5_dset_for_comparisons_float",
     # Views returned by methods could also be added if "deep diving" is implemented
     # e.g., "h5_dataset_fields_view_from_compound" (though these are harder to pre-define)
+
+# Additions to tricky_h5py_names for Advanced Slicing Arguments & Operations
+    # Datasets suitable for these operations
+    "h5_dset_compound_for_field_slicing",    # A compound dataset from Cat C can be reused or a new one
+    "h5_dset_1d_for_multiblock_slicing",     # A simple 1D dataset, e.g., shape (100,)
+    "h5_dset_2d_for_regionref_slicing",    # A 2D dataset, e.g., shape (50,50)
+
+    # Pre-defined slice argument objects
+    "h5_multiblockslice_simple_valid",       # A valid MultiBlockSlice instance
+    "h5_multiblockslice_error_stride_zero",  # A MultiBlockSlice designed to cause an error
+    "h5_multiblockslice_error_block_gt_stride",
+    "h5_regionref_from_dset_2d_part",      # A RegionReference to a part of h5_dset_2d_for_regionref_slicing
+    "h5_regionref_from_dset_2d_empty",     # A RegionReference to an empty part
+    "h5_regionref_from_dset_scalar",       # A RegionReference on a scalar dataset
 ]
 
 tricky_h5py_code = """
@@ -1801,10 +1815,83 @@ else:
          if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
 
 
+# --- Additions to tricky_h5py_code for Advanced Slicing ---
+# Assumes _h5_main_file, _h5_unique_name, h5py, numpy, uuid, sys are available.
+
+if _h5_main_file:
+    # --- Datasets for Advanced Slicing ---
+    try:
+        _dt_compound_e = numpy.dtype([('id', 'i4'), ('value', 'f8'), ('tag', 'S10', (2,))]) # Array field
+        _data_compound_e = numpy.zeros(20, dtype=_dt_compound_e)
+        for i in range(20): _data_compound_e[i] = (i, i*1.5, [f"tag{i}a".encode(), f"tag{i}b".encode()])
+        h5py_tricky_objects["h5_dset_compound_for_field_slicing"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_comp_slice'), data=_data_compound_e
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_compound_for_field_slicing"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+
+    try:
+        h5py_tricky_objects["h5_dset_1d_for_multiblock_slicing"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_1d_mbs'), data=numpy.arange(100, dtype='i2')
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_1d_for_multiblock_slicing"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+
+    try:
+        h5py_tricky_objects["h5_dset_2d_for_regionref_slicing"] = _h5_main_file.create_dataset(
+            _h5_unique_name('d_2d_regref'), shape=(50,50), dtype='f4', fillvalue=0.0
+        )
+    except Exception as e: h5py_tricky_objects["h5_dset_2d_for_regionref_slicing"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+
+    _dset_scalar_for_regref = _h5_main_file.create_dataset(_h5_unique_name('d_scalar_regref'), data=123.45)
+
+
+    # --- Pre-defined Slice Argument Objects ---
+    try:
+        h5py_tricky_objects["h5_multiblockslice_simple_valid"] = h5py.MultiBlockSlice(start=10, count=5, stride=10, block=3)
+    except Exception as e: h5py_tricky_objects["h5_multiblockslice_simple_valid"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+    try:
+        # These will raise error upon .indices() or use, not necessarily at creation.
+        # The fuzzer will try to use them as slice arguments.
+        h5py_tricky_objects["h5_multiblockslice_error_stride_zero"] = h5py.MultiBlockSlice(stride=0)
+    except Exception as e: h5py_tricky_objects["h5_multiblockslice_error_stride_zero"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+    try:
+        h5py_tricky_objects["h5_multiblockslice_error_block_gt_stride"] = h5py.MultiBlockSlice(stride=2, block=3)
+    except Exception as e: h5py_tricky_objects["h5_multiblockslice_error_block_gt_stride"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+
+    _target_dset_for_ref = h5py_tricky_objects.get("h5_dset_2d_for_regionref_slicing")
+    if _target_dset_for_ref:
+        try:
+            h5py_tricky_objects["h5_regionref_from_dset_2d_part"] = _target_dset_for_ref.regionref[5:15, 10:20]
+        except Exception as e: h5py_tricky_objects["h5_regionref_from_dset_2d_part"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+        try:
+            h5py_tricky_objects["h5_regionref_from_dset_2d_empty"] = _target_dset_for_ref.regionref[5:5, :]
+        except Exception as e: h5py_tricky_objects["h5_regionref_from_dset_2d_empty"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+    else: # Fallbacks
+        h5py_tricky_objects["h5_regionref_from_dset_2d_part"] = None
+        h5py_tricky_objects["h5_regionref_from_dset_2d_empty"] = None
+
+    if _dset_scalar_for_regref:
+        try:
+            # Create a scalar space ID for the reference
+            _scalar_sid = h5py.h5s.create(h5py.h5s.SCALAR)
+            _scalar_sid.select_all() # Select the scalar point
+            h5py_tricky_objects["h5_regionref_from_dset_scalar"] = h5py.h5r.create(_dset_scalar_for_regref.id, b'.', h5py.h5r.DATASET_REGION, _scalar_sid)
+        except Exception as e: h5py_tricky_objects["h5_regionref_from_dset_scalar"] = None; print(f"H5_E_WARN: {e}", file=sys.stderr)
+    else: # Fallback
+        h5py_tricky_objects["h5_regionref_from_dset_scalar"] = None
+
+else:
+    print(f"H5_E_ERROR: _h5_main_file was not created. Cannot add Category E dataset/slice objects.", file=sys.stderr)
+    # Populate relevant keys with None
+    _e_names_to_none = [name for name in tricky_h5py_names if "h5_dset_" in name and ("_for_" in name or "compound_for_" in name) or "h5_multiblockslice_" in name or "h5_regionref_" in name]
+    for _name in _e_names_to_none:
+         if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
+
 
 # Ensure all names in tricky_h5py_names have a corresponding (even if None) entry in h5py_tricky_objects
 for name in tricky_h5py_names:
     if name not in h5py_tricky_objects:
         print(f"H5PY_TRICKY_DEV_WARN: '{name}' was in tricky_h5py_names but not added to h5py_tricky_objects dict. Setting to None.", file=sys.stderr)
         h5py_tricky_objects[name] = None
+    elif h5py_tricky_objects[name] is None:
+        print(f"H5PY_TRICKY_DEV_WARN: '{name}' was in tricky_h5py_names but h5py_tricky_objects[{name}] was None.", file=sys.stderr)
 """
