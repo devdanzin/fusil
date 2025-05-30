@@ -14,8 +14,12 @@ vulnerabilities through unusual type interactions and boundary conditions.
 
 from __future__ import annotations
 
-from random import choice, randint, sample
+from random import choice, randint, random, sample, uniform
 from typing import Callable
+import uuid
+
+import h5py
+import numpy
 
 import fusil.python
 from fusil.bytes_generator import BytesGenerator
@@ -264,6 +268,431 @@ class ArgumentGenerator:
         """Generate a name of a 'tricky' predefined h5py object from tricky_weird."""
         tricky_name = choice(fusil.python.tricky_weird.tricky_h5py_names)
         return [f"h5py_tricky_objects.get('{tricky_name}')"]
+
+    def genH5PyFileMode(self) -> list[str]:
+        modes = ['r', 'r+', 'w', 'w-', 'x', 'a']
+        modes += ["rw", "z", "wa"]
+        return [f"'{choice(modes)}'"]
+
+    def genH5PyFileDriver(self) -> list[str]:
+        drivers = ['core', 'sec2', 'stdio', 'direct', 'split', 'fileobj', None]  # None for default
+        # Add invalid driver names too
+        drivers += ["mydriver", "\\x00"]
+        chosen_driver = choice(drivers)
+        return [f"'{chosen_driver}'" if chosen_driver else "None"]
+
+    def genH5PyLibver(self) -> list[str]:
+        versions = ['earliest', 'latest', 'v108', 'v110', 'v112', 'v114']  # Valid up to HDF5 1.14.x
+        choice_type = randint(0, 2)
+        if choice_type == 0:  # Single string
+            return [f"'{choice(versions)}'"]
+        elif choice_type == 1:  # Tuple
+            low = choice(versions)
+            high = choice(versions)  # Could ensure low <= high logic if desired
+            return [f"('{low}', '{high}')"]
+        else:  # None (default)
+            return ["None"]
+
+    def genH5PyUserblockSize(self) -> list[str]:
+        valid_sizes = [0, 512, 1024, 2048, 4096, 8192]  # 0 means no userblock
+        invalid_sizes = [256, 513, 1000]
+        chosen_size = choice(valid_sizes + invalid_sizes if random() < 0.3 else valid_sizes)
+        return [str(chosen_size)]
+
+    def genH5PyFsStrategyKwargs(self) -> list[str]:
+        kwargs = []
+        strategy = choice(["page", "fsm", "aggregate", "none", "invalid_strat", None])
+        if strategy:
+            kwargs.append(f"fs_strategy='{strategy}'")
+            if strategy == "page":
+                if random() < 0.7: kwargs.append(f"fs_persist={choice([True, False])}")
+                if random() < 0.7: kwargs.append(f"fs_threshold={choice([1, 64, 128, 256])}")
+                if random() < 0.7: kwargs.append(f"fs_page_size={choice([4096, 16384])}")
+                if random() < 0.5:  # Page buffer options
+                    pbs = choice([4096, 16384, 32768])
+                    kwargs.append(f"page_buf_size={pbs}")
+                    # These min_meta_keep/min_raw_keep are percentages 0-100
+                    if random() < 0.5: kwargs.append(f"min_meta_keep={randint(0, 100)}")
+                    if random() < 0.5: kwargs.append(f"min_raw_keep={randint(0, 100)}")
+        return [", ".join(kwargs)] if kwargs else [""]
+
+    def genH5PyLocking(self) -> list[str]:
+        options = [True, False, 'best-effort', 'invalid_lock_opt', None]
+        chosen = choice(options)
+        if isinstance(chosen, str): return [f"'{chosen}'"]
+        return [str(chosen)]
+
+    # In ArgumentGenerator
+    def genH5PyFileDriver_actualval(self) -> str | None:  # Returns the actual string or None
+        drivers = ['core', 'sec2', 'stdio', 'direct', 'split', 'fileobj', None]
+        return choice(drivers)
+
+    def genH5PyFileMode_actualval(self) -> str:
+        modes = ['r', 'r+', 'w', 'w-', 'x', 'a']
+        return choice(modes)
+
+    def gen_h5py_file_name_or_object(self, actual_driver: str | None, actual_mode: str, is_core_backing: bool) -> tuple[
+        str, list[str]]:
+        setup_lines = []
+        if actual_driver == 'fileobj':
+            # Ensure io, tempfile are imported in the generated script
+            name_expr = f"io.BytesIO()"  # Simpler than TemporaryFile for pure in-memory
+        elif actual_driver == 'core' and not is_core_backing:
+            name_expr = f"'mem_core_{uuid.uuid4().hex}'"
+        else:  # Needs a disk path
+            var_name = f"temp_disk_path_{uuid.uuid4().hex[:6]}"
+            # This logic creates a filename string. It doesn't create the file on disk yet.
+            # That's h5py.File's job for 'w' modes. For 'r'/'r+', the file needs to exist.
+            setup_lines.append(f"{var_name}_fd, {var_name} = tempfile.mkstemp(suffix='.h5', prefix='fuzz_')")
+            setup_lines.append(f"os.close({var_name}_fd)")
+            # Critical: For 'r', 'r+' mode, this temp file is empty. h5py.File will fail.
+            # It needs to be a valid (even if empty) HDF5 file, or a specific non-HDF5 file for error testing.
+            if actual_mode in ('r', 'r+'):
+                # This is where it gets complex for dynamic generation.
+                # Easiest is to pre-create a valid HDF5 file and use its path.
+                # Or, for error testing, a non-HDF5 file.
+                # For now, let's assume if we need to read, we're using a pre-made path
+                # from tricky_h5py_code or the fuzzer won't choose r/r+ for random disk paths.
+                # A simpler approach for generation: if r/r+ for disk, make it readable by writing first.
+                setup_lines.append(f"# Path for {var_name} generated; for 'r'/'r+' ensure it's pre-populated if new.")
+                # If we *must* make it valid for 'r'/'r+' here:
+                # setup_lines.append(f"with h5py.File({var_name}, 'w') as pre_f: pre_f.create_group('init')")
+            name_expr = var_name
+            # Track var_name for deletion at end of script if required
+        return name_expr, setup_lines
+
+    # genH5PyDriverKwargs should take actual_driver string
+    def genH5PyDriverKwargs(self, actual_driver_str_val: str | None) -> list[str]:
+        kwargs_parts = []  # e.g., ["backing_store=False", "block_size=1024"]
+        if actual_driver_str_val == 'core':
+            if random() < 0.8:  # High chance to specify backing_store for core
+                bs = choice([True, False])
+                kwargs_parts.append(f"backing_store={bs}")
+                if not bs and random() < 0.5:  # block_size more relevant if no backing for some HDF5 internal things
+                    kwargs_parts.append(f"block_size={choice([512, 4096, 65536])}")
+                elif bs and random() < 0.2:  # Less chance if backing_store=True as it might be ignored
+                    kwargs_parts.append(f"block_size={choice([512, 4096])}")
+
+        # Add other driver specific kwargs for 'direct', etc.
+        # ...
+        return ["", ", ".join(kwargs_parts)][
+            len(kwargs_parts) > 0]  # Returns empty string or ", kwarg1=val1, kwarg2=val2"
+
+    def genH5PySimpleDtype_expr(self) -> str:
+        """Generates a Python expression string for a simple NumPy dtype."""
+        # Focusing on basic types for Category B
+        simple_dtypes = [
+            "'i1'", "'i2'", "'i4'", "'i8'",
+            "'u1'", "'u2'", "'u4'", "'u8'",
+            "'f2'", "'f4'", "'f8'",
+            "'bool'"
+        ]
+        # Add occasional numpy.dtype() wrapping for variety if desired
+        if random() < 0.2:
+            return f"numpy.dtype({choice(simple_dtypes)})"
+        return choice(simple_dtypes)
+
+    def genH5PyDatasetShape_expr(self) -> str:
+        """Generates a Python expression string for a dataset shape."""
+        choice = randint(0, 6)
+        if choice == 0:
+            return "()"  # Scalar
+        elif choice == 1:
+            return "None"  # Null dataspace (requires dtype)
+        elif choice == 2:
+            return f"({randint(0, 5)},)"  # 1D, possibly zero-length
+        elif choice == 3:
+            # 2D, possibly with a zero-length dimension
+            d1 = randint(0, 10)
+            d2 = randint(0, 3) if d1 > 0 and random() < 0.5 else randint(1, 10)
+            return f"({d1}, {d2})"
+        elif choice == 4:
+            # 3D
+            return f"({randint(1, 5)}, {randint(1, 5)}, {randint(1, 5)})"
+        elif choice == 5:
+            return str(randint(1, 20))  # Integer shape for 1D
+        else:  # Higher chance for simple 1D
+            return f"({randint(1, 50)},)"
+
+    def genH5PyData_expr(self, shape_expr_str: str, dtype_expr_str: str) -> str:
+        """Generates a Python expression for dataset data, or None."""
+        choice_int = randint(0, 4)
+        if choice_int == 0:
+            return "None"  # Let h5py initialize or use fillvalue
+        elif choice_int == 1:  # Scalar data (h5py will broadcast if shape allows, or error)
+            dt_val = eval(dtype_expr_str)  # Risky, but for simple types here might be okay
+            if numpy.issubdtype(dt_val, numpy.integer): return str(randint(0, 100))
+            if numpy.issubdtype(dt_val, numpy.floating): return str(round(random() * 100, 2))
+            if numpy.issubdtype(dt_val, numpy.bool_): return choice(["True", "False"])
+            return "None"  # Fallback for other simple types
+        elif choice_int == 2:  # h5py.Empty
+            return f"h5py.Empty(dtype={dtype_expr_str})"
+        elif choice_int == 3 and shape_expr_str != "None" and shape_expr_str != "()":
+            # Attempt to create a compatible numpy array
+            # This is complex to make perfectly compatible via string generation.
+            # Simplification: small arange if 1D, otherwise zeros.
+            try:
+                shape_val = eval(shape_expr_str)
+                if isinstance(shape_val, int): shape_val = (shape_val,)  # Make tuple
+                if isinstance(shape_val, tuple) and len(shape_val) > 0 and all(isinstance(d, int) for d in shape_val):
+                    if len(shape_val) == 1 and shape_val[0] < 200 and shape_val[0] >= 0:  # only for small 1D
+                        return f"numpy.arange({shape_val[0]}, dtype={dtype_expr_str})"
+                    # else: return f"numpy.zeros({shape_expr_str}, dtype={dtype_expr_str})" # For N-D
+            except:
+                pass  # If shape_expr_str is not eval-able or complex
+            return f"numpy.zeros({shape_expr_str}, dtype={dtype_expr_str})" if shape_expr_str != "None" else "None"
+
+        return "None"  # Default
+
+    def genH5PyDatasetChunks_expr(self, shape_expr_str: str) -> str:
+        """Generates a Python expression for dataset chunks."""
+        choice = randint(0, 4)
+        if choice == 0:
+            return "True"  # Auto-chunk
+        elif choice == 1:
+            return "None"  # Contiguous (or error if maxshape set)
+        elif choice == 2:  # Explicit chunks
+            try:
+                # Attempt to make somewhat valid chunks based on shape
+                shape_val = eval(shape_expr_str)
+                if isinstance(shape_val, int): shape_val = (shape_val,)
+                if isinstance(shape_val, tuple) and all(isinstance(d, int) and d > 0 for d in shape_val):
+                    chunks = tuple(max(1, d // randint(1, 4)) for d in shape_val)
+                    return str(chunks)
+                elif isinstance(shape_val, tuple) and any(d == 0 for d in shape_val):  # Has zero dim
+                    return "None"  # Cannot chunk if a dim is zero
+            except:
+                pass  # Fallback if shape_expr is weird
+            return f"({randint(1, 10)},)"  # Fallback simple chunk
+        elif choice == 3:
+            return "False"  # Can cause ValueError if maxshape is also set
+        else:  # Invalid chunk tuple (e.g., too many dims, or larger than shape)
+            return f"({randint(100, 200)}, {randint(100, 200)})"
+
+    def genH5PyFillvalue_expr(self, dtype_expr_str: str) -> str:
+        """Generates a Python expression for a fillvalue compatible with simple dtypes."""
+        try:
+            # This eval is to determine the kind of dtype for generating a compatible fillvalue
+            # It's used locally and doesn't go into the final generated script if it fails.
+            dt_val = eval(dtype_expr_str)
+            if numpy.issubdtype(dt_val, numpy.integer):
+                return str(randint(-100, 100))
+            elif numpy.issubdtype(dt_val, numpy.floating):
+                return choice([str(round(uniform(-100, 100), 2)), "numpy.nan", "numpy.inf", "-numpy.inf"])
+            elif numpy.issubdtype(dt_val, numpy.bool_):
+                return choice(["True", "False"])
+        except:
+            pass  # Fallback if dtype_expr_str is complex or not recognized
+        return "None"  # Let h5py use default
+
+    def genH5PyFillTime_expr(self) -> str:
+        """Generates a Python expression for dataset fill_time."""
+        options = ['ifset', 'never', 'alloc', 'invalid_fill_time_option']
+        return f"'{choice(options)}'"
+
+    def genH5PyMaxshape_expr(self, shape_expr_str: str) -> str:
+        """Generates a Python expression for dataset maxshape."""
+        choice = randint(0, 3)
+        if choice == 0:
+            return "None"  # Unlimited on all axes implied by current shape
+
+        try:
+            # Try to make a maxshape compatible with or larger than shape_expr_str
+            shape_val = eval(shape_expr_str)
+            if isinstance(shape_val, int): shape_val = (shape_val,)
+
+            if isinstance(shape_val, tuple) and all(isinstance(d, int) for d in shape_val):
+                maxs = []
+                for dim_size in shape_val:
+                    axis_choice = randint(0, 2)
+                    if axis_choice == 0:
+                        maxs.append("None")
+                    elif axis_choice == 1:
+                        maxs.append(str(dim_size + randint(0, 10)))
+                    else:
+                        maxs.append(str(dim_size))  # Same as shape
+                return f"({', '.join(maxs)}{',' if len(maxs) == 1 else ''})"  # Ensure tuple format
+        except:
+            pass  # Fallback if shape_expr_str is weird
+
+        if shape_expr_str != "None" and shape_expr_str != "()":
+            # Fallback: make one axis unlimited
+            return f"(None, {randint(1, 10)})" if "()," in shape_expr_str or "," in shape_expr_str else "(None,)"
+        return "None"
+
+    def genH5PyTrackTimes_expr(self) -> str:
+        """Generates a Python expression for dataset track_times."""
+        options = [True, False, "'invalid_track_times_val'"]
+        return str(choice(options))
+
+    def genH5PyCompressionKwargs_expr(self) -> list[str]:  # Returns list of "kwarg=value" strings
+        """Generates Python expressions for compression related kwargs."""
+        kwargs_list = []
+
+        # Choose compression algorithm
+        if random() < 0.7:  # 70% chance to apply some compression/filter
+            comp_choice = randint(0, 5)
+            if comp_choice == 0 and 'gzip' in h5py.filters.encode:
+                kwargs_list.append("compression='gzip'")
+                if random() < 0.5:  # Chance to add opts
+                    kwargs_list.append(f"compression_opts={randint(0, 9)}")
+            elif comp_choice == 1 and 'lzf' in h5py.filters.encode:
+                kwargs_list.append("compression='lzf'")
+            # Szip can be problematic if not available, skip for now unless specifically targeted
+            # elif comp_choice == 2 and 'szip' in h5py.filters.encode:
+            #     kwargs_list.append("compression='szip'")
+            #     opts = choice([('ec', 8), ('nn', 16)]) # Example opts
+            #     kwargs_list.append(f"compression_opts={opts}")
+            elif comp_choice == 3:  # Generic integer filter ID
+                kwargs_list.append(
+                    f"compression={choice([1, h5py.h5z.FILTER_DEFLATE, 257])}")  # 257 for testing allow_unknown
+                if random() < 0.3: kwargs_list.append("allow_unknown_filter=True")
+                if "FILTER_DEFLATE" in kwargs_list[-1]:  # if gzip by ID
+                    kwargs_list.append(f"compression_opts=({randint(0, 9)},)")
+
+            # Add other filters randomly, these can be combined with compression or used alone
+            if random() < 0.4 and 'shuffle' in h5py.filters.encode:
+                kwargs_list.append(f"shuffle={choice([True, False])}")
+
+            if random() < 0.3 and 'fletcher32' in h5py.filters.encode:
+                kwargs_list.append(f"fletcher32={choice([True, False])}")
+
+            if random() < 0.3 and 'scaleoffset' in h5py.filters.encode:
+                # scaleoffset needs chunks. Ensure chunks=True is passed if this is chosen,
+                # or that this kwarg is only added if chunks are already enabled.
+                # For now, just generate it; caller must ensure chunking if using scaleoffset.
+                so_val = choice(
+                    [True, randint(0, 16)])  # Bool for auto-int, or nbits for int, or factor for float
+                kwargs_list.append(f"scaleoffset={so_val}")
+
+        return kwargs_list
+
+    # In ArgumentGenerator
+    def genH5PyVlenDtype_expr(self) -> str:
+        base_dtypes = ["numpy.int16", "numpy.float32", "numpy.bool_", "h5py.string_dtype(encoding='ascii')"]
+        return f"h5py.vlen_dtype({choice(base_dtypes)})"
+
+    def genH5PyEnumDtype_expr(self) -> str:
+        base_types = ["'i1'", "'u2'", "numpy.intc"]
+        enum_dict_str = str(
+            {f"VAL_{chr(65 + i)}": i for i in range(randint(2, 5))})  # E.g. "{'VAL_A':0, 'VAL_B':1}"
+        return f"h5py.enum_dtype({enum_dict_str}, basetype={choice(base_types)})"
+
+    def genH5PyCompoundDtype_expr(self) -> str:
+        # This is simplified. A robust version would build more complex structures.
+        fields = []
+        num_fields = randint(1, 3)
+        for i in range(num_fields):
+            fname = f"'field_{i}_{uuid.uuid4().hex[:4]}'"
+            ftype_choice = randint(0, 3)
+            if ftype_choice == 0:
+                ftype = self.genH5PySimpleDtype_expr()
+            elif ftype_choice == 1:
+                ftype = self.genH5PyVlenDtype_expr()  # Can be nested
+            elif ftype_choice == 2:
+                ftype = f"'{choice(['S', 'U'])}{randint(5, 15)}'"  # Fixed string
+            else:
+                ftype = "'(2,)i4'"  # Array field
+            fields.append(f"({fname}, {ftype})")
+        return f"numpy.dtype([{', '.join(fields)}])"
+
+    def genH5PyComplexDtype_expr(self) -> str:  # Top-level chooser
+        options = [
+            self.genH5PySimpleDtype_expr,
+            lambda: f"h5py.string_dtype(encoding='{choice(['ascii', 'utf-8'])}', length={choice([None, 5, 20])})",
+            self.genH5PyVlenDtype_expr,
+            self.genH5PyEnumDtype_expr,
+            self.genH5PyCompoundDtype_expr,
+            lambda: f"'({randint(2, 5)},)i2'",  # Simple array dtype
+            lambda: "h5py.ref_dtype",
+            lambda: "h5py.regionref_dtype"
+        ]
+        # Add chance to pick from committed types (if names are known to AG)
+        # if h5py_tricky_objects_committed_type_names:
+        #    options.append(lambda: f"_h5_main_file['{choice(h5py_tricky_objects_committed_type_names)}']")
+        return choice(options)()
+
+
+    def genH5PySliceForDirectIO_expr(self, dataset_rank: int) -> str:
+        """Generates a slice expression string for read_direct/write_direct."""
+        if random() < 0.2: return "None"
+        if random() < 0.2: return "numpy.s_[...]"  # Ellipsis
+
+        slices = []
+        for _ in range(int(dataset_rank)):
+            choice = randint(0, 3)
+            if choice == 0:
+                slices.append(":")  # Full slice for this axis
+            elif choice == 1:
+                slices.append(str(randint(0, 5)))  # Single index
+            else:  # start:stop or start:stop:step
+                start = randint(0, 10)
+                stop = start + randint(1, 10)
+                if random() < 0.3:  # chance for step
+                    step = choice([1, 2, 3, -1, -2])
+                    slices.append(f"{start}:{stop}:{step}")
+                else:
+                    slices.append(f"{start}:{stop}")
+        return f"numpy.s_[{', '.join(slices)}]"
+
+    def genH5PySliceForDirectIO_expr_runtime(self, rank_variable_name_in_script: str) -> str:
+        """
+        Generates a Python expression string that, when executed, calls a helper
+        to create a slice tuple based on the runtime rank.
+        Args:
+            rank_variable_name_in_script: The string name of the variable in the
+                                          generated script that will hold the rank.
+        Returns:
+            A string like "_fusil_h5_create_dynamic_slice_for_rank(actual_rank_var)"
+        """
+        # Small chance to return simple generic slices directly, bypassing the helper
+        if random() < 0.1:
+            return "None"
+        if random() < 0.1:
+            return "numpy.s_[...]"  # Requires numpy to be imported as numpy in generated script
+        if random() < 0.05:
+            return "()"
+
+        # Default case: call the runtime helper
+        return f"_fusil_h5_create_dynamic_slice_for_rank({rank_variable_name_in_script})"
+
+    def genNumpyArrayForDirectIO_expr(self, array_shape_expr: str, dtype_expr: str,
+                                      allow_non_contiguous: bool = True) -> str:
+        """Generates a numpy array expression for read_direct (dest) or write_direct (source)."""
+        # This needs to create an array that is compatible in size with the selection.
+        # For simplicity, assume array_shape_expr is like "(5,5)" or "10"
+        # This is a placeholder; a robust version needs to calculate size from selection.
+        order_opt = ""
+        if allow_non_contiguous and random() < 0.2:
+            order_opt = ", order='F'"
+
+        # Try to create a compatible array. This is complex if shape is from a slice.
+        # For now, let's generate a small, simple array, assuming compatibility is handled by test case.
+        # A better approach would be to get the *actual shape value* from the slice to make a compatible array.
+        if random() < 0.5:
+            return f"numpy.arange(10, dtype={dtype_expr}).reshape(2,5){order_opt}"  # Example fixed size
+        else:
+            return f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, fill_value={self.genH5PyFillvalue_expr(dtype_expr)}, dtype={dtype_expr}{order_opt})"
+
+    def genH5PyAsTypeDtype_expr(self) -> str:  # Can reuse existing dtype generators
+        return self.genH5PyComplexDtype_expr() if random() < 0.5 else self.genH5PySimpleDtype_expr()
+
+    def genH5PyAsStrEncoding_expr(self) -> str:
+        encodings = ['ascii', 'utf-8', 'latin-1', 'utf-16', 'cp1252', 'invalid_encoding_fuzz']
+        return f"'{choice(encodings)}'"
+
+    def genH5PyAsStrErrors_expr(self) -> str:
+        errors = ['strict', 'ignore', 'replace', 'xmlcharrefreplace', 'bogus_error_handler']
+        return f"'{choice(errors)}'"
+
+    def genNumpyValueForComparison_expr(self, dataset_dtype_expr_str: str) -> str:
+        # Generate a scalar or small array for comparison
+        # This can reuse parts of genH5PyFillvalue_expr or genH5PyData_expr logic
+        # to create a compatible value.
+        if random() < 0.7:  # Scalar
+            return self.genH5PyFillvalue_expr(dataset_dtype_expr_str)  # Good enough for a scalar
+        else:  # Small array
+            return f"numpy.array([{self.genH5PyFillvalue_expr(dataset_dtype_expr_str)}, {self.genH5PyFillvalue_expr(dataset_dtype_expr_str)}], dtype={dataset_dtype_expr_str})"
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""
