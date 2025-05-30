@@ -263,6 +263,7 @@ class WritePythonCode(WriteCode):
             dedent(
                 """\
                 from gc import collect
+                from random import choice, randint, random
                 from sys import stderr, path as sys_path
                 from os.path import dirname
                 import inspect
@@ -283,7 +284,7 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         # In WritePythonCode, when writing the preamble of the generated script:
 
-        self.write(0, "import random  # For the dynamic slice helper")
+        # self.write(0, "import random  # For the dynamic slice helper")
         self.write(0, "import numpy   # For numpy.s_ in the dynamic slice helper, if used directly")
         self.emptyLine()
         self.write(0, dedent(
@@ -292,7 +293,7 @@ class WritePythonCode(WriteCode):
                 # ""\"Generates a slice tuple suitable for a dataset of given rank_value.""\"
                 if rank_value is None: # Could be for null dataspace or if shape fetch failed
                     # Return a generic slice or an ellipsis for such cases
-                    return random.choice([numpy.s_[...], slice(None), ()])
+                    return choice([numpy.s_[...], slice(None), ()])
 
                 if not isinstance(rank_value, int) or rank_value < 0:
                     # Fallback for unexpected rank_value input
@@ -300,7 +301,7 @@ class WritePythonCode(WriteCode):
 
                 if rank_value == 0: # Scalar dataset
                     # Common ways to slice scalars: (), ...
-                    return random.choice([(), numpy.s_[...]])
+                    return choice([(), numpy.s_[...]])
 
                 # For rank > 0, generate a tuple of slice components
                 slice_components = []
@@ -308,29 +309,29 @@ class WritePythonCode(WriteCode):
                 # Usually same as rank, but could be less (e.g., for d[0] on 2D array)
                 # or more (h5py might truncate or error). Let's try for same as rank mostly.
                 num_dims_to_slice = rank_value
-                if random.random() < 0.1: # Small chance to use fewer slice components
-                    num_dims_to_slice = random.randint(1, max(1, rank_value))
+                if random() < 0.1: # Small chance to use fewer slice components
+                    num_dims_to_slice = randint(1, max(1, rank_value))
 
                 for i in range(num_dims_to_slice):
-                    choice = random.randint(0, 6)
-                    if choice == 0:
+                    choice_int = randint(0, 6)
+                    if choice_int == 0:
                         slice_components.append(slice(None))  # ':'
-                    elif choice == 1:
+                    elif choice_int == 1:
                         # Sensible index: 0, 1, or relative to end if rank_value and current dim size were known
                         # Since we only have rank, let's keep indices small
-                        slice_components.append(random.randint(0, 3))
-                    elif choice == 2: # start:stop
-                        s = random.randint(0, 2)
-                        e = s + random.randint(1, 3)
+                        slice_components.append(randint(0, 3))
+                    elif choice_int == 2: # start:stop
+                        s = randint(0, 2)
+                        e = s + randint(1, 3)
                         slice_components.append(slice(s, e))
-                    elif choice == 3: # :stop
-                        slice_components.append(slice(None, random.randint(1, 4)))
-                    elif choice == 4: # start:
-                        slice_components.append(slice(random.randint(0, 2), None))
-                    elif choice == 5: # start:stop:step
-                        s = random.randint(0, 2)
-                        e = s + random.randint(2, 5)
-                        st = random.choice([-2, -1, 1, 2, 3])
+                    elif choice_int == 3: # :stop
+                        slice_components.append(slice(None, randint(1, 4)))
+                    elif choice_int == 4: # start:
+                        slice_components.append(slice(randint(0, 2), None))
+                    elif choice_int == 5: # start:stop:step
+                        s = randint(0, 2)
+                        e = s + randint(2, 5)
+                        st = choice([-2, -1, 1, 2, 3])
                         if st == 0: st = 1 # step cannot be 0
                         slice_components.append(slice(s, e, st))
                     else: # Ellipsis (can appear once)
@@ -350,6 +351,67 @@ class WritePythonCode(WriteCode):
             """
         ))
         self.emptyLine()
+        self.write(0, dedent(f"""\
+            def _fusil_h5_get_link_target_in_file(parent_group_obj, predefined_tricky_objects, runtime_objects):
+                # ""\"Attempts to find a suitable existing Dataset or Group in the same file as parent_group_obj.
+                # Used as a target for creating hard links.
+                # ""\"
+                if not parent_group_obj or not hasattr(parent_group_obj, 'file'):
+                    return None # Parent group is invalid
+
+                target_file_id = parent_group_obj.file.id
+                candidates = []
+
+                # Strategy 1: Direct children of the parent group
+                try:
+                    if len(parent_group_obj) > 0:
+                        child_name = choice(list(parent_group_obj.keys()))
+                        child_obj = parent_group_obj.get(child_name) # Resolve link if it is one
+                        if isinstance(child_obj, (h5py.Group, h5py.Dataset)):
+                            candidates.append(child_obj)
+                except Exception:
+                    pass # Ignore errors during candidate search
+
+                # Strategy 2: Top-level items in the same file
+                try:
+                    if len(parent_group_obj.file) > 0:
+                        root_item_name = choice(list(parent_group_obj.file.keys()))
+                        root_item_obj = parent_group_obj.file.get(root_item_name)
+                        if isinstance(root_item_obj, (h5py.Group, h5py.Dataset)):
+                            candidates.append(root_item_obj)
+                except Exception:
+                    pass
+
+                # Strategy 3: Items from predefined_tricky_objects if they are in the same file
+                try:
+                    for obj_name, obj in predefined_tricky_objects.items():
+                        if obj is not None and hasattr(obj, 'file') and hasattr(obj.file, 'id') and obj.file.id == target_file_id:
+                            if isinstance(obj, (h5py.Group, h5py.Dataset)):
+                                candidates.append(obj)
+                        if len(candidates) > 20: break # Limit search
+                except Exception:
+                    pass
+
+                # Strategy 4: Items from runtime_objects if they are in the same file
+                try:
+                    for obj_name, obj in runtime_objects.items():
+                        if obj is not None and hasattr(obj, 'file') and hasattr(obj.file, 'id') and obj.file.id == target_file_id:
+                            if isinstance(obj, (h5py.Group, h5py.Dataset)):
+                                candidates.append(obj)
+                        if len(candidates) > 40: break # Limit search
+                except Exception:
+                    pass
+
+                if candidates:
+                    return choice(candidates)
+
+                # Fallback: the root group of the parent's file, or parent itself if it's not root
+                if parent_group_obj.name != '/':
+                    return parent_group_obj 
+                return parent_group_obj.file['/'] # Root group as ultimate fallback
+        """))
+        self.emptyLine()
+        
 
     def _write_tricky_definitions(self) -> None:
         """Writes definitions for 'tricky' classes and objects."""
@@ -556,41 +618,50 @@ class WritePythonCode(WriteCode):
         is_h5py_file = is_h5py_type and class_name_str == "File" # Or issubclass(class_type, h5py.File)
         is_h5py_dataset = is_h5py_type and class_name_str == "Dataset" # Or issubclass(class_type, h5py.Dataset)
 
-        instance_var_name = f"instance_c{class_idx}_{class_name_str.lower()}"  # Make unique and descriptive
+        instance_var_name = f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
 
         if is_h5py_file:
-            # Your existing logic for calling _write_h5py_file_creation_call()
-            # Ensure it defines a variable like 'new_file_obj' that you can then assign
-            # to instance_var_name or use directly.
-            # From your diff, it seems _write_h5py_file() defines 'new_file_obj'
-            self._write_h5py_file()  # This was your name from the diff, assuming it sets 'new_file_obj'
-            self.write(0, f"{instance_var_name} = new_file_obj")  # Assign to the common instance_var_name
-            self.emptyLine()
-
+            # Defines 'new_file_obj' in the generated script
+            self._write_h5py_file()  # This was name from user's diff
+            self.write(0, f"{instance_var_name} = new_file_obj")
         elif is_h5py_dataset:
-            # For Dataset, we need a parent (File or Group).
-            # Simplest: use _h5_main_file (must be defined in generated script's global scope by tricky_h5py_code)
-            # Or, pick a random existing File/Group from h5py_tricky_objects or h5py_runtime_objects.
-
-            # For now, using _h5_main_file for simplicity. A more advanced picker could be added.
-            parent_obj_expr_str = "_h5_main_file"
-            dataset_name_expr_str = f"{_h5_unique_name('runtime_ds_c')}"  # Ensure _h5_unique_name is available or use uuid
-
-            self.write(0, f"# Conditionally creating h5py.Dataset {dataset_name_expr_str} on {parent_obj_expr_str}")
+            parent_obj_expr_str = "_h5_main_file"  # Or pick dynamically
+            dataset_name_expr_str = f"'{_h5_unique_name(f'ds_{prefix}')}'"
             self.write(0, f"if {parent_obj_expr_str} and hasattr({parent_obj_expr_str}, 'create_dataset'):")
             self.addLevel(1)
-            self.write(0, f"{instance_var_name} = None # Initialize before try")
+            self.write(0, f"{instance_var_name} = None")  # Init
             self._write_h5py_dataset_creation_call(parent_obj_expr_str, dataset_name_expr_str, instance_var_name)
-            self.restoreLevel(self.base_level - 1)  # Exit if
+            self.restoreLevel(self.base_level - 1)
             self.write(0, "else:")
             self.addLevel(1)
             self.write_print_to_stderr(0,
-                                       f'"Skipping dynamic Dataset creation for {instance_var_name} as parent HDF5 file/group ({parent_obj_expr_str}) is not available/valid."')
+                                       f"f'Skipping dynamic Dataset creation for {instance_var_name} as parent is unavailable.'")
             self.write(0, f"{instance_var_name} = None")
-            self.restoreLevel(self.base_level - 1)  # Exit else
-            self.emptyLine()
-
-        else:  # Original logic for other classes (from your diff, slightly adapted for clarity)
+            self.restoreLevel(self.base_level - 1)
+        elif is_h5py_type and class_name_str == "Group":  # Special handling for creating Groups
+            parent_obj_expr_str = "_h5_main_file"  # Or pick dynamically
+            group_name_expr_str = f"'''{_h5_unique_name(f'grp_{prefix}')} '''"
+            self.write(0, f"if {parent_obj_expr_str} and hasattr({parent_obj_expr_str}, 'create_group'):")
+            self.addLevel(1)
+            self.write(0, f"{instance_var_name} = None")  # Init
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{instance_var_name} = {parent_obj_expr_str}.create_group({group_name_expr_str})")
+            self.write(0, f"h5py_runtime_objects[{group_name_expr_str.strip(chr(39))}] = {instance_var_name}")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, "except Exception as e_grp_create:")
+            self.addLevel(1)
+            self.write(0, f"{instance_var_name} = None")
+            self.write_print_to_stderr(0, f"f'Failed to create group {group_name_expr_str}: {{e_grp_create}}'")
+            self.restoreLevel(self.base_level - 1)
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, "else:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0,
+                                       f"f'Skipping dynamic Group creation for {instance_var_name} as parent is unavailable.'")
+            self.write(0, f"{instance_var_name} = None")
+            self.restoreLevel(self.base_level - 1)
+        else:  # Generic class instantiation
             num_constructor_args = class_arg_number(class_name_str, class_type)
             self.write(0, f"{instance_var_name} = None # Initialize instance variable")
             self.write(0, "try:")
@@ -613,6 +684,25 @@ class WritePythonCode(WriteCode):
             self.write(0, f"{instance_var_name} = None")
             self.restoreLevel(self.base_level - 1)  # Exit except's indentation
             self.emptyLine()
+
+        # Now, dispatch fuzzing on the created instance_var_name
+        self._dispatch_fuzz_on_instance(
+            current_prefix=f"{prefix}_{class_name_str.lower()}_ops",  # e.g., "c0_file_ops", "c1_dataset_ops"
+            target_obj_expr_str=instance_var_name,
+            class_name_hint=class_name_str,
+            generation_depth=0,
+        )
+
+        # Cleanup for the instance variable created in this scope (if it wasn't None already)
+        # Note: _dispatch_fuzz_on_instance does not delete the object it's passed.
+        # self.write(0, f"if '{instance_var_name}' in locals() and {instance_var_name} is not None:")
+        # self.addLevel(1)
+        # self.write(0, f"try: del {instance_var_name}")
+        # self.write(0, f"except NameError: pass")  # Should not happen with check above but defensive
+        # self.restoreLevel(self.base_level - 1)
+        # self.write_print_to_stderr(0, f'"GC after _fuzz_one_class for {class_name_str}"')
+        # self.write(0, "collect()")
+        # self.emptyLine()
 
         # Common logic: if instance_var_name was successfully created, fuzz its methods
         # Inside _fuzz_one_class, after instance_var_name is potentially defined:
@@ -679,10 +769,10 @@ class WritePythonCode(WriteCode):
         self.write(0, f"{ctx_p}_rank = len({ctx_p}_shape) if {ctx_p}_shape is not None else 0")
         self.write(0, f"{ctx_p}_is_empty_dataspace = h5py._hl.base.is_empty_dataspace({ctx_p}_target_dset.id)")
         self.write_print_to_stderr(0,
-                                   f"f'''DS_OP_CTX ({dset_name_for_log}): Shape={{ {ctx_p}_shape }}, Dtype={{ {ctx_p}_dtype_str }}, Chunked={{ {ctx_p}_is_chunked }}, Scalar={{ {ctx_p}_is_scalar }}'''")
+                                   f"f'''DS_OP_CTX ({dset_name_for_log}): Shape={{ {ctx_p}_shape }}, Dtype={{ {ctx_p}_dtype_str }}, Chunked={{ {ctx_p}_is_chunked }}, Scalar={{ {ctx_p}_is_scalar }} '''")
         self.restoreLevel(self.base_level - 1)  # Exit try
         self.write(0,
-                   f"except Exception as e_op_ctx: print(f'''DS_OP_CTX_ERR ({dset_name_for_log}): {{e_op_ctx}}''', file=sys.stderr)")
+                   f"except Exception as e_op_ctx: print(f'''DS_OP_CTX_ERR ({dset_name_for_log}): {{e_op_ctx}} ''', file=sys.stderr)")
         self.emptyLine()
 
         # --- Advanced Slicing Operations ---
@@ -772,23 +862,23 @@ class WritePythonCode(WriteCode):
                                 "scaleoffset", "maxshape", "file", "parent"]
         for prop_name in properties_to_access:
             self.write(0,
-                       f"try: print(f'''DS_PROP ({dset_name_for_log}): .{prop_name} = {{repr(getattr({ctx_p}_target_dset, '{prop_name}'))}}''', file=sys.stderr)")
+                       f"try: print(f'''DS_PROP ({dset_name_for_log}): .{prop_name} = {{repr(getattr({ctx_p}_target_dset, '{prop_name}'))}} ''', file=sys.stderr)")
             self.write(0,
-                       f"except Exception as e_prop: print(f'''DS_PROP_ERR ({dset_name_for_log}) .{prop_name}: {{e_prop}}''', file=sys.stderr)")
+                       f"except Exception as e_prop: print(f'''DS_PROP_ERR ({dset_name_for_log}) .{prop_name}: {{e_prop}} ''', file=sys.stderr)")
         self.emptyLine()
 
         # Call len()
         self.write(0,
-                   f"try: print(f'''DS_LEN ({dset_name_for_log}): len = {{len({ctx_p}_target_dset)}}''', file=sys.stderr)")
+                   f"try: print(f'''DS_LEN ({dset_name_for_log}): len = {{len({ctx_p}_target_dset)}} ''', file=sys.stderr)")
         self.write(0,
-                   f"except Exception as e_len: print(f'''DS_LEN_ERR ({dset_name_for_log}): {{e_len}}''', file=sys.stderr)")
+                   f"except Exception as e_len: print(f'''DS_LEN_ERR ({dset_name_for_log}): {{e_len}} ''', file=sys.stderr)")
         self.emptyLine()
 
         # Call repr()
         self.write(0,
-                   f"try: print(f'''DS_REPR ({dset_name_for_log}): repr = {{repr({ctx_p}_target_dset)}}''', file=sys.stderr)")
+                   f"try: print(f'''DS_REPR ({dset_name_for_log}): repr = {{repr({ctx_p}_target_dset)}} ''', file=sys.stderr)")
         self.write(0,
-                   f"except Exception as e_repr_op: print(f'''DS_REPR_ERR ({dset_name_for_log}): {{e_repr_op}}''', file=sys.stderr)")
+                   f"except Exception as e_repr_op: print(f'''DS_REPR_ERR ({dset_name_for_log}): {{e_repr_op}} ''', file=sys.stderr)")
         self.emptyLine()
 
         # Call .astype()
@@ -802,20 +892,20 @@ class WritePythonCode(WriteCode):
             self.write(0, f"{ctx_p}_astype_view = {ctx_p}_target_dset.astype({astype_dtype_expr})")
             escaped_astype_dtype_expr = "{" + astype_dtype_expr + "}"
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASTYPE ({dset_name_for_log}): view created with dtype {escaped_astype_dtype_expr}. View repr: {{repr({ctx_p}_astype_view)}}'''")
+                                       f"f'''DS_ASTYPE ({dset_name_for_log}): view created with dtype {escaped_astype_dtype_expr}. View repr: {{repr({ctx_p}_astype_view)}} '''")
             self.write(0,
                        f"if not {ctx_p}_is_scalar and {ctx_p}_shape and product({ctx_p}_shape) > 0 :")  # product from h5py._hl.base
             self.addLevel(1)
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASTYPE ({dset_name_for_log}): first elem = {{repr({ctx_p}_astype_view[tuple(0 for _ in range({ctx_p}_rank))])}}'''")
+                                       f"f'''DS_ASTYPE ({dset_name_for_log}): first elem = {{repr({ctx_p}_astype_view[tuple(0 for _ in range({ctx_p}_rank))])}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit if not scalar
             self.write(0,
                        f"{ctx_p}_arr_from_astype = numpy.array({ctx_p}_astype_view)")  # Try converting to numpy array
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASTYPE ({dset_name_for_log}): converted to numpy array with shape {{ {ctx_p}_arr_from_astype.shape }}'''")
+                                       f"f'''DS_ASTYPE ({dset_name_for_log}): converted to numpy array with shape {{ {ctx_p}_arr_from_astype.shape }} '''")
             self.restoreLevel(self.base_level - 1)  # Exit try for astype
             self.write(0,
-                       f"except Exception as e_astype: print(f'''DS_ASTYPE_ERR ({dset_name_for_log}) with dtype {escaped_astype_dtype_expr}: {{e_astype}}''', file=sys.stderr)")
+                       f"except Exception as e_astype: print(f'''DS_ASTYPE_ERR ({dset_name_for_log}) with dtype {escaped_astype_dtype_expr}: {{e_astype}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if shape is not None
         self.emptyLine()
 
@@ -831,18 +921,18 @@ class WritePythonCode(WriteCode):
             self.write(0,
                        f"{ctx_p}_asstr_view = {ctx_p}_target_dset.asstr(encoding={asstr_enc_expr}, errors={asstr_err_expr})")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASSTR ({dset_name_for_log}): view created with enc {asstr_enc_expr}, err {asstr_err_expr}. View repr: {{repr({ctx_p}_asstr_view)}}'''")
+                                       f"f'''DS_ASSTR ({dset_name_for_log}): view created with enc {asstr_enc_expr}, err {asstr_err_expr}. View repr: {{repr({ctx_p}_asstr_view)}} '''")
             self.write(0, f"if not {ctx_p}_is_scalar and {ctx_p}_shape and product({ctx_p}_shape) > 0:")
             self.addLevel(1)
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASSTR ({dset_name_for_log}): first elem = {{repr({ctx_p}_asstr_view[tuple(0 for _ in range({ctx_p}_rank))])}}'''")
+                                       f"f'''DS_ASSTR ({dset_name_for_log}): first elem = {{repr({ctx_p}_asstr_view[tuple(0 for _ in range({ctx_p}_rank))])}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit if not scalar
             self.write(0, f"{ctx_p}_arr_from_asstr = numpy.array({ctx_p}_asstr_view)")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ASSTR ({dset_name_for_log}): converted to numpy array with shape {{ {ctx_p}_arr_from_asstr.shape }}'''")
+                                       f"f'''DS_ASSTR ({dset_name_for_log}): converted to numpy array with shape {{ {ctx_p}_arr_from_asstr.shape }} '''")
             self.restoreLevel(self.base_level - 1)  # Exit try for asstr
             self.write(0,
-                       f"except Exception as e_asstr: print(f'''DS_ASSTR_ERR ({dset_name_for_log}) with enc {asstr_enc_expr}: {{e_asstr}}''', file=sys.stderr)")
+                       f"except Exception as e_asstr: print(f'''DS_ASSTR_ERR ({dset_name_for_log}) with enc {asstr_enc_expr}: {{e_asstr}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if is_string_like
         self.emptyLine()
 
@@ -861,16 +951,16 @@ class WritePythonCode(WriteCode):
                        f"if random() < 0.5: field_to_access = list(sample(field_names_tuple, k=min(len(field_names_tuple), randint(1,2))))")  # List of fields
             self.write(0, f"{ctx_p}_fields_view = {ctx_p}_target_dset.fields(field_to_access)")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_FIELDS ({dset_name_for_log}): view for {{field_to_access}}. View repr: {{repr({ctx_p}_fields_view)}}'''")
+                                       f"f'''DS_FIELDS ({dset_name_for_log}): view for {{field_to_access}}. View repr: {{repr({ctx_p}_fields_view)}} '''")
             self.write(0, f"if not {ctx_p}_is_scalar and {ctx_p}_shape and product({ctx_p}_shape) > 0:")
             self.addLevel(1)
             self.write_print_to_stderr(0,
-                                       f"f'''DS_FIELDS ({dset_name_for_log}): first elem = {{repr({ctx_p}_fields_view[tuple(0 for _ in range({ctx_p}_rank))])}}'''")
+                                       f"f'''DS_FIELDS ({dset_name_for_log}): first elem = {{repr({ctx_p}_fields_view[tuple(0 for _ in range({ctx_p}_rank))])}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit if not scalar
             self.restoreLevel(self.base_level - 1)  # Exit if field_names_tuple
             self.restoreLevel(self.base_level - 1)  # Exit try for fields
             self.write(0,
-                       f"except Exception as e_fields: print(f'''DS_FIELDS_ERR ({dset_name_for_log}): {{e_fields}}''', file=sys.stderr)")
+                       f"except Exception as e_fields: print(f'''DS_FIELDS_ERR ({dset_name_for_log}): {{e_fields}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if is_compound
         self.emptyLine()
 
@@ -896,10 +986,10 @@ class WritePythonCode(WriteCode):
             self.write(0, f"if {ctx_p}_chunk_count > {randint(5, 20)}: break")
             self.restoreLevel(self.base_level - 1)  # Exit for loop
             self.write_print_to_stderr(0,
-                                       f"f'''DS_ITER_CHUNKS ({dset_name_for_log}): iterated {{ {ctx_p}_chunk_count }} chunks for selection {{{ctx_p}_selection_for_iter_chunks!r}}'''")
+                                       f"f'''DS_ITER_CHUNKS ({dset_name_for_log}): iterated {{ {ctx_p}_chunk_count }} chunks for selection {{{ctx_p}_selection_for_iter_chunks!r}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit try
             self.write(0,
-                       f"except Exception as e_iterchunks: print(f'''DS_ITER_CHUNKS_ERR ({dset_name_for_log}): {{e_iterchunks}} for selection {{{ctx_p}_selection_for_iter_chunks!r}}''', file=sys.stderr)")
+                       f"except Exception as e_iterchunks: print(f'''DS_ITER_CHUNKS_ERR ({dset_name_for_log}): {{e_iterchunks}} for selection {{{ctx_p}_selection_for_iter_chunks!r}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if is_chunked
         self.emptyLine()
 
@@ -935,10 +1025,10 @@ class WritePythonCode(WriteCode):
             self.write(0,
                        f"{ctx_p}_target_dset.read_direct({ctx_p}_np_arr_for_rd, source_sel={ctx_p}_source_sel, dest_sel={ctx_p}_dest_sel)")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_READ_DIRECT ({dset_name_for_log}): success with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}}'''")
+                                       f"f'''DS_READ_DIRECT ({dset_name_for_log}): success with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit inner try for read_direct
             self.write(0,
-                       f"except Exception as e_readdirect: print(f'''DS_READ_DIRECT_ERR ({dset_name_for_log}): {{e_readdirect}} with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}}''', file=sys.stderr)")
+                       f"except Exception as e_readdirect: print(f'''DS_READ_DIRECT_ERR ({dset_name_for_log}): {{e_readdirect}} with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}} ''', file=sys.stderr)")
 
             self.write(0, f"# For write_direct, np_arr_for_wd is source")
             self.write(0, f"try:")  # Try creating source array
@@ -951,14 +1041,14 @@ class WritePythonCode(WriteCode):
             self.write(0,
                        f"{ctx_p}_target_dset.write_direct({ctx_p}_np_arr_for_wd, source_sel={ctx_p}_source_sel, dest_sel={ctx_p}_dest_sel)")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_WRITE_DIRECT ({dset_name_for_log}): success with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}}'''")
+                                       f"f'''DS_WRITE_DIRECT ({dset_name_for_log}): success with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit inner try for write_direct
             self.write(0,
-                       f"except Exception as e_writedirect: print(f'''DS_WRITE_DIRECT_ERR ({dset_name_for_log}): {{e_writedirect}} with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}}''', file=sys.stderr)")
+                       f"except Exception as e_writedirect: print(f'''DS_WRITE_DIRECT_ERR ({dset_name_for_log}): {{e_writedirect}} with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}} ''', file=sys.stderr)")
 
             self.restoreLevel(self.base_level - 1)  # Exit outer try
             self.write(0,
-                       f"except Exception as e_direct_io_setup: print(f'''DS_DIRECT_IO_SETUP_ERR ({dset_name_for_log}): {{e_direct_io_setup}}''', file=sys.stderr)")
+                       f"except Exception as e_direct_io_setup: print(f'''DS_DIRECT_IO_SETUP_ERR ({dset_name_for_log}): {{e_direct_io_setup}} ''', file=sys.stderr)")
 
             self.restoreLevel(self.base_level - 1)  # Exit if shape is small
         self.emptyLine()
@@ -979,10 +1069,10 @@ class WritePythonCode(WriteCode):
                        f"{ctx_p}_block_data = numpy.zeros(tuple({ctx_p}_block_shape), dtype={ctx_p}_dtype_obj)")  # Or random data
             self.write(0, f"{ctx_p}_target_dset[:, {ctx_p}_fancy_indices, ...] = {ctx_p}_block_data")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_FANCY_SETITEM ({dset_name_for_log}): success with indices {{{ctx_p}_fancy_indices}}'''")
+                                       f"f'''DS_FANCY_SETITEM ({dset_name_for_log}): success with indices {{{ctx_p}_fancy_indices}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit try
             self.write(0,
-                       f"except Exception as e_fancyitem: print(f'''DS_FANCY_SETITEM_ERR ({dset_name_for_log}): {{e_fancyitem}}''', file=sys.stderr)")
+                       f"except Exception as e_fancyitem: print(f'''DS_FANCY_SETITEM_ERR ({dset_name_for_log}): {{e_fancyitem}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if rank >=2
         self.emptyLine()
 
@@ -1002,7 +1092,7 @@ class WritePythonCode(WriteCode):
             self.write_print_to_stderr(0, f"f'''DS_ITER ({dset_name_for_log}): iterated {{{ctx_p}_iter_count}} rows'''")
             self.restoreLevel(self.base_level - 1)  # Exit try
             self.write(0,
-                       f"except Exception as e_iter: print(f'''DS_ITER_ERR ({dset_name_for_log}): {{e_iter}}''', file=sys.stderr)")
+                       f"except Exception as e_iter: print(f'''DS_ITER_ERR ({dset_name_for_log}): {{e_iter}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if not scalar
         self.emptyLine()
 
@@ -1017,10 +1107,10 @@ class WritePythonCode(WriteCode):
             self.write(0, f"{ctx_p}_is_equal = ({ctx_p}_target_dset == {ctx_p}_comp_val)")
             self.write(0, f"{ctx_p}_is_not_equal = ({ctx_p}_target_dset != {ctx_p}_comp_val)")
             self.write_print_to_stderr(0,
-                                       f"f'''DS_COMPARE ({dset_name_for_log}): == type {{type({ctx_p}_is_equal).__name__}}, != type {{type({ctx_p}_is_not_equal).__name__}}'''")
+                                       f"f'''DS_COMPARE ({dset_name_for_log}): == type {{type({ctx_p}_is_equal).__name__}}, != type {{type({ctx_p}_is_not_equal).__name__}} '''")
             self.restoreLevel(self.base_level - 1)  # Exit try
             self.write(0,
-                       f"except Exception as e_compare: print(f'''DS_COMPARE_ERR ({dset_name_for_log}): {{e_compare}}''', file=sys.stderr)")
+                       f"except Exception as e_compare: print(f'''DS_COMPARE_ERR ({dset_name_for_log}): {{e_compare}} ''', file=sys.stderr)")
             self.restoreLevel(self.base_level - 1)  # Exit if dtype_str
         self.emptyLine()
 
@@ -1030,9 +1120,9 @@ class WritePythonCode(WriteCode):
                                "get_offset()", "get_storage_size()"]
             for id_prop_call in id_props_to_get:
                 self.write(0,
-                           f"try: print(f'''DS_ID_PROP ({dset_name_for_log}): .id.{id_prop_call} result = {{repr({ctx_p}_target_dset.id.{id_prop_call})}}''', file=sys.stderr)")
+                           f"try: print(f'''DS_ID_PROP ({dset_name_for_log}): .id.{id_prop_call} result = {{repr({ctx_p}_target_dset.id.{id_prop_call})}} ''', file=sys.stderr)")
                 self.write(0,
-                           f"except Exception as e_id_prop: print(f'''DS_ID_PROP_ERR ({dset_name_for_log}) .id.{id_prop_call}: {{e_id_prop}}''', file=sys.stderr)")
+                           f"except Exception as e_id_prop: print(f'''DS_ID_PROP_ERR ({dset_name_for_log}) .id.{id_prop_call}: {{e_id_prop}} ''', file=sys.stderr)")
             self.emptyLine()
 
         self.restoreLevel(self.base_level - 1)  # Exit 'if target_dset is not None:'
@@ -1041,6 +1131,346 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0,
                                    f'f"Skipping dataset operations for {dset_name_for_log} as target_dset is None."')
         self.restoreLevel(self.base_level - 1)  # Exit else
+        self.emptyLine()
+
+    MAX_FUZZ_GENERATION_DEPTH = 5  # Adjust as needed; 3-5 is usually a good start
+
+    def _dispatch_fuzz_on_instance(
+            self,
+            current_prefix: str,
+            target_obj_expr_str: str,
+            class_name_hint: str,
+            generation_depth: int  # NEW parameter
+    ):
+        """
+        Dispatches to a type-specific fuzzing routine for the given object instance,
+        or falls back to generic method fuzzing, respecting generation depth.
+        """
+        if generation_depth > self.MAX_FUZZ_GENERATION_DEPTH:
+            self.write_print_to_stderr(0,
+                                       f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {target_obj_expr_str}, not generating deeper fuzzing operations here.'")
+            return
+
+        self.write_print_to_stderr(0,
+                                   f'f"--- (Depth {generation_depth}) Dispatching fuzz for instance: {target_obj_expr_str} (hint: {class_name_hint}, prefix: {current_prefix}) ---"')
+
+        # Ensure h5py is imported in the generated script for isinstance
+        # This should be done once in the script header by _write_script_header_and_imports
+        # self.write(0, "import h5py # Ensure h5py is imported for isinstance checks")
+
+        self.write(0, f"if {target_obj_expr_str} is not None:")
+        self.addLevel(1)  # For the content of "if target_obj_expr_str is not None:"
+
+        # Specific fuzzer for h5py.Dataset
+        self.write(0, f"if isinstance({target_obj_expr_str}, h5py.Dataset):")
+        self.addLevel(1)
+        self._fuzz_one_dataset_instance(target_obj_expr_str, class_name_hint, f"{current_prefix}_ds")
+        self.restoreLevel(self.base_level - 1)
+
+        # Specific fuzzer for h5py.Group (NEWLY ADDED)
+        self.write(0, f"elif isinstance({target_obj_expr_str}, h5py.Group):")
+        self.addLevel(1)
+        self._fuzz_one_group_instance(target_obj_expr_str, class_name_hint, f"{current_prefix}_grp", generation_depth + 1)
+        self.restoreLevel(self.base_level - 1)
+
+        # Specific fuzzer for h5py.File (can be added if needed, beyond just creation)
+        # self.write(0, f"elif isinstance({target_obj_expr_str}, h5py.File):")
+        # self.addLevel(1)
+        # self._fuzz_one_file_instance(target_obj_expr_str, class_name_hint, f"{current_prefix}_file")
+        # self.restoreLevel(self.base_level - 1)
+
+        # Fallback to generic method fuzzing for other types, or as an additional step
+        # For now, let's assume the specific fuzzers are comprehensive for these types.
+        # If you want generic calls *in addition*, this 'else' would be removed or adapted.
+        self.write(0, "else:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'")
+        # --- Generic Method Fuzzing Logic ---
+        # This is where you'd put your existing loop that gets methods via dir() or _get_object_methods
+        # and calls them randomly using _generate_and_write_call.
+        # For this to work, you need the actual methods of the object.
+        # This requires getting methods at runtime in the generated script or having class_type available
+        # in WritePythonCode if the object's type is known at generation time.
+
+        # Example of generic method fuzzing (conceptual, adapt from your existing code):
+        self.write(0, f"{current_prefix}_methods = []")
+        self.write(0, f"try:")
+        self.addLevel(1)
+        self.write(0, f"for {current_prefix}_attr_name in dir({target_obj_expr_str}):")
+        self.addLevel(1)
+        self.write(0,
+                   f"if {current_prefix}_attr_name.startswith('_'): continue")  # Skip private/dunder for simplicity
+        self.write(0, f"try:")  # Inner try for getattr
+        self.addLevel(1)
+        self.write(0, f"{current_prefix}_attr_val = getattr({target_obj_expr_str}, {current_prefix}_attr_name)")
+        self.write(0,
+                   f"if callable({current_prefix}_attr_val): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))")
+        self.restoreLevel(self.base_level - 1)  # Exit inner try
+        self.write(0, f"except Exception: pass")
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.restoreLevel(self.base_level - 1)  # Exit outer try
+        self.write(0, f"except Exception: {current_prefix}_methods = [] # Failed to get methods")
+
+        self.write(0, f"if {current_prefix}_methods:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f"f'Found {{len({current_prefix}_methods)}} callable methods for generic fuzzing of {target_obj_expr_str}'")
+        self.write(0,
+                   f"for _i_{current_prefix} in range(min(len({current_prefix}_methods), {self.options.methods_number})):")  # Use configured num calls
+        self.addLevel(1)
+        self.write(0,
+                   f"{current_prefix}_method_name_to_call, {current_prefix}_method_obj_to_call = random.choice({current_prefix}_methods)")
+        # Now call _generate_and_write_call using {current_prefix}_method_name_to_call (string)
+        # and {current_prefix}_method_obj_to_call (the callable).
+        # _generate_and_write_call needs adaptation if method_obj is a runtime variable.
+        # For simplicity here, let's assume _generate_and_write_call can take the method *name*
+        # and the target object expression.
+        self.write(0, f"# Conceptual call to generic method fuzzer")
+        self.write(0,
+                   f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)")  # Example simplified call
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.restoreLevel(self.base_level - 1)  # Exit if methods
+        # --- End Generic Method Fuzzing Logic ---
+        self.restoreLevel(self.base_level - 1)  # Exit else
+
+        self.restoreLevel(self.base_level - 1)  # Exit "if target_obj_expr_str is not None:"
+        self.write(0, "else:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f"f'Instance {target_obj_expr_str} (hint: {class_name_hint}) is None, skipping fuzz dispatch.'")
+        self.restoreLevel(self.base_level - 1)
+
+        self.write_print_to_stderr(0, f'f"--- Finished dispatching fuzz for instance: {target_obj_expr_str} ---"')
+        self.emptyLine()
+
+    def _fuzz_one_group_instance(self, group_expr_str: str, group_name_for_log: str, prefix: str, generation_depth: int): # NEW depth param
+        """
+        Generates code to perform a variety of operations on a given h5py.Group instance.
+        Args:
+            group_expr_str: Python expression string for the group instance.
+            group_name_for_log: Clean name for logging.
+            prefix: Logging prefix.
+        """
+        self.write_print_to_stderr(0,
+                                   f'f"--- Fuzzing Group Instance: {group_name_for_log} (var: {group_expr_str}, prefix: {prefix}) ---"')
+        self.emptyLine()
+
+        ctx_p = f"ctx_{prefix}"  # Context prefix for runtime variables
+
+        self.write(0, f"{ctx_p}_target_grp = {group_expr_str}")
+        self.write(0, f"if {ctx_p}_target_grp is not None:")
+        self.addLevel(1)  # Enter if target_grp is not None
+
+        # --- Basic Group Properties & Methods ---
+        group_properties = ["name", "file", "parent", "attrs"]  # .attrs returns AttributeManager
+        for prop_name in group_properties:
+            self.write(0,
+                       f"try: print(f'''GRP_PROP ({group_name_for_log}): .{prop_name} = {{repr(getattr({ctx_p}_target_grp, '{prop_name}'))}} ''', file=sys.stderr)")
+            self.write(0,
+                       f"except Exception as e_prop: print(f'''GRP_PROP_ERR ({group_name_for_log}) .{prop_name}: {{e_prop}} ''', file=sys.stderr)")
+        self.emptyLine()
+
+        self.write(0,
+                   f"try: print(f'''GRP_LEN ({group_name_for_log}): len = {{len({ctx_p}_target_grp)}} ''', file=sys.stderr)")
+        self.write(0,
+                   f"except Exception as e_len: print(f'''GRP_LEN_ERR ({group_name_for_log}): {{e_len}} ''', file=sys.stderr)")
+        self.emptyLine()
+
+        # Iteration, keys, values, items
+        if random() < 0.5:
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_iter_count = 0")
+            self.write(0, f"for {ctx_p}_key in {ctx_p}_target_grp:")  # Iterates keys
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f"f'''GRP_ITER ({group_name_for_log}): key = {{{ctx_p}_key!r}} '''")
+            self.write(0, f"{ctx_p}_iter_count += 1")
+            self.write(0, f"if {ctx_p}_iter_count > 5: break")
+            self.restoreLevel(self.base_level - 1)
+            self.write_print_to_stderr(0, f"f'''GRP_ITER ({group_name_for_log}): iterated {{{ctx_p}_iter_count}} keys'''")
+
+            self.write(0, f"{ctx_p}_keys_view = {ctx_p}_target_grp.keys()")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_KEYS ({group_name_for_log}): {{len({ctx_p}_keys_view)}} keys, e.g., {{list({ctx_p}_keys_view)[:3]!r}} '''")
+            self.write(0, f"{ctx_p}_values_view = {ctx_p}_target_grp.values()")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_VALUES ({group_name_for_log}): {{len({ctx_p}_values_view)}} values, e.g., {{[repr(x) for x in list({ctx_p}_values_view)[:3]]!r}} '''")
+            self.write(0, f"{ctx_p}_items_view = {ctx_p}_target_grp.items()")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_ITEMS ({group_name_for_log}): {{len({ctx_p}_items_view)}} items, e.g., {{[(k, repr(v)) for k,v in list({ctx_p}_items_view)[:3]]!r}} '''")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0,
+                       "except Exception as e_grp_iter: print(f'''GRP_ITER_METHODS_ERR ({group_name_for_log}): {{e_grp_iter}} ''', file=sys.stderr)")
+            self.emptyLine()
+
+        # --- Create Children (Dataset, Group) ---
+        # Dynamic Dataset creation within this group
+        if random() < 0.4:
+            ds_name_expr = f"'{_h5_unique_name(f'ds_{prefix}')}'"  # Use prefix from group fuzz op
+            ds_instance_var = f"{prefix}_new_ds"
+            self.write(0, f"{ds_instance_var} = None")  # Init
+            self._write_h5py_dataset_creation_call(f"{ctx_p}_target_grp", ds_name_expr, ds_instance_var)
+            # Optionally, if ds_instance_var is created, immediately fuzz it (deep dive)
+            self.write(0, f"if {ds_instance_var} is not None:")
+            self.addLevel(1)
+            self._dispatch_fuzz_on_instance(f"{prefix}_newly_created_ds", ds_instance_var, "Dataset", generation_depth + 1)
+            self.restoreLevel(self.base_level - 1)
+
+        # Dynamic Group creation within this group
+        if random() < 0.3:
+            new_grp_name_expr = f"'{_h5_unique_name(f'subgrp_{prefix}')}'"
+            new_grp_var = f"{prefix}_new_subgrp"
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{new_grp_var} = {ctx_p}_target_grp.create_group({new_grp_name_expr})")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Created subgroup {new_grp_name_expr} as {{{new_grp_var}!r}} '''")
+            self.write(0, f"if {new_grp_var} is not None:")  # If created, fuzz it (deep dive)
+            self.addLevel(1)
+            self._dispatch_fuzz_on_instance(f"{prefix}_newly_created_grp", new_grp_var, "Group", generation_depth + 1)
+            self.restoreLevel(self.base_level - 1)
+            self.restoreLevel(self.base_level - 1)
+            self.write(0,
+                       "except Exception as e_cgrp: print(f'''GRP_OP_ERR ({group_name_for_log}) creating subgroup {new_grp_name_expr}: {{e_cgrp}} ''', file=sys.stderr)")
+            self.emptyLine()
+
+        # --- Link Creation Operations ---
+        current_op_prefix = f"{prefix}_link_ops"  # Unique prefix for link operations
+
+        # Create SoftLink
+        if random() < 0.3:
+            new_slink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
+            softlink_target_path_expr = self.arg_generator.genH5PyLinkPath_expr(
+                f"getattr({ctx_p}_target_grp, 'name', '/')")
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_target_grp[{new_slink_name_expr}] = h5py.SoftLink({softlink_target_path_expr})")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Created SoftLink {new_slink_name_expr} -> {{ {softlink_target_path_expr} }} '''")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0,
+                       "except Exception as e_slink: print(f'''GRP_OP_ERR ({group_name_for_log}) creating SoftLink {new_slink_name_expr}: {{e_slink}} ''', file=sys.stderr)")
+            self.emptyLine()
+
+        # Create ExternalLink
+        if random() < 0.2:
+            new_elink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
+            # Assuming _h5_external_target_file is a global var in generated script for the secondary file
+            ext_file_name_expr = self.arg_generator.genH5PyExternalLinkFilename_expr(
+                "_h5_external_target_file.filename if _h5_external_target_file and hasattr(_h5_external_target_file, 'filename') else 'missing_ext_file.h5'")
+            ext_internal_path_expr = self.arg_generator.genH5PyLinkPath_expr("'/'")
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0,
+                       f"{ctx_p}_target_grp[{new_elink_name_expr}] = h5py.ExternalLink({ext_file_name_expr}, {ext_internal_path_expr})")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Created ExternalLink {new_elink_name_expr} -> {{ {ext_file_name_expr} }}:{{ {ext_internal_path_expr} }} '''")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0,
+                       "except Exception as e_elink: print(f'''GRP_OP_ERR ({group_name_for_log}) creating ExternalLink {new_elink_name_expr}: {{e_elink}} ''', file=sys.stderr)")
+            self.emptyLine()
+
+        # Create HardLink
+        if random() < 0.3:
+            new_hlink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
+            existing_object_to_link_expr = self.arg_generator.genH5PyExistingObjectPath_expr(f"{ctx_p}_target_grp")
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{current_op_prefix}_target_obj_for_hlink = {existing_object_to_link_expr}")
+            self.write(0, f"if {current_op_prefix}_target_obj_for_hlink is not None:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_target_grp[{new_hlink_name_expr}] = {current_op_prefix}_target_obj_for_hlink")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Created HardLink {new_hlink_name_expr} -> {{{current_op_prefix}_target_obj_for_hlink!r}} '''")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, "else:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP_WARN ({group_name_for_log}): Could not find/resolve target for hardlink {new_hlink_name_expr} '''")
+            self.restoreLevel(self.base_level - 1)
+            self.restoreLevel(self.base_level - 1)
+            self.write(0,
+                       "except Exception as e_hlink: print(f'''GRP_OP_ERR ({group_name_for_log}) creating HardLink {new_hlink_name_expr}: {{e_hlink}} ''', file=sys.stderr)")
+            self.emptyLine()
+
+        # Get and inspect links
+        if random() < 0.2:
+            self.write(0, f"if len({ctx_p}_target_grp) > 0:")
+            self.addLevel(1)
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_link_item_name = choice(list({ctx_p}_target_grp.keys()))")
+            self.write(0, f"{ctx_p}_link_obj_itself = {ctx_p}_target_grp.get({ctx_p}_link_item_name, getlink=True)")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Link object {{{ctx_p}_link_item_name!r}}: {{repr({ctx_p}_link_obj_itself)}} type {{type({ctx_p}_link_obj_itself).__name__}} '''")
+            self.write(0,
+                       f"if isinstance({ctx_p}_link_obj_itself, h5py.SoftLink): print(f'  SoftLink path: {{{ctx_p}_link_obj_itself.path}}', file=sys.stderr)")
+            self.write(0,
+                       f"if isinstance({ctx_p}_link_obj_itself, h5py.ExternalLink): print(f'  ExternalLink filename: {{{ctx_p}_link_obj_itself.filename}}, path: {{{ctx_p}_link_obj_itself.path}}', file=sys.stderr)")
+            self.write(0,
+                       f"{ctx_p}_link_info = h5py.h5l.get_info({ctx_p}_target_grp.id, {ctx_p}_link_item_name.encode('utf-8'))")
+            self.write_print_to_stderr(0,
+                                       f"f'  Link info for {{{ctx_p}_link_item_name!r}}: type={{{ctx_p}_link_info.type}}'")
+            self.restoreLevel(self.base_level- 1)
+            self.write(0,
+                       "except Exception as e_getlink: print(f'''GRP_OP_ERR ({group_name_for_log}) getting link object: {{e_getlink}} ''', file=sys.stderr)")
+            self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # Attempt to access/resolve a random item (could be a link or direct object)
+        if random() < 0.4:
+            self.write(0, f"if len({ctx_p}_target_grp) > 0:")
+            self.addLevel(1)
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"{ctx_p}_item_to_access_name = choice(list({ctx_p}_target_grp.keys()))")
+            self.write(0, f"{ctx_p}_resolved_item = {ctx_p}_target_grp[{ctx_p}_item_to_access_name]")
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Accessed item {{{ctx_p}_item_to_access_name!r}}: {{repr({ctx_p}_resolved_item)}} '''")
+            # Potential "deep dive" point: if _resolved_item is Group/Dataset, call _dispatch_fuzz_on_instance
+            self.write(0, f"if isinstance({ctx_p}_resolved_item, (h5py.Group, h5py.Dataset)):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0,
+                                       f"f'''GRP_OP ({group_name_for_log}): Resolved item {{{ctx_p}_item_to_access_name!r}} is fuzzable, dispatching deep dive.'''")
+            self._dispatch_fuzz_on_instance(
+                f"{prefix}_resolved_{str(uuid.uuid4())[:4]}", # Ensure uuid is imported in generated script for this if used
+                f"{ctx_p}_resolved_item",
+                f"{prefix}_resolved_item_type_name", # Pass the runtime type name
+                generation_depth + 1 # Increment depth
+            )
+            self.restoreLevel(self.base_level - 1)
+
+            self.restoreLevel(self.base_level- 1)
+            self.write(0,
+                       "except Exception as e_accessitem: print(f'''GRP_OP_ERR ({group_name_for_log}) accessing item: {{e_accessitem}} ''', file=sys.stderr)")
+            self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # Call require_group and require_dataset
+        if random() < 0.2:
+            req_grp_name = self.arg_generator.genH5PyNewLinkName_expr()
+            self.write(0,
+                       f"try: {ctx_p}_req_grp = {ctx_p}_target_grp.require_group({req_grp_name}); print(f'''GRP_OP ({group_name_for_log}): require_group {req_grp_name} -> {{{ctx_p}_req_grp!r}} ''', file=sys.stderr)")
+            self.write(0,
+                       f"except Exception as e_reqg: print(f'''GRP_OP_ERR ({group_name_for_log}) require_group {req_grp_name}: {{e_reqg}} ''', file=sys.stderr)")
+
+        if random() < 0.2:
+            req_ds_name = self.arg_generator.genH5PyNewLinkName_expr()
+            req_ds_shape_expr = self.arg_generator.genH5PyDatasetShape_expr()
+            req_ds_dtype_expr = self.arg_generator.genH5PySimpleDtype_expr()
+            self.write(0,
+                       f"try: {ctx_p}_req_ds = {ctx_p}_target_grp.require_dataset({req_ds_name}, shape={req_ds_shape_expr}, dtype={req_ds_dtype_expr}, exact=False); print(f'''GRP_OP ({group_name_for_log}): require_dataset {req_ds_name} -> {{{ctx_p}_req_ds!r}} ''', file=sys.stderr)")
+            self.write(0,
+                       f"except Exception as e_reqd: print(f'''GRP_OP_ERR ({group_name_for_log}) require_dataset {req_ds_name}: {{e_reqd}} ''', file=sys.stderr)")
+        self.emptyLine()
+
+        self.restoreLevel(self.base_level - 1)  # Exit 'if target_grp is not None:'
+        self.write(0, "else:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f'f"Skipping group operations for {group_name_for_log} as its variable ({group_expr_str}) is None."')
+        self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
     def _write_h5py_file(self):
@@ -1125,7 +1555,7 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         # Using triple quotes for the f-string in print to handle potential quotes in expressions
         self.write(0,
-                   f"print(f'''FUZZ_RUNTIME_WARN: Failed to create h5py.File({name_arg_expression}, {mode_expr}, {kwargs_final_str}): {{e_file_create.__class__.__name__}} {{e_file_create}}''', file=sys.stderr)")
+                   f"print(f'''FUZZ_RUNTIME_WARN: Failed to create h5py.File({name_arg_expression}, {mode_expr}, {kwargs_final_str}): {{e_file_create.__class__.__name__}} {{e_file_create}} ''', file=sys.stderr)")
         self.restoreLevel(self.base_level - 1)  # Exit except
         self.emptyLine()
 
@@ -1241,7 +1671,7 @@ class WritePythonCode(WriteCode):
         self.write(0, f"try:")
         self.addLevel(1)
         self.write(0,
-                   f"{instance_var_name} = {parent_obj_expr}.create_dataset('{dataset_name_expr}', {final_kwargs_str})")
+                   f"{instance_var_name} = {parent_obj_expr}.create_dataset({dataset_name_expr}, {final_kwargs_str})")
         self.write(0, f"if {instance_var_name}:")
         self.addLevel(1)
         # Using a different dict key for runtime created datasets for clarity
@@ -1258,12 +1688,12 @@ class WritePythonCode(WriteCode):
             1,
             f"f'''FUZZ_RUNTIME_WARN: Failed to create dataset {dataset_name_expr} on {{ {parent_obj_expr} }} "
             f"with args {{ repr(dict({final_kwargs_str})) }}: "  # Log evaluated args if possible, or raw string
-            f"{{e_dset_create.__class__.__name__}} {{e_dset_create}}'''"
+            f"{{e_dset_create.__class__.__name__}} {{e_dset_create}} '''"
         )
         self.write(0, f"except Exception as e_dset_print_error:")
         self.write(1, f"f'''FUZZ_RUNTIME_WARN: Failed to create dataset {dataset_name_expr} on {{ {parent_obj_expr} }} "
             f"with args ERROR_PRINTING_ARGS: "
-            f"{{e_dset_create.__class__.__name__}} {{e_dset_create}}'''")
+            f"{{e_dset_create.__class__.__name__}} {{e_dset_create}} '''")
         self.restoreLevel(self.base_level - 1)  # Exit except
         self.emptyLine()
 

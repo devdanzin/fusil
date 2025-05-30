@@ -46,6 +46,10 @@ except ImportError:
     TEMPLATES = None
 
 
+def _h5_unique_name(base="item"):
+    return f"{base}_{uuid.uuid4().hex[:8]}"
+
+
 class ArgumentGenerator:
     """Handles the generation of diverse argument types for fuzzing."""
 
@@ -773,6 +777,103 @@ class ArgumentGenerator:
             return self.genH5PyFillvalue_expr(dataset_dtype_expr_str)  # Good enough for a scalar
         else:  # Small array
             return f"numpy.array([{self.genH5PyFillvalue_expr(dataset_dtype_expr_str)}, {self.genH5PyFillvalue_expr(dataset_dtype_expr_str)}], dtype={dataset_dtype_expr_str})"
+
+        # In ArgumentGenerator class:
+
+    def genH5PyLinkPath_expr(self, current_group_path_expr_str: str = "'/'") -> str:
+        """Generates a path string for SoftLink targets."""
+        # current_group_path_expr_str is the HDF5 path of the group where the link is being created.
+        # This allows generating truly relative paths like '.' or '../sibling'.
+        # For simplicity now, mainly absolute or simple relative.
+        paths = [
+            f"'/{_h5_unique_name('target_abs_')}'",  # Target existing absolute path
+            f"'/{_h5_unique_name('dangling_abs_')}'",  # Dangling absolute
+            "'.'",  # Link to self (current group)
+            "'..'",  # Link to parent
+            f"'{_h5_unique_name('sibling_relative')}'",  # Relative path
+            f"{current_group_path_expr_str} + '/{_h5_unique_name('child_link_target')}'"
+            # Path relative to current group
+        ]
+        # Add a chance for a truly circular path if current_group_path_expr_str is known
+        if current_group_path_expr_str != "'/'" and random() < 0.2:
+            paths.append(current_group_path_expr_str)  # Link to the group path itself
+
+        return choice(paths)
+
+    def genH5PyExternalLinkFilename_expr(self, external_target_filename_expr_str: str) -> str:
+        """Generates a filename string for ExternalLink targets."""
+        # external_target_filename_expr_str is the expression for the valid secondary file.
+        if random() < 0.7:  # High chance to use the valid external file
+            return external_target_filename_expr_str
+        else:  # Chance for a dangling filename
+            return f"'{_h5_unique_name('dangling_ext_file_')}.h5'"
+
+    def genH5PyNewLinkName_expr(self) -> str:
+        """Generates a new name for a link."""
+        # _h5_unique_name should be a helper available in the generated script, or use uuid directly
+        # return f"'{_h5_unique_name('link_')}'"
+        return f"'link_{uuid.uuid4().hex[:6]}'"
+
+    # def genH5PyExistingObjectPath_expr(self, file_obj_expr_str: str) -> str:
+    #     """Generates a string expression for a path to an existing object within file_obj_expr_str."""
+    #     # This is tricky without knowing the contents of file_obj_expr_str at generation time.
+    #     # Simplification: return a common path or a root-level predefined object.
+    #     # This would ideally pick from actual objects in the file.
+    #     # For now, assume some known paths or use a runtime helper.
+    #     # Example: path to a pre-defined tricky dataset if its name is known globally.
+    #     predefined_targets = [
+    #         h5py_tricky_objects.get("h5_link_target_dataset").name if h5py_tricky_objects.get(
+    #             "h5_link_target_dataset") else None,
+    #         h5py_tricky_objects.get("h5_link_target_group").name if h5py_tricky_objects.get(
+    #             "h5_link_target_group") else None,
+    #     ]
+    #     valid_target = choice([p for p in predefined_targets if p])
+    #     if valid_target and random() < 0.7:
+    #         return f"{file_obj_expr_str}.get('{valid_target}')"  # Get the actual object
+    #     return f"{file_obj_expr_str}.get('/')"  # Fallback to root group object
+
+    def genH5PyExistingObjectPath_expr(self, parent_group_expr_str: str) -> str:
+        """
+        Generates a Python expression string that, when executed in the fuzz script,
+        attempts to return an existing h5py object (Dataset or Group) from the
+        same file as parent_group_expr_str. This is suitable for creating a hard link.
+
+        Args:
+            parent_group_expr_str: Python expression string for the h5py.Group instance
+                                   where the hard link will be created (e.g., "_h5_main_file['mygroup']").
+        """
+        # This lambda will be defined and executed within the generated fuzzer script.
+        # It needs access to 'random' and 'h5py' (for isinstance checks).
+        # It uses parent_group_expr_str to access the runtime group object.
+
+        # Strategy:
+        # 1. Try to pick a random direct child of the parent_group_expr_str.
+        # 2. If parent is empty or by chance, try to pick a random child from the file's root.
+        # 3. As a final fallback, use the root group of the parent's file.
+        # 4. Ensure the picked item is a Group or Dataset (not a link object itself before resolution).
+
+        # We construct a self-contained Python expression string (an IIFE lambda).
+        # Note: `h5py_tricky_objects` is available at runtime in the generated script.
+        # We can also try to pick from `h5py_tricky_objects` if they are in the same file.
+
+        # Let's make it a bit more robust by trying a sequence of strategies at runtime.
+        # This entire block is a string that will be executed in the generated script.
+        # The `random` here refers to `random` module in the generated script.
+
+        # We need unique variable names within the lambda if we store intermediate results,
+        # or just chain expressions.
+
+        # Expression for selecting a candidate object:
+        # This lambda will be embedded as a string, so internal quotes need care.
+        # It takes the runtime group object `pg` (parent_group) and the runtime
+        # `h5py_tricky_objects` dict.
+
+        # Using a more direct approach: generate a call to a helper function
+        # that will be defined in the generated script by WritePythonCode.
+        # This keeps the expression returned by ArgumentGenerator simpler.
+
+        helper_call_expr = f"_fusil_h5_get_link_target_in_file({parent_group_expr_str}, h5py_tricky_objects, h5py_runtime_objects)"
+        return helper_call_expr
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""

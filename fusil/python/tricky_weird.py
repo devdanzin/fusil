@@ -936,6 +936,39 @@ tricky_h5py_names = [
     "h5_regionref_from_dset_2d_part",      # A RegionReference to a part of h5_dset_2d_for_regionref_slicing
     "h5_regionref_from_dset_2d_empty",     # A RegionReference to an empty part
     "h5_regionref_from_dset_scalar",       # A RegionReference on a scalar dataset
+
+# Additions to tricky_h5py_names for Link Objects
+
+    # Target objects for linking (can reuse existing datasets/groups or create specific ones)
+    "h5_link_target_dataset",
+    "h5_link_target_group",
+    "h5_extlink_target_file_object_itself", # The secondary file for external links
+    "h5_extlink_target_dataset_in_secondary_file",
+
+    # Soft Links
+    "h5_softlink_valid_to_dataset",
+    "h5_softlink_valid_to_group",
+    "h5_softlink_dangling_nonexistent_path",
+    "h5_softlink_circular_to_self_in_group",    # group/link_name -> /group/link_name (or .)
+    "h5_softlink_circular_to_ancestor", # group/subgroup/link_name -> /group
+    "h5_softlink_relative_path_valid",      # e.g., link to 'sibling_dataset'
+    "h5_softlink_relative_path_dotdot",     # e.g., link to '../sibling_of_parent'
+
+    # External Links
+    "h5_extlink_valid_to_secondary_file_dataset",
+    "h5_extlink_dangling_bad_internal_path",  # Target file exists, path inside doesn't
+    "h5_extlink_dangling_bad_filename",       # Target filename doesn't exist (harder with core)
+    "h5_extlink_relative_filename",           # Needs efile_prefix setup on parent file
+
+    # Hard Links (These will resolve to the target object, so their "trickiness" is in their existence)
+    # We won't store the link itself as a distinct object type in h5py_tricky_objects,
+    # but tricky_h5py_code will create them. The fuzzer might then pick up the target
+    # object through multiple paths. We can add a group that *contains* such links.
+    "h5_group_containing_hardlinks",
+
+    # Link objects themselves (obtained via get(..., getlink=True))
+    "h5_softlink_object_itself",      # The h5py.SoftLink instance
+    "h5_extlink_object_itself",       # The h5py.ExternalLink instance
 ]
 
 tricky_h5py_code = """
@@ -1884,6 +1917,164 @@ else:
     # Populate relevant keys with None
     _e_names_to_none = [name for name in tricky_h5py_names if "h5_dset_" in name and ("_for_" in name or "compound_for_" in name) or "h5_multiblockslice_" in name or "h5_regionref_" in name]
     for _name in _e_names_to_none:
+         if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
+
+
+# --- Additions to tricky_h5py_code for Link Objects ---
+# Assumes _h5_main_file, _h5_create_core_file, _h5_unique_name,
+# h5py_tricky_objects, _h5_internal_files_to_keep_open_ are available.
+
+# --- Secondary file for External Link targets ---
+_h5_external_target_file = _h5_create_core_file(name_suffix="ext_target", mode='w')
+h5py_tricky_objects['h5_extlink_target_file_object_itself'] = _h5_external_target_file
+
+if _h5_main_file and _h5_external_target_file:
+    # --- Populate target files with some objects ---
+    try:
+        h5py_tricky_objects["h5_link_target_dataset"] = _h5_main_file.create_dataset(
+            _h5_unique_name('link_target_ds'), data=numpy.arange(10))
+    except Exception as e: h5py_tricky_objects["h5_link_target_dataset"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+    try:
+        h5py_tricky_objects["h5_link_target_group"] = _h5_main_file.create_group(
+            _h5_unique_name('link_target_grp'))
+        if h5py_tricky_objects["h5_link_target_group"]:
+             h5py_tricky_objects["h5_link_target_group"].create_dataset("child_ds", data=1)
+    except Exception as e: h5py_tricky_objects["h5_link_target_group"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+    try:
+        h5py_tricky_objects["h5_extlink_target_dataset_in_secondary_file"] = \
+            _h5_external_target_file.create_dataset('data_in_ext_file', data=[10,20,30])
+    except Exception as e: h5py_tricky_objects["h5_extlink_target_dataset_in_secondary_file"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+    _h5_external_target_file.flush() # Ensure it's written if backing_store=True for it
+
+    _link_creation_group_name = _h5_unique_name('group_for_links')
+    _link_creation_group = _h5_main_file.create_group(_link_creation_group_name)
+
+    if _link_creation_group:
+        # --- Soft Links ---
+        _target_ds_path = h5py_tricky_objects.get("h5_link_target_dataset").name if h5py_tricky_objects.get("h5_link_target_dataset") else "/dangling_fallback_ds"
+        try:
+            _link_name_valid_ds = _h5_unique_name('slink_valid_ds')
+            _link_creation_group[_link_name_valid_ds] = h5py.SoftLink(_target_ds_path)
+            h5py_tricky_objects["h5_softlink_valid_to_dataset"] = _link_creation_group[_link_name_valid_ds] # This resolves
+        except Exception as e: h5py_tricky_objects["h5_softlink_valid_to_dataset"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        _target_grp_path = h5py_tricky_objects.get("h5_link_target_group").name if h5py_tricky_objects.get("h5_link_target_group") else "/dangling_fallback_grp"
+        try:
+            _link_name_valid_grp = _h5_unique_name('slink_valid_grp')
+            _link_creation_group[_link_name_valid_grp] = h5py.SoftLink(_target_grp_path)
+            h5py_tricky_objects["h5_softlink_valid_to_group"] = _link_creation_group[_link_name_valid_grp] # This resolves
+        except Exception as e: h5py_tricky_objects["h5_softlink_valid_to_group"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        try:
+            _link_name_dangling = _h5_unique_name('slink_dangling')
+            _dangling_path = '/' + _h5_unique_name('non_existent_path')
+            _link_creation_group[_link_name_dangling] = h5py.SoftLink(_dangling_path)
+            h5py_tricky_objects["h5_softlink_dangling_nonexistent_path"] = _link_creation_group.get(_link_name_dangling, getlink=True)
+        except Exception as e: h5py_tricky_objects["h5_softlink_dangling_nonexistent_path"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        _sub_group_for_circular_name = _h5_unique_name('sub_for_circular')
+        _sub_group_for_circular = _link_creation_group.create_group(_sub_group_for_circular_name)
+        if _sub_group_for_circular:
+            try: # Link to self ('.') or its own name
+                _link_name_circ_self = _h5_unique_name('slink_circ_self')
+                _sub_group_for_circular[_link_name_circ_self] = h5py.SoftLink('.') # Relative to _sub_group_for_circular
+                h5py_tricky_objects["h5_softlink_circular_to_self_in_group"] = _sub_group_for_circular.get(_link_name_circ_self, getlink=True)
+            except Exception as e: h5py_tricky_objects["h5_softlink_circular_to_self_in_group"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+            try: # Link to parent/ancestor
+                _link_name_circ_anc = _h5_unique_name('slink_circ_ancestor')
+                _sub_group_for_circular[_link_name_circ_anc] = h5py.SoftLink(f'/{_link_creation_group_name}')
+                h5py_tricky_objects["h5_softlink_circular_to_ancestor"] = _sub_group_for_circular.get(_link_name_circ_anc, getlink=True)
+            except Exception as e: h5py_tricky_objects["h5_softlink_circular_to_ancestor"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        try: # Relative path to a sibling dataset (if h5_link_target_dataset is sibling of _link_creation_group)
+            _sibling_ds_for_rel_link_name = _h5_unique_name('sibling_ds_for_rel')
+            _sibling_ds = _h5_main_file.create_dataset(_sibling_ds_for_rel_link_name, data=1)
+            _link_name_rel_valid = _h5_unique_name('slink_rel_valid')
+            # Assuming _link_creation_group is at root level, so path to sibling is just its name
+            _link_creation_group[_link_name_rel_valid] = h5py.SoftLink(_sibling_ds_for_rel_link_name)
+            h5py_tricky_objects["h5_softlink_relative_path_valid"] = _link_creation_group.get(_link_name_rel_valid, getlink=True)
+        except Exception as e: h5py_tricky_objects["h5_softlink_relative_path_valid"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+        try:
+            _link_name_rel_dotdot = _h5_unique_name('slink_rel_dotdot')
+            if _sub_group_for_circular: # Create ../sibling in subgroup
+                 _sub_group_for_circular.create_dataset("actual_target_for_dotdot_link", data=123)
+                 _another_sub = _sub_group_for_circular.create_group("another_sub")
+                 _another_sub[_link_name_rel_dotdot] = h5py.SoftLink("../actual_target_for_dotdot_link")
+                 h5py_tricky_objects["h5_softlink_relative_path_dotdot"] = _another_sub.get(_link_name_rel_dotdot, getlink=True)
+            else: h5py_tricky_objects["h5_softlink_relative_path_dotdot"] = None
+        except Exception as e: h5py_tricky_objects["h5_softlink_relative_path_dotdot"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+
+        # --- External Links ---
+        _ext_target_ds_path = h5py_tricky_objects.get("h5_extlink_target_dataset_in_secondary_file").name if h5py_tricky_objects.get("h5_extlink_target_dataset_in_secondary_file") else "/dangling_ext_ds"
+        try:
+            _link_name_ext_valid = _h5_unique_name('elink_valid')
+            # _h5_external_target_file.name is the unique name given by HDF5 core driver, might not be directly usable as "filename" if not backing_store=True
+            # For core driver, external links usually refer to other *actual file system files*.
+            # This setup is tricky for pure in-memory.
+            # Let's assume _h5_external_target_file.filename IS a usable identifier IF both files are in the same "virtual filesystem"
+            # This is more robust if _h5_external_target_file was created with backing_store=True using a temp disk name.
+            # For now, we'll use its .name attribute. This might only work if h5py has special handling for core-to-core external links.
+            # A true external link test requires actual file paths.
+            # For fuzzing, creating a real temp file for _h5_external_target_file is better.
+            _ext_fname_for_link = _h5_external_target_file.filename # if it has one (e.g. backing_store=True)
+            if _ext_fname_for_link:
+                 _link_creation_group[_link_name_ext_valid] = h5py.ExternalLink(_ext_fname_for_link, _ext_target_ds_path)
+                 h5py_tricky_objects["h5_extlink_valid_to_secondary_file_dataset"] = _link_creation_group.get(_link_name_ext_valid, getlink=True)
+            else: h5py_tricky_objects["h5_extlink_valid_to_secondary_file_dataset"] = None
+        except Exception as e: h5py_tricky_objects["h5_extlink_valid_to_secondary_file_dataset"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        try:
+            _link_name_ext_dangling_path = _h5_unique_name('elink_dangling_path')
+            _ext_fname_for_link = _h5_external_target_file.filename
+            if _ext_fname_for_link:
+                _link_creation_group[_link_name_ext_dangling_path] = h5py.ExternalLink(_ext_fname_for_link, "/path/does/not/exist/in/target")
+                h5py_tricky_objects["h5_extlink_dangling_bad_internal_path"] = _link_creation_group.get(_link_name_ext_dangling_path, getlink=True)
+            else: h5py_tricky_objects["h5_extlink_dangling_bad_internal_path"] = None
+        except Exception as e: h5py_tricky_objects["h5_extlink_dangling_bad_internal_path"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+
+        try: # This requires a filename that truly doesn't exist or isn't HDF5
+            _link_name_ext_dangling_file = _h5_unique_name('elink_dangling_file')
+            _non_existent_fname = f"totally_non_existent_file_{uuid.uuid4().hex}.h5"
+            _link_creation_group[_link_name_ext_dangling_file] = h5py.ExternalLink(_non_existent_fname, "/some/path")
+            h5py_tricky_objects["h5_extlink_dangling_bad_filename"] = _link_creation_group.get(_link_name_ext_dangling_file, getlink=True)
+        except Exception as e: h5py_tricky_objects["h5_extlink_dangling_bad_filename"] = None; print(f"H5_F_WARN: {e}", file=sys.stderr)
+        
+        # h5_extlink_relative_filename would need efile_prefix set on _h5_main_file's fapl.
+
+        # --- Hard Links ---
+        h5py_tricky_objects["h5_group_containing_hardlinks"] = _link_creation_group # The group itself
+        _target_ds_obj = h5py_tricky_objects.get("h5_link_target_dataset")
+        if _target_ds_obj and _link_creation_group:
+            try:
+                _link_creation_group[_h5_unique_name('hardlink_to_ds')] = _target_ds_obj # Creates hard link
+            except Exception as e: print(f"H5_F_WARN: creating hardlink_to_ds {e}", file=sys.stderr)
+        _target_grp_obj = h5py_tricky_objects.get("h5_link_target_group")
+        if _target_grp_obj and _link_creation_group:
+            try:
+                _link_creation_group[_h5_unique_name('hardlink_to_grp')] = _target_grp_obj # Creates hard link
+            except Exception as e: print(f"H5_F_WARN: creating hardlink_to_grp {e}", file=sys.stderr)
+
+        # --- Link objects themselves ---
+        try:
+            h5py_tricky_objects["h5_softlink_object_itself"] = _link_creation_group.get(
+                _link_name_valid_ds if '_link_name_valid_ds' in locals() else list(_link_creation_group.keys())[0], getlink=True) \
+                if _link_creation_group and len(_link_creation_group) > 0 and isinstance(_link_creation_group.get(list(_link_creation_group.keys())[0], getlink=True), h5py.SoftLink) \
+                else None
+        except Exception as e: h5py_tricky_objects["h5_softlink_object_itself"] = None
+        try:
+            h5py_tricky_objects["h5_extlink_object_itself"] = _link_creation_group.get(
+                _link_name_ext_valid if '_link_name_ext_valid' in locals() else list(_link_creation_group.keys())[0], getlink=True) \
+                if _link_creation_group and len(_link_creation_group) > 0 and isinstance(_link_creation_group.get(list(_link_creation_group.keys())[0], getlink=True), h5py.ExternalLink) \
+                else None
+        except Exception as e: h5py_tricky_objects["h5_extlink_object_itself"] = None
+
+else: # Fallback if _h5_main_file or _h5_external_target_file is None
+    print(f"H5_F_ERROR: Main or External HDF5 file for tricky link objects could not be created.", file=sys.stderr)
+    _f_names_to_none = [name for name in tricky_h5py_names if "link" in name]
+    for _name in _f_names_to_none:
          if _name not in h5py_tricky_objects: h5py_tricky_objects[_name] = None
 
 
