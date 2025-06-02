@@ -411,7 +411,15 @@ class WritePythonCode(WriteCode):
                 return parent_group_obj.file['/'] # Root group as ultimate fallback
         """))
         self.emptyLine()
-        
+
+        self.write(0, dedent("""\
+        TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None),}
+        def skip_trivial_type(obj_instance_or_class):
+            if type(obj_instance_or_class) in TRIVIAL_TYPES:
+                return True
+            return False
+        """))
+        self.emptyLine()
 
     def _write_tricky_definitions(self) -> None:
         """Writes definitions for 'tricky' classes and objects."""
@@ -1592,8 +1600,13 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# {self.base_level=}")
         self.write(0, f"# {L_main_if_target_not_none=}")
         try:
+            self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
+            skiplevel = self.addLevel(1)
+            self.write_print_to_stderr(0,
+                                       f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+            self.restoreLevel(skiplevel)
             # Specific h5py type checks
-            self.write(0, f"if isinstance({target_obj_expr_str}, h5py.Dataset):")
+            self.write(0, f"elif isinstance({target_obj_expr_str}, h5py.Dataset):")
             L_is_dataset = self.addLevel(1)
             self.write(0, f"# {self.base_level=}")
             self.write(0, f"# {L_is_dataset=}")
@@ -2241,9 +2254,14 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0,
                                    f'f"--- Fuzzing instance: {target_obj_expr_str} (type hint: {target_obj_class_name}, prefix: {current_prefix}) ---"')
 
+        self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
+        skiplevel = self.addLevel(1)
+        self.write_print_to_stderr(0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+        self.restoreLevel(skiplevel)
+
         # Check if it's an h5py.Dataset and call specialized fuzzing for it
         # We need h5py imported in the generated script for isinstance
-        self.write(0, f"if isinstance({target_obj_expr_str}, h5py.Dataset):")
+        self.write(0, f"elif isinstance({target_obj_expr_str}, h5py.Dataset):")
         level = self.addLevel(1)
         # Use a clean name for logging, e.g., derived from target_obj_expr_str or its HDF5 name
         dset_log_name = target_obj_expr_str.split('.')[-1].strip("')\"")  # Basic heuristic for name
