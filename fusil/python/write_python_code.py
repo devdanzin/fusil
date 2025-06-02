@@ -10,6 +10,7 @@ from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
 import fusil.python.tricky_weird
+import fusil.python.h5py.h5py_tricky_weird
 from fusil.python.arg_numbers import class_arg_number, get_arg_number
 from fusil.python.argument_generator import ArgumentGenerator
 from fusil.python.blacklists import (
@@ -436,7 +437,7 @@ class WritePythonCode(WriteCode):
 
         if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
             self.write(0, "# Executing HDF5 tricky object generation code")
-            self.write(0, fusil.python.tricky_weird.tricky_h5py_code)
+            self.write(0, fusil.python.h5py.h5py_tricky_weird.tricky_h5py_code)
             self.emptyLine()
 
         self.write(
@@ -813,7 +814,7 @@ class WritePythonCode(WriteCode):
                 self.write(0, f"if {ctx_p}_shape is not None and not {ctx_p}_is_empty_dataspace:")
                 L_astype_outer_if = self.addLevel(1)
                 try:
-                    astype_dtype_expr = self.arg_generator.genH5PyAsTypeDtype_expr()
+                    astype_dtype_expr = self.arg_generator.h5py_argument_generator.genH5PyAsTypeDtype_expr()
                     self.write(0, "try:")
                     L_astype_try = self.addLevel(1)
                     try:
@@ -872,7 +873,7 @@ class WritePythonCode(WriteCode):
                 self.write(0, "try:")
                 self.addLevel(1)
                 # The AG method now takes expressions that will evaluate to the shape tuple and base dtype object at runtime
-                data_for_el_expr = self.arg_generator.genArrayForArrayDtypeElement_expr(
+                data_for_el_expr = self.arg_generator.h5py_argument_generator.genArrayForArrayDtypeElement_expr(
                     f'{ctx_p}_el_shape_tuple',  # This variable holds the tuple like (3,) at runtime
                     f'{ctx_p}_base_dt_obj'  # This variable holds the base dtype object like np.dtype('i4') at runtime
                 )
@@ -914,7 +915,7 @@ class WritePythonCode(WriteCode):
                 self.addLevel(1)
                 self.write(0, "try:")
                 self.addLevel(1)
-                large_int_expr = self.arg_generator.genLargePythonInt_expr()
+                large_int_expr = self.arg_generator.h5py_argument_generator.genLargePythonInt_expr()
                 self.write(0, f"val_to_write = {large_int_expr}")
                 self.write(0,
                            f"idx_to_write = randint(0, {ctx_p}_shape[0]-1) if {ctx_p}_shape and {ctx_p}_shape[0]>0 else 0")
@@ -973,7 +974,7 @@ class WritePythonCode(WriteCode):
                 dset_fields_keys_expr = f"list({ctx_p}_dtype_obj.fields.keys()) if {ctx_p}_is_compound and {ctx_p}_dtype_obj.fields else []"
                 # Note: {ctx_p}_rank is already defined as a variable in generated code.
 
-                adv_slice_arg_expr = self.arg_generator.genAdvancedSliceArgument_expr(
+                adv_slice_arg_expr = self.arg_generator.h5py_argument_generator.genAdvancedSliceArgument_expr(
                     f"{ctx_p}_target_dset",  # Pass the dataset variable name itself
                     f"{ctx_p}_rank",
                     dset_fields_keys_expr
@@ -1073,7 +1074,7 @@ class WritePythonCode(WriteCode):
 
             # Call .astype()
             if random() < 0.4:  # Chance to try astype
-                astype_dtype_expr = self.arg_generator.genH5PyAsTypeDtype_expr()
+                astype_dtype_expr = self.arg_generator.h5py_argument_generator.genH5PyAsTypeDtype_expr()
                 self.write(0,
                            f"if {ctx_p}_shape is not None and not {ctx_p}_is_empty_dataspace:")  # Astype on empty might be problematic or less interesting for now
                 self.addLevel(1)
@@ -1104,8 +1105,8 @@ class WritePythonCode(WriteCode):
                 self.write(0,
                            f"if {ctx_p}_is_string_like and {ctx_p}_shape is not None and not {ctx_p}_is_empty_dataspace:")
                 self.addLevel(1)
-                asstr_enc_expr = self.arg_generator.genH5PyAsStrEncoding_expr()
-                asstr_err_expr = self.arg_generator.genH5PyAsStrErrors_expr()
+                asstr_enc_expr = self.arg_generator.h5py_argument_generator.genH5PyAsStrEncoding_expr()
+                asstr_err_expr = self.arg_generator.h5py_argument_generator.genH5PyAsStrErrors_expr()
                 self.write(0, f"try:")
                 self.addLevel(1)
                 self.write(0,
@@ -1160,7 +1161,7 @@ class WritePythonCode(WriteCode):
                            f"if {ctx_p}_is_chunked and not {ctx_p}_is_empty_dataspace and {ctx_p}_rank is not None:")  # Added rank check
                 self.addLevel(1)
                 # Use the new AG method, passing the name of the runtime rank variable
-                sel_expr_iter = self.arg_generator.genH5PySliceForDirectIO_expr_runtime(f"{ctx_p}_rank")
+                sel_expr_iter = self.arg_generator.h5py_argument_generator.genH5PySliceForDirectIO_expr_runtime(f"{ctx_p}_rank")
 
                 self.write(0, f"try:")
                 self.addLevel(1)
@@ -1186,8 +1187,8 @@ class WritePythonCode(WriteCode):
             # Call read_direct() / write_direct()
             if random() < 0.5 and not ctx_p + "_is_empty_dataspace" and f"{ctx_p}_rank is not None":
                 # ...
-                source_sel_expr = self.arg_generator.genH5PySliceForDirectIO_expr_runtime(f"{ctx_p}_rank")
-                dest_sel_expr = self.arg_generator.genH5PySliceForDirectIO_expr_runtime(
+                source_sel_expr = self.arg_generator.h5py_argument_generator.genH5PySliceForDirectIO_expr_runtime(f"{ctx_p}_rank")
+                dest_sel_expr = self.arg_generator.h5py_argument_generator.genH5PySliceForDirectIO_expr_runtime(
                     f"{ctx_p}_rank")  # Or rank of dest array
 
                 self.write(0,
@@ -1288,7 +1289,7 @@ class WritePythonCode(WriteCode):
 
             # Comparisons
             if random() < 0.3:
-                comp_val_expr = self.arg_generator.genNumpyValueForComparison_expr(f"{ctx_p}_dtype_str")
+                comp_val_expr = self.arg_generator.h5py_argument_generator.genNumpyValueForComparison_expr(f"{ctx_p}_dtype_str")
                 self.write(0, f"if {ctx_p}_dtype_str is not None:")  # Only if dtype context was obtained
                 self.addLevel(1)
                 self.write(0, "try:")
@@ -1481,7 +1482,7 @@ class WritePythonCode(WriteCode):
 
             # --- require_group / require_dataset ---
             if random() < 0.3:
-                req_grp_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
+                req_grp_name_expr = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
                 self.write(0, "try:")
                 L_req_grp_try = self.addLevel(1)
                 try:
@@ -1497,9 +1498,9 @@ class WritePythonCode(WriteCode):
                            f"except Exception as e_reqg_file: print(f'''FILE_OP_ERR ({file_name_for_log}) require_group {req_grp_name_expr}: {{e_reqg_file}} ''', file=sys.stderr)")
 
             if random() < 0.3:
-                req_ds_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
-                req_ds_shape_expr = self.arg_generator.genH5PyDatasetShape_expr()
-                req_ds_dtype_expr = self.arg_generator.genH5PySimpleDtype_expr()  # Or complex
+                req_ds_name_expr = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
+                req_ds_shape_expr = self.arg_generator.h5py_argument_generator.genH5PyDatasetShape_expr()
+                req_ds_dtype_expr = self.arg_generator.h5py_argument_generator.genH5PySimpleDtype_expr()  # Or complex
                 req_ds_exact_expr = choice(["True", "False"])
                 self.write(0, "try:")
                 L_req_ds_try = self.addLevel(1)
@@ -1872,8 +1873,8 @@ class WritePythonCode(WriteCode):
 
             # Create SoftLink
             if random() < 0.3:
-                new_slink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
-                softlink_target_path_expr = self.arg_generator.genH5PyLinkPath_expr(
+                new_slink_name_expr = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
+                softlink_target_path_expr = self.arg_generator.h5py_argument_generator.genH5PyLinkPath_expr(
                     f"getattr({ctx_p}_target_grp, 'name', '/')")
                 self.write(0, "try:")
                 L_slink_try = self.addLevel(1)
@@ -1891,10 +1892,10 @@ class WritePythonCode(WriteCode):
             # Create ExternalLink
             if random() < 0.2:  # and "_h5_external_target_file" in self.parent_python_source.generated_script_globals: (this check is hard here)
                 # Assume _h5_external_target_file is defined in the generated script's global scope
-                new_elink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
-                ext_file_name_expr = self.arg_generator.genH5PyExternalLinkFilename_expr(
+                new_elink_name_expr = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
+                ext_file_name_expr = self.arg_generator.h5py_argument_generator.genH5PyExternalLinkFilename_expr(
                     "getattr(_h5_external_target_file, 'filename', 'missing_ext_file.h5') if '_h5_external_target_file' in globals() and _h5_external_target_file else 'dangling_ext_file.h5'")
-                ext_internal_path_expr = self.arg_generator.genH5PyLinkPath_expr("'/'")  # Path inside the external file
+                ext_internal_path_expr = self.arg_generator.h5py_argument_generator.genH5PyLinkPath_expr("'/'")  # Path inside the external file
                 self.write(0, "try:")
                 L_elink_try = self.addLevel(1)
                 try:
@@ -1910,8 +1911,8 @@ class WritePythonCode(WriteCode):
 
             # Create HardLink
             if random() < 0.3:
-                new_hlink_name_expr = self.arg_generator.genH5PyNewLinkName_expr()
-                existing_object_to_link_expr = self.arg_generator.genH5PyExistingObjectPath_expr(f"{ctx_p}_target_grp")
+                new_hlink_name_expr = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
+                existing_object_to_link_expr = self.arg_generator.h5py_argument_generator.genH5PyExistingObjectPath_expr(f"{ctx_p}_target_grp")
                 self.write(0, "try:")
                 L_hlink_try = self.addLevel(1)
                 try:
@@ -2000,7 +2001,7 @@ class WritePythonCode(WriteCode):
             # Call require_group and require_dataset
             # ... (similar try/finally structure for these if they use addLevel internally, but they are simple calls usually)
             if random() < 0.2:
-                req_grp_name = self.arg_generator.genH5PyNewLinkName_expr()
+                req_grp_name = self.arg_generator.h5py_argument_generator.genH5PyNewLinkName_expr()
                 self.write(0,
                            f"try: {ctx_p}_req_grp = {ctx_p}_target_grp.require_group({req_grp_name}); print(f'''GRP_OP ({group_name_for_log}): require_group {req_grp_name} -> {{{ctx_p}_req_grp!r}} ''', file=sys.stderr)")
                 self.write(0,
@@ -2023,8 +2024,8 @@ class WritePythonCode(WriteCode):
         # In WritePythonCode._write_h5py_file(self):
 
         # 1. Get actual driver and mode strings first
-        actual_driver = self.arg_generator.genH5PyFileDriver_actualval()  # New AG method
-        actual_mode = self.arg_generator.genH5PyFileMode_actualval()  # New AG method
+        actual_driver = self.arg_generator.h5py_argument_generator.genH5PyFileDriver_actualval()  # New AG method
+        actual_mode = self.arg_generator.h5py_argument_generator.genH5PyFileMode_actualval()  # New AG method
 
         driver_expr = f"'{actual_driver}'" if actual_driver else "None"
         mode_expr = f"'{actual_mode}'"
@@ -2042,7 +2043,7 @@ class WritePythonCode(WriteCode):
             # incompatible options with driver='core', backing_store=False if path is just an ID.
             # The generation of driver_kwargs needs to be smarter.
             # For now, let's assume it's generated:
-            driver_kwargs_str_list = self.arg_generator.genH5PyDriverKwargs(actual_driver)
+            driver_kwargs_str_list = self.arg_generator.h5py_argument_generator.genH5PyDriverKwargs(actual_driver)
             driver_kwargs_expr = "".join(driver_kwargs_str_list)
             if "backing_store=True" in driver_kwargs_expr:
                 is_core_backing = True
@@ -2050,7 +2051,7 @@ class WritePythonCode(WriteCode):
         # 3. Generate the file name or object expression
         #    This is a crucial change. gen_h5py_file_name_or_object needs to be implemented in AG.
         #    It might return a variable name like 'temp_file_path_xyz' if it means a disk file.
-        name_arg_expression, setup_code_lines = self.arg_generator.gen_h5py_file_name_or_object(
+        name_arg_expression, setup_code_lines = self.arg_generator.h5py_argument_generator.gen_h5py_file_name_or_object(
             actual_driver, actual_mode, is_core_backing
         )
 
@@ -2058,9 +2059,9 @@ class WritePythonCode(WriteCode):
             self.write(0, line)
 
         # 4. Generate other kwargs
-        libver_expr = "".join(self.arg_generator.genH5PyLibver())
-        userblock_val_str = "".join(self.arg_generator.genH5PyUserblockSize())  # e.g., "512"
-        locking_expr = "".join(self.arg_generator.genH5PyLocking())
+        libver_expr = "".join(self.arg_generator.h5py_argument_generator.genH5PyLibver())
+        userblock_val_str = "".join(self.arg_generator.h5py_argument_generator.genH5PyUserblockSize())  # e.g., "512"
+        locking_expr = "".join(self.arg_generator.h5py_argument_generator.genH5PyLocking())
         fs_kwargs_expr = ""  # Default to empty
 
         all_kwargs = []
@@ -2076,7 +2077,7 @@ class WritePythonCode(WriteCode):
 
             # Your fs_strategy tweak - apply only for creation modes
             if randint(0, 9) > 1:  # Reduced chance further from your "> 8" if still too many errors
-                fs_kwargs_str_list_temp = self.arg_generator.genH5PyFsStrategyKwargs()
+                fs_kwargs_str_list_temp = self.arg_generator.h5py_argument_generator.genH5PyFsStrategyKwargs()
                 fs_kwargs_expr_temp = "".join(fs_kwargs_str_list_temp)
                 if fs_kwargs_expr_temp:  # Only add if it generated something
                     all_kwargs.append(fs_kwargs_expr_temp)
@@ -2121,9 +2122,9 @@ class WritePythonCode(WriteCode):
         # It's often safer to create dataset first, then write data.
         # Or, create with shape and dtype, and let h5py handle/error on data.
 
-        shape_expr = self.arg_generator.genH5PyDatasetShape_expr()
+        shape_expr = self.arg_generator.h5py_argument_generator.genH5PyDatasetShape_expr()
         if random() < 0.4:  # 40% chance to try a complex dtype
-            dtype_expr = self.arg_generator.genH5PyComplexDtype_expr()
+            dtype_expr = self.arg_generator.h5py_argument_generator.genH5PyComplexDtype_expr()
             # Data generation for complex dtypes is hard; often best to omit data or use h5py.Empty
             if random() < 0.8 or "vlen" in dtype_expr or "enum" in dtype_expr:  # Higher chance to omit data for these
                 data_expr = "None"
@@ -2135,8 +2136,8 @@ class WritePythonCode(WriteCode):
                 data_expr = f"h5py.Empty(dtype={dtype_expr})"
                 # Shape should remain None if data is h5py.Empty
         else:
-            dtype_expr = self.arg_generator.genH5PySimpleDtype_expr()
-            data_expr = self.arg_generator.genH5PyData_expr(shape_expr, dtype_expr)  # Existing logic
+            dtype_expr = self.arg_generator.h5py_argument_generator.genH5PySimpleDtype_expr()
+            data_expr = self.arg_generator.h5py_argument_generator.genH5PyData_expr(shape_expr, dtype_expr)  # Existing logic
 
         # Most other parameters are kwargs
         kwargs_list = []
@@ -2145,31 +2146,31 @@ class WritePythonCode(WriteCode):
 
         # Chunks: scaleoffset needs chunks. Some compression benefits from chunks.
         # maxshape always implies chunks (auto-created if not specified).
-        chunks_expr = self.arg_generator.genH5PyDatasetChunks_expr(shape_expr)
+        chunks_expr = self.arg_generator.h5py_argument_generator.genH5PyDatasetChunks_expr(shape_expr)
         if chunks_expr != "None":  # Only add if not default contiguous
             kwargs_list.append(f"chunks={chunks_expr}")
             # If chunks are being set, it's safer to also set maxshape if we want resizability
             if random() < 0.5:  # Chance to add maxshape if chunked
-                kwargs_list.append(f"maxshape={self.arg_generator.genH5PyMaxshape_expr(shape_expr)}")
+                kwargs_list.append(f"maxshape={self.arg_generator.h5py_argument_generator.genH5PyMaxshape_expr(shape_expr)}")
 
         # Fillvalue and FillTime
         # fillvalue needs to be compatible with dtype.
         # genH5PyFillvalue_expr tries to do this for simple dtypes.
         if random() < 0.7:  # 70% chance to specify fillvalue
-            fv_expr = self.arg_generator.genH5PyFillvalue_expr(dtype_expr)
+            fv_expr = self.arg_generator.h5py_argument_generator.genH5PyFillvalue_expr(dtype_expr)
             if fv_expr != "None":  # if generator provided something specific
                 kwargs_list.append(f"fillvalue={fv_expr}")
 
         if random() < 0.5:  # 50% chance to specify fill_time
-            kwargs_list.append(f"fill_time={self.arg_generator.genH5PyFillTime_expr()}")
+            kwargs_list.append(f"fill_time={self.arg_generator.h5py_argument_generator.genH5PyFillTime_expr()}")
 
         # Compression and other filters
-        compression_kwargs = self.arg_generator.genH5PyCompressionKwargs_expr()  # This returns a list of "kw=val"
+        compression_kwargs = self.arg_generator.h5py_argument_generator.genH5PyCompressionKwargs_expr()  # This returns a list of "kw=val"
         kwargs_list.extend(compression_kwargs)
 
         # Track times
         if random() < 0.5:
-            kwargs_list.append(f"track_times={self.arg_generator.genH5PyTrackTimes_expr()}")
+            kwargs_list.append(f"track_times={self.arg_generator.h5py_argument_generator.genH5PyTrackTimes_expr()}")
 
         # Assemble the create_dataset call string
         # Base parameters are shape and dtype, others are kwargs
@@ -2196,21 +2197,21 @@ class WritePythonCode(WriteCode):
 
         if chunks_expr != "None": all_kwargs_dict["chunks"] = chunks_expr
         if random() < 0.5 and "chunks" in all_kwargs_dict:  # maxshape often with chunks
-            all_kwargs_dict["maxshape"] = self.arg_generator.genH5PyMaxshape_expr(shape_expr)
+            all_kwargs_dict["maxshape"] = self.arg_generator.h5py_argument_generator.genH5PyMaxshape_expr(shape_expr)
 
         if random() < 0.7:
-            fv_expr = self.arg_generator.genH5PyFillvalue_expr(dtype_expr)
+            fv_expr = self.arg_generator.h5py_argument_generator.genH5PyFillvalue_expr(dtype_expr)
             if fv_expr != "None": all_kwargs_dict["fillvalue"] = fv_expr
         if random() < 0.5:
-            all_kwargs_dict["fill_time"] = self.arg_generator.genH5PyFillTime_expr()
+            all_kwargs_dict["fill_time"] = self.arg_generator.h5py_argument_generator.genH5PyFillTime_expr()
 
-        compression_kwargs_strings = self.arg_generator.genH5PyCompressionKwargs_expr()  # list of "key=val"
+        compression_kwargs_strings = self.arg_generator.h5py_argument_generator.genH5PyCompressionKwargs_expr()  # list of "key=val"
         for comp_kw_str in compression_kwargs_strings:
             key, val = comp_kw_str.split('=', 1)
             all_kwargs_dict[key] = val  # Assumes val is already a valid expression string
 
         if random() < 0.5:
-            all_kwargs_dict["track_times"] = self.arg_generator.genH5PyTrackTimes_expr()
+            all_kwargs_dict["track_times"] = self.arg_generator.h5py_argument_generator.genH5PyTrackTimes_expr()
 
         final_kwargs_str = ", ".join(f"{k}={v}" for k, v in all_kwargs_dict.items() if v is not None)
 
@@ -2355,12 +2356,12 @@ class WritePythonCode(WriteCode):
             if random() < 0.6:
                 num_attr_ops = randint(1, 3)
                 for i in range(num_attr_ops):
-                    attr_name_expr = self.arg_generator.genH5PyAttributeName_expr()  # Needs to be defined in AG
+                    attr_name_expr = self.arg_generator.h5py_argument_generator.genH5PyAttributeName_expr()  # Needs to be defined in AG
                     # For AttributeValue, it can be simple types, strings, or small numpy arrays
                     # Let's use a generic value generator for now, or a specialized one.
-                    attr_val_dtype_expr = self.arg_generator.genH5PySimpleDtype_expr()  # For numpy array attr
+                    attr_val_dtype_expr = self.arg_generator.h5py_argument_generator.genH5PySimpleDtype_expr()  # For numpy array attr
                     attr_val_shape_expr = choice(["()", "(randint(1,3),)"])
-                    attr_val_expr = self.arg_generator.genH5PyData_expr(attr_val_shape_expr,
+                    attr_val_expr = self.arg_generator.h5py_argument_generator.genH5PyData_expr(attr_val_shape_expr,
                                                                         attr_val_dtype_expr)  # Reuse for data
 
                     self.write(0, f"# Attribute operation {i + 1}")
