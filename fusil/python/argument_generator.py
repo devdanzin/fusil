@@ -926,6 +926,29 @@ class ArgumentGenerator:
             f".reshape({element_shape_tuple_expr_str})"
         )
 
+    def genH5PyAttributeName_expr(self) -> str:
+        # Simple names, long names, names with some chars (h5py might restrict)
+        # For now, simple alphanumeric + underscore
+        name_len = randint(1, 20)
+        name = "".join(choice("abcdefghijklmnopqrstuvwxyz_0123456789") for _ in range(name_len))
+        if random() < 0.1: name = "very_long_attribute_name_" + uuid.uuid4().hex[:16]
+        if random() < 0.1: name = "attr_with_unicode_😀"  # Test unicode if h5py supports it for attr names
+        return f"'{name}'"
+
+    def genH5PyAttributeValue_expr(self) -> str:  # Simplified, can reuse other generators
+        """Generates a Python expression for an attribute value."""
+        choice = randint(0, 3)
+        if choice == 0:  # Simple scalar
+            return self.genInt()  # Returns list, take first
+        elif choice == 1:
+            return self.genFloat()[0]
+        elif choice == 2:  # String
+            return self.genString()[0]  # Returns "escaped_string"
+        else:  # Small numpy array
+            dtype_expr = self.genH5PySimpleDtype_expr()
+            # Attributes typically store small arrays or scalars
+            return f"numpy.arange({randint(1, 5)}, dtype={dtype_expr})"
+
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""
         return [choice(TEMPLATES)]

@@ -26,9 +26,13 @@ class WriteCode:
     def addLevel(self, delta):
         level = self.base_level
         self.base_level += delta
+        if self.base_level < 0:
+            raise ValueError("Negative indentation level in addLevel()")
         return level
 
     def restoreLevel(self, level):
+        if level < 0:
+            raise ValueError("Negative indentation level in restoreLevel()")
         self.base_level = level
 
     def indentLine(self, level, text):
