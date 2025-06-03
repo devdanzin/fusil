@@ -1,3 +1,24 @@
+"""
+Defines h5py-specific "tricky" and "weird" objects for fuzzing.
+
+This module provides a list of names (`tricky_h5py_names`) and a corresponding
+string of Python code (`tricky_h5py_code`). When `tricky_h5py_code` is
+executed in a fuzzing script, it populates a dictionary named
+`h5py_tricky_objects`. This dictionary contains various h5py File, Group,
+Dataset, Datatype, and AttributeManager objects configured in ways that
+are intended to trigger edge cases or expose bugs in the h5py library.
+
+The `tricky_h5py_names` list serves as an inventory of keys for the
+`h5py_tricky_objects` dictionary, allowing the argument generator to
+retrieve these pre-initialized, complex h5py objects by name.
+"""
+
+# List of names for predefined "tricky" h5py objects.
+# These names are used as keys in the `h5py_tricky_objects` dictionary
+# that is populated by the `tricky_h5py_code` string when executed in
+# the generated fuzzing script. Each name typically corresponds to an h5py
+# object (File, Group, Dataset, etc.) created with specific configurations
+# intended to test edge cases or replicate known bug scenarios.
 tricky_h5py_names = [
     # File objects
     "h5_file_readonly_core",
@@ -258,6 +279,17 @@ tricky_h5py_names = [
     # Note: Issue #2558 (libver with core driver) is covered by dynamic file creation (Category A additions to AG)
     # and the existing "h5_file_libver_*" objects, if they use the core driver.
 ]
+
+# Python code string to be executed in the generated fuzzing script.
+# This code imports necessary h5py and numpy, defines helper functions,
+# and then creates a variety of h5py objects (Files, Groups, Datasets, etc.)
+# with diverse and potentially problematic configurations. These objects are
+# stored in the `h5py_tricky_objects` dictionary, keyed by names from
+# `tricky_h5py_names`. This dictionary is then used by the argument generator
+# to inject these pre-configured complex objects into fuzzed h5py API calls.
+# The code is structured with try-except blocks to handle potential errors during
+# object creation gracefully, allowing the fuzzing script to continue even if some
+# tricky objects cannot be initialized.
 tricky_h5py_code = """
 import uuid # For unique names where needed
 import h5py
