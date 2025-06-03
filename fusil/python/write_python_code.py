@@ -675,16 +675,16 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit if methods
         # --- End Generic Method Fuzzing Logic ---
-        self.restoreLevel(self.base_level - 1)  # Exit else
-        self.write(0, f"# {self.base_level=}")
-        self.restoreLevel(self.base_level - 1)  # Exit "if target_obj_expr_str is not None:"
-        self.write(0, "else:")
-        self.addLevel(1)
-        self.write(0, f"# {self.base_level=}")
-        self.write_print_to_stderr(0,
-                                   f"f'Instance {target_obj_expr_str} (hint: type({target_obj_expr_str}) is None, skipping fuzz dispatch.'")
-        self.restoreLevel(self.base_level - 1)
-        self.write(0, f"# {self.base_level=}")
+        # # self.restoreLevel(self.base_level - 1)  # Exit else
+        # self.write(0, f"# {self.base_level=}")
+        # self.restoreLevel(self.base_level - 1)  # Exit "if target_obj_expr_str is not None:"
+        # self.write(0, "else:")
+        # self.addLevel(1)
+        # self.write(0, f"# {self.base_level=}")
+        # self.write_print_to_stderr(0,
+        #                            f"f'Instance {target_obj_expr_str} (hint: type({target_obj_expr_str}) is None, skipping fuzz dispatch.'")
+        # self.restoreLevel(self.base_level - 1)
+        # self.write(0, f"# {self.base_level=}")
         self.emptyLine()
 
     def _fuzz_methods_on_object_or_specific_types(
