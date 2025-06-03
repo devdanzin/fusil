@@ -43,7 +43,7 @@ ERRBACK_NAME_CONST = "errback"
 try:
     from fusil.python.template_strings import TEMPLATES
 except ImportError:
-    TEMPLATES = None
+    TEMPLATES = []
 
 
 class ArgumentGenerator:
@@ -116,6 +116,7 @@ class ArgumentGenerator:
         )
         if not self.options.no_numpy and use_numpy:
             self.simple_argument_generators += (self.genTrickyNumpy,) * 50
+            assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
             self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
         self.complex_argument_generators: tuple[Callable[[], list[str]], ...] = (
             self.genList,
@@ -132,6 +133,7 @@ class ArgumentGenerator:
 
         if not self.options.no_numpy and use_numpy:
             if use_h5py:
+                assert  isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
                 self.simple_argument_generators += (
                     self.h5py_argument_generator.genH5PyObject,
                 ) * 50

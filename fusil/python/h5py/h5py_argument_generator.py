@@ -261,7 +261,7 @@ class H5PyArgumentGenerator:
                 elif bs and random() < 0.2:
                     kwargs_parts.append(f"block_size={choice([512, 4096])}")
         # Add other driver specific kwargs here if needed (e.g., for 'direct')
-        return ["", ", ".join(kwargs_parts)][len(kwargs_parts) > 0]
+        return [["", ", ".join(kwargs_parts)][len(kwargs_parts) > 0]]
 
     def genH5PySimpleDtype_expr(self) -> str:
         """

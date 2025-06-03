@@ -489,7 +489,7 @@ class WritePythonCode(WriteCode):
             f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
         )
 
-        if not self.h5py_writer.fuzz_one_h5py_class(
+        if self.h5py_writer and not self.h5py_writer.fuzz_one_h5py_class(
             class_name_str, class_type, instance_var_name, prefix
         ):
             num_constructor_args = class_arg_number(class_name_str, class_type)
