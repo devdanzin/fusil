@@ -642,7 +642,7 @@ class H5PyArgumentGenerator:
     choice(["non_existent_field", "another_bad_field"])
 )({dataset_fields_keys_expr_str})
 """
-        return " ".join(lambda_expr.strip().splitlines())
+        return "\n".join(lambda_expr.strip().splitlines())
 
     def genH5PyMultiBlockSlice_expr(self, dataset_1d_len_expr_str: str = "100") -> str:
         """
@@ -659,11 +659,11 @@ class H5PyArgumentGenerator:
 (lambda L: h5py.MultiBlockSlice(
     start=randint(0, max(0, L//2 if L else 10)),
     count=randint(1, max(1, L//4 if L else 5)) if random() < 0.8 else None,
-    stride=randint(0, max(1, L//5 if L else 8)) if random() < 0.9 else 1, # stride 0 is problematic
+    stride=randint(0, max(1, L//5 if L else 8)) if random() < 0.9 else 1,
     block=randint(1, max(1, L//5 if L else 8)) if random() < 0.8 else 1
 ))({dataset_1d_len_expr_str} if isinstance({dataset_1d_len_expr_str}, int) else 100)
 """
-        return " ".join(lambda_expr.strip().splitlines())
+        return "\n".join(lambda_expr.strip().splitlines())
 
     def genH5PyRegionReferenceForSlicing_expr(self, dataset_expr_str: str, dataset_rank_expr_str: str) -> str:
         """
