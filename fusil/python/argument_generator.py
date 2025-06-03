@@ -21,9 +21,9 @@ import numpy
 
 import fusil.python
 import fusil.python.h5py.h5py_tricky_weird
-from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 from fusil.bytes_generator import BytesGenerator
 from fusil.config import FusilConfig
+from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 from fusil.unicode_generator import (

@@ -7,8 +7,8 @@ strings. These are used by the main fuzzing engine to construct calls to
 h5py functions and methods.
 """
 import sys
-from random import choice, randint, random, uniform
 import uuid
+from random import choice, randint, random, uniform
 
 import h5py
 import numpy

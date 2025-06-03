@@ -8,8 +8,8 @@ from textwrap import dedent
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
-import fusil.python.tricky_weird
 import fusil.python.h5py.h5py_tricky_weird
+import fusil.python.tricky_weird
 from fusil.python.arg_numbers import class_arg_number, get_arg_number
 from fusil.python.argument_generator import ArgumentGenerator
 from fusil.python.blacklists import (
@@ -17,9 +17,9 @@ from fusil.python.blacklists import (
     METHOD_BLACKLIST,
     OBJECT_BLACKLIST,
 )
+from fusil.python.h5py.write_h5py_code import WriteH5PyCode
 from fusil.python.mangle import mangle_loop, mangle_obj
 from fusil.write_code import WriteCode
-from fusil.python.h5py.write_h5py_code import WriteH5PyCode
 
 if TYPE_CHECKING:
     from fusil.python.python_source import PythonSource
@@ -560,6 +560,7 @@ class WritePythonCode(WriteCode):
             class_name_hint: str,  # Can be a runtime type string like "type(obj).__name__"
             generation_depth: int
     ):
+        """Dispatches fuzzing operations for a given object instance."""
         if generation_depth > self.MAX_FUZZ_GENERATION_DEPTH:
             self.write_print_to_stderr(0,
                                        f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'")
@@ -680,6 +681,7 @@ class WritePythonCode(WriteCode):
             target_obj_actual_type_obj: Any,  # The actual type object if available to WritePythonCode, else None
             num_method_calls_to_make: int
     ):
+        """Fuzzes methods of a given object, with special handling for specific types."""
         self.write_print_to_stderr(0,
                                    f'f"--- Fuzzing instance: {target_obj_expr_str} (type hint: {target_obj_class_name}, prefix: {current_prefix}) ---"')
 
