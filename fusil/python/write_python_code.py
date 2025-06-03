@@ -53,7 +53,8 @@ EXCEPTION_NAMES = {
     for cls in builtins.__dict__.values()
     if isinstance(cls, type) and issubclass(cls, Exception)
 }
-
+TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None),}
+TRIVIAL_TYPES_STR = "{int, str, float, bool, bytes, tuple, list, dict, set, type(None),}"
 
 class PythonFuzzerError(Exception):
     """Custom exception raised when fuzzer encounters unrecoverable errors."""
@@ -185,18 +186,7 @@ class WritePythonCode(WriteCode):
     ) -> dict[str, Callable[..., Any]]:
         """Extracts callable methods from an object or class, respecting blacklists."""
         methods: dict[str, Callable[..., Any]] = {}
-        if type(obj_instance_or_class) in {
-            int,
-            str,
-            float,
-            bool,
-            bytes,
-            tuple,
-            list,
-            dict,
-            set,
-            type(None),
-        }:
+        if type(obj_instance_or_class) in TRIVIAL_TYPES:
             return methods
 
         try:
@@ -285,8 +275,8 @@ class WritePythonCode(WriteCode):
         if self.h5py_writer:
             self.h5py_writer._write_h5py_script_header_and_imports()
 
-        self.write(0, dedent("""\
-        TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None),}
+        self.write(0, dedent(f"""\
+        TRIVIAL_TYPES = {TRIVIAL_TYPES_STR}
         def skip_trivial_type(obj_instance_or_class):
             if type(obj_instance_or_class) in TRIVIAL_TYPES:
                 return True
@@ -626,7 +616,12 @@ class WritePythonCode(WriteCode):
         # 3. In each iteration, choosing a random method.
         # 4. Calling `self._generate_and_write_call` for that method.
         # The deep dive part comes if _generate_and_write_call is enhanced.
-        # self.addLevel(1)
+        self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
+        skiplevel = self.addLevel(1)
+        self.write_print_to_stderr(0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+        self.restoreLevel(skiplevel)
+        self.write(0, "else:")
+        elselevel = self.addLevel(1)
         self.write_print_to_stderr(0,
                                    f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'")
         # --- Generic Method Fuzzing Logic ---
@@ -674,17 +669,7 @@ class WritePythonCode(WriteCode):
                    f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)")  # Example simplified call
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit if methods
-        # --- End Generic Method Fuzzing Logic ---
-        # # self.restoreLevel(self.base_level - 1)  # Exit else
-        # self.write(0, f"# {self.base_level=}")
-        # self.restoreLevel(self.base_level - 1)  # Exit "if target_obj_expr_str is not None:"
-        # self.write(0, "else:")
-        # self.addLevel(1)
-        # self.write(0, f"# {self.base_level=}")
-        # self.write_print_to_stderr(0,
-        #                            f"f'Instance {target_obj_expr_str} (hint: type({target_obj_expr_str}) is None, skipping fuzz dispatch.'")
-        # self.restoreLevel(self.base_level - 1)
-        # self.write(0, f"# {self.base_level=}")
+        self.restoreLevel(elselevel)  # Exit else
         self.emptyLine()
 
     def _fuzz_methods_on_object_or_specific_types(
