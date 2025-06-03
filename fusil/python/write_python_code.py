@@ -170,7 +170,7 @@ class WritePythonCode(WriteCode):
                     continue
                 classes.append(name)
             else:
-                if isinstance(attr, ModuleType):
+                if isinstance(attr, ModuleType) or type(attr) in TRIVIAL_TYPES:
                     continue
                 if (
                     not self.options.fuzz_exceptions
