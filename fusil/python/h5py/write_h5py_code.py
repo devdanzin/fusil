@@ -276,7 +276,7 @@ class WriteH5PyCode:
                 try:
                     self.parent.write(0, f"{ctx_p}_attrs_obj = {ctx_p}_target_dset.attrs")
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'DS_ATTRS_ACCESS ({dset_name_for_log}): Got .attrs object {{ {ctx_p}_attrs_obj!r }}. Dispatching fuzz.'")
+                                                      f"f'''DS_ATTRS_ACCESS ({dset_name_for_log}): Got .attrs object {{ {ctx_p}_attrs_obj!r }}. Dispatching fuzz.'''")
                     self.parent._dispatch_fuzz_on_instance(  # Call parent's dispatcher
                         current_prefix=f"{prefix}_attrs",
                         target_obj_expr_str=f"{ctx_p}_attrs_obj",
@@ -286,7 +286,7 @@ class WriteH5PyCode:
                 finally:
                     self.parent.restoreLevel(L_attrs_try)
                 self.parent.write(0,
-                                  "except Exception as e_attrs_access: print(f'DS_ATTRS_ACCESS_ERR ({dset_name_for_log}): {{e_attrs_access}}', file=sys.stderr)")
+                                  f"except Exception as e_attrs_access: print(f'''DS_ATTRS_ACCESS_ERR ({dset_name_for_log}): {{e_attrs_access}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             # Fuzz .astype() result
@@ -300,7 +300,7 @@ class WriteH5PyCode:
                     try:
                         self.parent.write(0, f"{ctx_p}_astype_view = {ctx_p}_target_dset.astype({astype_dtype_expr})")
                         self.parent.write_print_to_stderr(0,
-                                                          f"f'DS_ASTYPE ({dset_name_for_log}): view created. Dispatching fuzz on view.'")
+                                                          f"f'''DS_ASTYPE ({dset_name_for_log}): view created. Dispatching fuzz on view.'''")
                         self.parent._dispatch_fuzz_on_instance(  # Call parent's dispatcher
                             current_prefix=f"{prefix}_astype_view",
                             target_obj_expr_str=f"{ctx_p}_astype_view",
@@ -328,7 +328,7 @@ class WriteH5PyCode:
                                   f"assert isinstance({ctx_p}_item, numpy.void), f'Expected np.void, got {{type({ctx_p}_item)}}'")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue135: print(f'G_ISSUE135_ERR ({dset_name_for_log}): {{e_issue135}}', file=sys.stderr)")
+                                  f"except Exception as e_issue135: print(f'''G_ISSUE135_ERR ({dset_name_for_log}): {{e_issue135}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.emptyLine()
 
@@ -352,11 +352,11 @@ class WriteH5PyCode:
                 self.parent.addLevel(1)
                 self.parent.write(0, f"{ctx_p}_target_dset[0] = {ctx_p}_data_for_el")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'G_ISSUE211_B ({dset_name_for_log}): Element write attempted with data of shape {{{ctx_p}_data_for_el.shape}}.'")
+                                                  f"f'''G_ISSUE211_B ({dset_name_for_log}): Element write attempted with data of shape {{{ctx_p}_data_for_el.shape}}.'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue211b: print(f'G_ISSUE211_B_ERR ({dset_name_for_log}): {{e_issue211b}}', file=sys.stderr)")
+                                  f"except Exception as e_issue211b: print(f'''G_ISSUE211_B_ERR ({dset_name_for_log}): {{e_issue211b}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.emptyLine()
 
@@ -369,12 +369,12 @@ class WriteH5PyCode:
                 self.parent.write(0, f"storage_size = {ctx_p}_target_dset.id.get_storage_size()")
                 self.parent.write(0, f"offset = {ctx_p}_target_dset.id.get_offset()")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'G_ISSUE1475 ({dset_name_for_log}): Empty dataspace. Storage={{storage_size}}, Offset={{offset}} (expected 0 and None)'")
+                                                  f"f'''G_ISSUE1475 ({dset_name_for_log}): Empty dataspace. Storage={{storage_size}}, Offset={{offset}} (expected 0 and None)'''")
                 self.parent.write(0, "assert storage_size == 0, 'Storage size non-zero for empty dataspace'")
                 self.parent.write(0, "assert offset is None, 'Offset not None for empty dataspace'")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue1475: print(f'G_ISSUE1475_ERR ({dset_name_for_log}): {{e_issue1475}}', file=sys.stderr)")
+                                  f"except Exception as e_issue1475: print(f'''G_ISSUE1475_ERR ({dset_name_for_log}): {{e_issue1475}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.emptyLine()
 
@@ -391,10 +391,10 @@ class WriteH5PyCode:
                 self.parent.write(0,
                                   f"if {ctx_p}_shape and {ctx_p}_actual_product_shape > 0 : {ctx_p}_target_dset[idx_to_write] = val_to_write")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'G_ISSUE1547 ({dset_name_for_log}): Wrote {{val_to_write}} to uint64 dataset at index {{idx_to_write}}'")
+                                                  f"f'''G_ISSUE1547 ({dset_name_for_log}): Wrote {{val_to_write}} to uint64 dataset at index {{idx_to_write}}'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue1547: print(f'G_ISSUE1547_ERR ({dset_name_for_log}): {{e_issue1547}}', file=sys.stderr)")
+                                  f"except Exception as e_issue1547: print(f'''G_ISSUE1547_ERR ({dset_name_for_log}): {{e_issue1547}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.emptyLine()
 
@@ -410,7 +410,7 @@ class WriteH5PyCode:
                 self.parent.write(0, f"# Attempt write before resize (might be error or no-op)")
                 self.parent.write(0, f"{ctx_p}_target_dset[()] = 0")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'G_ISSUE2549 ({dset_name_for_log}): Attempted write to initially zero-size resizable dataset.'")
+                                                  f"f'''G_ISSUE2549 ({dset_name_for_log}): Attempted write to initially zero-size resizable dataset.'''")
                 self.parent.write(0, f"# Now resize and write")
                 new_len = randint(1, 5)
                 self.parent.write(0, f"new_shape_tuple_parts = ({new_len},) + ({ctx_p}_shape[1:] if {ctx_p}_rank > 1 else ())")
@@ -420,14 +420,14 @@ class WriteH5PyCode:
                                   f"data_for_resize = numpy.arange(numpy.prod(new_shape_for_resize), dtype={ctx_p}_dtype_obj).reshape(new_shape_for_resize)")
                 self.parent.write(0, f"{ctx_p}_target_dset[...] = data_for_resize")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'G_ISSUE2549 ({dset_name_for_log}): Resized to {{new_shape_for_resize}} and wrote data.'")
+                                                  f"f'''G_ISSUE2549 ({dset_name_for_log}): Resized to {{new_shape_for_resize}} and wrote data.'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue2549_ops: print(f'G_ISSUE2549_OPS_ERR ({dset_name_for_log}): {{e_issue2549_ops}}', file=sys.stderr)")
+                                  f"except Exception as e_issue2549_ops: print(f'''G_ISSUE2549_OPS_ERR ({dset_name_for_log}): {{e_issue2549_ops}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_issue2549_setup: print(f'G_ISSUE2549_SETUP_ERR ({dset_name_for_log}): {{e_issue2549_setup}}', file=sys.stderr)")
+                                  f"except Exception as e_issue2549_setup: print(f'''G_ISSUE2549_SETUP_ERR ({dset_name_for_log}): {{e_issue2549_setup}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             # Advanced Slicing Operations
@@ -443,13 +443,13 @@ class WriteH5PyCode:
                 self.parent.addLevel(1)
                 self.parent.write(0, f"{ctx_p}_adv_slice_obj = {adv_slice_arg_expr}")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'DS_ADV_SLICE ({dset_name_for_log}): Attempting slice with {{repr({ctx_p}_adv_slice_obj)}}'")
+                                                  f"f'''DS_ADV_SLICE ({dset_name_for_log}): Attempting slice with {{repr({ctx_p}_adv_slice_obj)}}'''")
                 # Read attempt
                 self.parent.write(0, f"if not {ctx_p}_is_empty_dataspace:")
                 self.parent.addLevel(1)
                 self.parent.write(0, f"{ctx_p}_read_data = {ctx_p}_target_dset[{ctx_p}_adv_slice_obj]")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'DS_ADV_SLICE_READ ({dset_name_for_log}): Sliced data shape {{getattr({ctx_p}_read_data, \"shape\", \"N/A\")}}'")
+                                                  f"f'''DS_ADV_SLICE_READ ({dset_name_for_log}): Sliced data shape {{getattr({ctx_p}_read_data, \"shape\", \"N/A\")}}'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 # Write attempt
                 self.parent.write(0,
@@ -466,7 +466,7 @@ class WriteH5PyCode:
                 self.parent.addLevel(1)
                 self.parent.write(0, f"{ctx_p}_data_for_write = numpy.zeros_like({ctx_p}_read_data)")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated zeros_like data with shape {{{ctx_p}_data_for_write.shape}}'")
+                                                  f"f'''DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated zeros_like data with shape {{{ctx_p}_data_for_write.shape}}'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0, f"elif {ctx_p}_dtype_obj is not None:")
@@ -474,21 +474,21 @@ class WriteH5PyCode:
                 self.parent.write(0,
                                   f"{ctx_p}_data_for_write = numpy.array(0, dtype={ctx_p}_dtype_obj).item() if {ctx_p}_dtype_obj.kind not in 'SUOV' else (b'' if {ctx_p}_dtype_obj.kind == 'S' else '')")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated scalar data {{{ctx_p}_data_for_write!r}}'")
+                                                  f"f'''DS_ADV_SLICE_WRITE ({dset_name_for_log}): Generated scalar data {{{ctx_p}_data_for_write!r}}'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0, f"if {ctx_p}_data_for_write is not None:")
                 self.parent.addLevel(1)
                 self.parent.write(0, f"{ctx_p}_target_dset[{ctx_p}_adv_slice_obj] = {ctx_p}_data_for_write")
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'DS_ADV_SLICE_WRITE ({dset_name_for_log}): Write attempted with data {{{ctx_p}_data_for_write!r}}'")
+                                                  f"f'''DS_ADV_SLICE_WRITE ({dset_name_for_log}): Write attempted with data {{{ctx_p}_data_for_write!r}}'''")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_adv_write: print(f'DS_ADV_SLICE_WRITE_ERR ({dset_name_for_log}) for slice {{{ctx_p}_adv_slice_obj!r}}: {{e_adv_write}}', file=sys.stderr)")
+                                  f"except Exception as e_adv_write: print(f'''DS_ADV_SLICE_WRITE_ERR ({dset_name_for_log}) for slice {{{ctx_p}_adv_slice_obj!r}}: {{e_adv_write}}''', file=sys.stderr)")
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.restoreLevel(self.parent.base_level - 1)
                 self.parent.write(0,
-                                  f"except Exception as e_adv_slice: print(f'DS_ADV_SLICE_ERR ({dset_name_for_log}) with slice obj {{repr(locals().get('{ctx_p}_adv_slice_obj', 'ERROR_GETTING_SLICE_OBJ'))}}: {{e_adv_slice}}', file=sys.stderr)")
+                                  f"except Exception as e_adv_slice: print(f'''DS_ADV_SLICE_ERR ({dset_name_for_log}) with slice obj {{repr(locals().get('{ctx_p}_adv_slice_obj', 'ERROR_GETTING_SLICE_OBJ'))}}: {{e_adv_slice}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             # Standard Properties and Operations
@@ -785,14 +785,14 @@ class WriteH5PyCode:
                 try:
                     self.parent.write(0, f"{ctx_p}_prop_val = getattr({ctx_p}_target_file, '{prop_name}')")
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'FILE_PROP ({file_name_for_log}): .{prop_name} = {{{ctx_p}_prop_val!r}}'")
+                                                      f"f'''FILE_PROP ({file_name_for_log}): .{prop_name} = {{{ctx_p}_prop_val!r}}'''")
                     if prop_name == "attrs":
                         self.parent._dispatch_fuzz_on_instance(f"{prefix}_attrs", f"{ctx_p}_prop_val", "AttributeManager",
                                                                generation_depth + 1)
                 finally:
                     self.parent.restoreLevel(L_prop_try)
                 self.parent.write(0,
-                                  f"except Exception as e_prop: print(f'FILE_PROP_ERR ({file_name_for_log}) .{prop_name}: {{e_prop}}', file=sys.stderr)")
+                                  f"except Exception as e_prop: print(f'''FILE_PROP_ERR ({file_name_for_log}) .{prop_name}: {{e_prop}}''', file=sys.stderr)")
             self.parent.emptyLine()
 
             if random() < 0.5:  # Iterate keys, values, items
@@ -800,7 +800,7 @@ class WriteH5PyCode:
                 L_iter_try = self.parent.addLevel(1)
                 try:
                     self.parent.write(0, f"{ctx_p}_file_len = len({ctx_p}_target_file)")
-                    self.parent.write_print_to_stderr(0, f"f'FILE_LEN ({file_name_for_log}): len = {{{ctx_p}_file_len}}'")
+                    self.parent.write_print_to_stderr(0, f"f'''FILE_LEN ({file_name_for_log}): len = {{{ctx_p}_file_len}}'''")
                     if self.parent.base_level > 0:  # Check to prevent negative indentation on restore
                         self.parent.write(0, f"if {ctx_p}_file_len > 0:")
                         L_iter_if_not_empty = self.parent.addLevel(1)
@@ -810,22 +810,22 @@ class WriteH5PyCode:
                             L_iter_for = self.parent.addLevel(1)
                             try:
                                 self.parent.write_print_to_stderr(0,
-                                                                  f"f'FILE_ITER ({file_name_for_log}): key = {{{ctx_p}_key!r}}'")
+                                                                  f"f'''FILE_ITER ({file_name_for_log}): key = {{{ctx_p}_key!r}}'''")
                                 self.parent.write(0, f"{ctx_p}_iter_count += 1")
                                 self.parent.write(0, f"if {ctx_p}_iter_count > 5: break")
                             finally:
                                 self.parent.restoreLevel(L_iter_for)
                             self.parent.write_print_to_stderr(0,
-                                                              f"f'FILE_ITER ({file_name_for_log}): iterated {{{ctx_p}_iter_count}} keys'")
+                                                              f"f'''FILE_ITER ({file_name_for_log}): iterated {{{ctx_p}_iter_count}} keys'''")
                             self.parent.write(0, f"{ctx_p}_keys_view = {ctx_p}_target_file.keys()")
                             self.parent.write_print_to_stderr(0,
-                                                              f"f'FILE_KEYS ({file_name_for_log}): {{len({ctx_p}_keys_view)}} keys, e.g., {{list({ctx_p}_keys_view)[:3]!r}}'")
+                                                              f"f'''FILE_KEYS ({file_name_for_log}): {{len({ctx_p}_keys_view)}} keys, e.g., {{list({ctx_p}_keys_view)[:3]!r}}'''")
                         finally:
                             self.parent.restoreLevel(L_iter_if_not_empty)
                 finally:
                     self.parent.restoreLevel(L_iter_try)
                 self.parent.write(0,
-                                  "except Exception as e_file_iter: print(f'FILE_ITER_METHODS_ERR ({file_name_for_log}): {{e_file_iter}}', file=sys.stderr)")
+                                  "except Exception as e_file_iter: print(f'''FILE_ITER_METHODS_ERR ({file_name_for_log}): {{e_file_iter}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             if random() < 0.3:  # Create Dataset
@@ -1038,7 +1038,7 @@ class WriteH5PyCode:
                 try:
                     # Changed to use f-string directly for evaluated property
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'GRP_PROP ({group_name_for_log}): .{prop_name} = {{repr(getattr({ctx_p}_target_grp, '{prop_name}'))}}'")
+                                                      f"f'''GRP_PROP ({group_name_for_log}): .{prop_name} = {{repr(getattr({ctx_p}_target_grp, '{prop_name}'))}}'''")
                     # Deep dive into .attrs
                     if prop_name == "attrs":
                         self.parent.write(0, f"{ctx_p}_attrs_obj = {ctx_p}_target_grp.attrs")
@@ -1048,18 +1048,18 @@ class WriteH5PyCode:
                 finally:
                     self.parent.restoreLevel(L_prop_try)
                 self.parent.write(0,
-                                  f"except Exception as e_prop: print(f'GRP_PROP_ERR ({group_name_for_log}) .{prop_name}: {{e_prop}}', file=sys.stderr)")
+                                  f"except Exception as e_prop: print(f'''GRP_PROP_ERR ({group_name_for_log}) .{prop_name}: {{e_prop}}''', file=sys.stderr)")
             self.parent.emptyLine()
 
             self.parent.write(0, "try:")
             L_len_try = self.parent.addLevel(1)
             try:
                 self.parent.write_print_to_stderr(0,
-                                                  f"f'GRP_LEN ({group_name_for_log}): len = {{len({ctx_p}_target_grp)}}'")
+                                                  f"f'''GRP_LEN ({group_name_for_log}): len = {{len({ctx_p}_target_grp)}}'''")
             finally:
                 self.parent.restoreLevel(L_len_try)
             self.parent.write(0,
-                              f"except Exception as e_len: print(f'GRP_LEN_ERR ({group_name_for_log}): {{e_len}}', file=sys.stderr)")
+                              f"except Exception as e_len: print(f'''GRP_LEN_ERR ({group_name_for_log}): {{e_len}}''', file=sys.stderr)")
             self.parent.emptyLine()
 
             if random() < 0.5:
@@ -1071,22 +1071,22 @@ class WriteH5PyCode:
                     L_iter_for = self.parent.addLevel(1)
                     try:
                         self.parent.write_print_to_stderr(0,
-                                                          f"f'GRP_ITER ({group_name_for_log}): key = {{{ctx_p}_key!r}}'")
+                                                          f"f'''GRP_ITER ({group_name_for_log}): key = {{{ctx_p}_key!r}}'''")
                         self.parent.write(0, f"{ctx_p}_iter_count += 1")
                         self.parent.write(0, f"if {ctx_p}_iter_count > 5: break")
                     finally:
                         self.parent.restoreLevel(L_iter_for)
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'GRP_ITER ({group_name_for_log}): iterated {{{ctx_p}_iter_count}} keys'")
+                                                      f"f'''GRP_ITER ({group_name_for_log}): iterated {{{ctx_p}_iter_count}} keys'''")
 
                     self.parent.write(0, f"{ctx_p}_keys_view = {ctx_p}_target_grp.keys()")
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'GRP_KEYS ({group_name_for_log}): {{len({ctx_p}_keys_view)}} keys, e.g., {{list({ctx_p}_keys_view)[:3]!r}}'")
+                                                      f"f'''GRP_KEYS ({group_name_for_log}): {{len({ctx_p}_keys_view)}} keys, e.g., {{list({ctx_p}_keys_view)[:3]!r}}'''")
                     # Values and Items can be added similarly if desired, for now focusing on keys and general iter
                 finally:
                     self.parent.restoreLevel(L_iter_methods_try)
                 self.parent.write(0,
-                                  "except Exception as e_grp_iter: print(f'GRP_ITER_METHODS_ERR ({group_name_for_log}): {{e_grp_iter}}', file=sys.stderr)")
+                                  f"except Exception as e_grp_iter: print(f'''GRP_ITER_METHODS_ERR ({group_name_for_log}): {{e_grp_iter}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             # --- Create Children (Dataset, Group) with deep dive ---
@@ -1216,7 +1216,7 @@ class WriteH5PyCode:
                     finally:
                         self.parent.restoreLevel(L_inspect_try)
                     self.parent.write(0,
-                                      "except Exception as e_getlink: print(f'GRP_OP_ERR ({group_name_for_log}) getting link object: {{e_getlink}}', file=sys.stderr)")
+                                      f"except Exception as e_getlink: print(f'''GRP_OP_ERR ({group_name_for_log}) getting link object: {{e_getlink}}''', file=sys.stderr)")
                 finally:
                     self.parent.restoreLevel(L_inspect_outer_if)
                 self.parent.emptyLine()
@@ -1542,23 +1542,23 @@ class WriteH5PyCode:
                     L_iter_for = self.parent.addLevel(1)
                     try:
                         self.parent.write_print_to_stderr(0,
-                                                          f"f'ATTR_ITER ({owner_name_for_log}): key = {{{ctx_p}_attr_name!r}}'")
+                                                          f"f'''ATTR_ITER ({owner_name_for_log}): key = {{{ctx_p}_attr_name!r}}'''")
                         self.parent.write(0, f"{ctx_p}_attr_count += 1")
                         self.parent.write(0, f"if {ctx_p}_attr_count > 5: break")
                     finally:
                         self.parent.restoreLevel(L_iter_for)
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'ATTR_ITER ({owner_name_for_log}): iterated {{{ctx_p}_attr_count}} attrs'")
+                                                      f"f'''ATTR_ITER ({owner_name_for_log}): iterated {{{ctx_p}_attr_count}} attrs'''")
                     self.parent.write_print_to_stderr(0,
-                                                      f"f'ATTR_LEN ({owner_name_for_log}): len = {{len({ctx_p}_target_attrs)}}'")
+                                                      f"f'''ATTR_LEN ({owner_name_for_log}): len = {{len({ctx_p}_target_attrs)}}'''")
                     self.parent.write(0,
                                       f"if {ctx_p}_attr_count > 0: {ctx_p}_first_attr_name = list({ctx_p}_target_attrs.keys())[0]")
                     self.parent.write(0,
-                                      f"if {ctx_p}_attr_count > 0: print(f'ATTR_CONTAINS ({owner_name_for_log}): {{{ctx_p}_first_attr_name!r}} in attrs = ({{{ctx_p}_first_attr_name!r}} in {ctx_p}_target_attrs)', file=sys.stderr)")
+                                      f"if {ctx_p}_attr_count > 0: print(f'''ATTR_CONTAINS ({owner_name_for_log}): {{{ctx_p}_first_attr_name!r}} in attrs = ({{{ctx_p}_first_attr_name!r}} in {ctx_p}_target_attrs)''', file=sys.stderr)")
                 finally:
                     self.parent.restoreLevel(L_iter_try)
                 self.parent.write(0,
-                                  f"except Exception as e_attr_iter: print(f'ATTR_ITER_ERR ({owner_name_for_log}): {{e_attr_iter}}', file=sys.stderr)")
+                                  f"except Exception as e_attr_iter: print(f'''ATTR_ITER_ERR ({owner_name_for_log}): {{e_attr_iter}}''', file=sys.stderr)")
                 self.parent.emptyLine()
 
             # Create/Modify/Get/Delete Attributes
@@ -1575,19 +1575,19 @@ class WriteH5PyCode:
                         if op_choice < 0.5:  # __setitem__ / create / modify
                             self.parent.write(0, f"{ctx_p}_target_attrs[{attr_name_expr}] = {attr_val_expr}")
                             self.parent.write_print_to_stderr(0,
-                                                              f"f'ATTR_SET ({owner_name_for_log}): Set/Create attr {{{attr_name_expr!r}}} = {{{attr_val_expr!r}}} (actual: {{repr({ctx_p}_target_attrs.get({attr_name_expr}))}})'")
+                                                              f"f'''ATTR_SET ({owner_name_for_log}): Set/Create attr {{{attr_name_expr!r}}} = {{{attr_val_expr!r}}} (actual: {{repr({ctx_p}_target_attrs.get({attr_name_expr}))}})'''")
                         elif op_choice < 0.8:  # __getitem__ / get
                             self.parent.write(0, f"{ctx_p}_read_attr_val = {ctx_p}_target_attrs[{attr_name_expr}]")
                             self.parent.write_print_to_stderr(0,
-                                                              f"f'ATTR_GET ({owner_name_for_log}): Got attr {{{attr_name_expr!r}}} = {{{ctx_p}_read_attr_val!r}}'")
+                                                              f"f'''ATTR_GET ({owner_name_for_log}): Got attr {{{attr_name_expr!r}}} = {{{ctx_p}_read_attr_val!r}}'''")
                         else:  # __delitem__
                             self.parent.write(0, f"del {ctx_p}_target_attrs[{attr_name_expr}]")
                             self.parent.write_print_to_stderr(0,
-                                                              f"f'ATTR_DEL ({owner_name_for_log}): Deleted attr {{{attr_name_expr!r}}}'")
+                                                              f"f'''ATTR_DEL ({owner_name_for_log}): Deleted attr {{{attr_name_expr!r}}}'''")
                     finally:
                         self.parent.restoreLevel(L_attr_op_try)
                     self.parent.write(0,
-                                      f"except Exception as e_attr_mod: print(f'ATTR_MOD_ERR ({owner_name_for_log}) with name {{{attr_name_expr!r}}}: {{e_attr_mod}}', file=sys.stderr)")
+                                      f"except Exception as e_attr_mod: print(f'''ATTR_MOD_ERR ({owner_name_for_log}) with name {{{attr_name_expr!r}}}: {{e_attr_mod}}''', file=sys.stderr)")
                     self.parent.emptyLine()
         finally:
             self.parent.restoreLevel(L_main_if_attrs)
@@ -1595,7 +1595,7 @@ class WriteH5PyCode:
         L_else_attrs_is_none = self.parent.addLevel(1)
         try:
             self.parent.write_print_to_stderr(0,
-                                              f"f'Skipping AttributeManager fuzz for {owner_name_for_log} as its variable ({attrs_expr_str}) is None.'")
+                                              f"f'''Skipping AttributeManager fuzz for {owner_name_for_log} as its variable ({attrs_expr_str}) is None.'''")
         finally:
             self.parent.restoreLevel(L_else_attrs_is_none)
         self.parent.emptyLine()
@@ -1643,7 +1643,7 @@ class WriteH5PyCode:
             self.parent.write(0, "else:")
             self.parent.addLevel(1)
             self.parent.write_print_to_stderr(0,
-                                              f"f'Skipping dynamic Dataset creation for {instance_var_name} as parent {parent_obj_expr_str} is unavailable.'")
+                                              f"f'''Skipping dynamic Dataset creation for {instance_var_name} as parent {parent_obj_expr_str} is unavailable.'''")
             self.parent.write(0, f"{instance_var_name} = None")
             self.parent.restoreLevel(self.parent.base_level - 1)
         elif is_h5py_type and class_name_str == "Group":
@@ -1661,13 +1661,13 @@ class WriteH5PyCode:
             self.parent.write(0, "except Exception as e_grp_create:")
             self.parent.addLevel(1)
             self.parent.write(0, f"{instance_var_name} = None")
-            self.parent.write_print_to_stderr(0, f"f'Failed to create group {group_name_expr_str}: {{e_grp_create}}'")
+            self.parent.write_print_to_stderr(0, f"f'''Failed to create group {group_name_expr_str}: {{e_grp_create}}'''")
             self.parent.restoreLevel(self.parent.base_level - 1)
             self.parent.restoreLevel(self.parent.base_level - 1)
             self.parent.write(0, "else:")
             self.parent.addLevel(1)
             self.parent.write_print_to_stderr(0,
-                                              f"f'Skipping dynamic Group creation for {instance_var_name} as parent {parent_obj_expr_str} is unavailable.'")
+                                              f"f'''Skipping dynamic Group creation for {instance_var_name} as parent {parent_obj_expr_str} is unavailable.'''")
             self.parent.write(0, f"{instance_var_name} = None")
             self.parent.restoreLevel(self.parent.base_level - 1)
         return is_h5py_class_handled
