@@ -15,11 +15,7 @@ for value in INTERESTING:
     TEMPLATES.append(f"""Template("\\x00", Interpolation({value}, "value"))""")
 
 for name in weird_instance_names:
-    TEMPLATES.append(
-        f"""Template("\\x00", Interpolation(weird_instances['{name}'], "name"))"""
-    )
+    TEMPLATES.append(f"""Template("\\x00", Interpolation(weird_instances['{name}'], "name"))""")
 
 for name in weird_names:
-    TEMPLATES.append(
-        f"""Template("\\x00", Interpolation(weird_classes['{name}'], "name"))"""
-    )
+    TEMPLATES.append(f"""Template("\\x00", Interpolation(weird_classes['{name}'], "name"))""")

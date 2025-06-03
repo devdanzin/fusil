@@ -51,9 +51,7 @@ for cls in numbers:
     weird_instance_names.append(f"weird_{cls.__name__}_-2**31")
     weird_instance_names.append(f"weird_{cls.__name__}_-2**31-1")
     if cls not in (float, complex):
-        weird_instance_names.append(
-            f"weird_{cls.__name__}_10**default_max_str_digits+1"
-        )
+        weird_instance_names.append(f"weird_{cls.__name__}_10**default_max_str_digits+1")
 
 
 weird_classes = """
@@ -309,68 +307,54 @@ tricky_numpy_names = [
     "numpy_arange_negative_step",
     "numpy_linspace_weird",
     "numpy_logspace_sizes",
-
     "numpy_nan_array",
     "numpy_inf_array",
     "numpy_neginf_array",
     "numpy_mixed_inf_nan_int_float",
     "numpy_complex_nan_inf",
-
     "numpy_factorial_int64",
     "numpy_factorial_float128",
     "numpy_sys_max_float_array",
     "numpy_sys_min_float_array",
     "numpy_float_subnormals",
     "numpy_float_boundaries",
-
     "numpy_object_array_mixed",
     "numpy_object_array_nested_lists",
     "numpy_object_array_none",
-
     "numpy_structured_array_simple",
     "numpy_structured_array_nested",
     "numpy_structured_array_offsets",
     "numpy_structured_array_empty_fields",
     "numpy_structured_array_bool_field",
-
     "numpy_string_array_fixed",
     "numpy_string_array_unicode_fixed",
     "numpy_string_array_empty",
     "numpy_string_array_null_bytes",
     "numpy_bytes_array_mixed_len_via_object",
-
     "numpy_bool_array_all_true",
     "numpy_bool_array_all_false",
     "numpy_bool_array_mixed",
-
     "numpy_datetime64_array_mixed_units",
     "numpy_datetime64_array_nat",
     "numpy_timedelta64_array_mixed_units",
     "numpy_timedelta64_array_nat",
-
     "numpy_big_endian_int32",
     "numpy_little_endian_float64",
-
     "numpy_non_contiguous_view_transpose",
     "numpy_non_contiguous_view_step",
     "numpy_c_contiguous_3d",
     "numpy_f_contiguous_3d",
-
     "numpy_readonly_array",
     # "numpy_writeable_object_array_with_readonly_elements",
-
     "numpy_zerodim_int",
     "numpy_zerodim_structured",
     "numpy_zerodim_from_list",
-
     "numpy_array_with_zero_size_dim",
     "numpy_array_all_dims_one",
     "numpy_array_order_k",
     "numpy_broadcastable_a",
     "numpy_broadcastable_b",
-
     "numpy_custom_void_dtype_multiple_fields",
-
     "numpy_zeros",
     "numpy_nan",
     "numpy_very_large_int",

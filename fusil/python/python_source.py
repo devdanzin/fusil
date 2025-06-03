@@ -42,8 +42,7 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST
-                | set(name for name in self.options.blacklist.split(",") if name),
+                MODULE_BLACKLIST | set(name for name in self.options.blacklist.split(",") if name),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             ).search_modules()
@@ -54,8 +53,7 @@ class PythonSource(ProjectAgent):
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
-                MODULE_BLACKLIST
-                | set(name for name in self.options.blacklist.split(",") if name),
+                MODULE_BLACKLIST | set(name for name in self.options.blacklist.split(",") if name),
                 self.options.skip_test,
                 verbose=self.options.verbose,
             )
@@ -71,9 +69,7 @@ class PythonSource(ProjectAgent):
                 self.modules |= set(mod.name for mod in package_walker)
 
             if self.options.verbose:
-                print(
-                    f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}"
-                )
+                print(f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}")
 
         blacklist_str = self.options.blacklist
         if blacklist_str:
@@ -91,13 +87,11 @@ class PythonSource(ProjectAgent):
         for filename in self.filenames:
             if not isabs(filename):
                 raise ValueError(
-                    "Filename %r is not an absolute path! Fix the --filenames option"
-                    % filename
+                    "Filename %r is not an absolute path! Fix the --filenames option" % filename
                 )
             if not path_exists(filename):
                 raise ValueError(
-                    "File doesn't exist: %s! Use different --filenames option"
-                    % filename
+                    "File doesn't exist: %s! Use different --filenames option" % filename
                 )
         project.error("Use filenames: %s" % ", ".join(self.filenames))
         self.error(print_running_time(time_start))
@@ -141,8 +135,7 @@ class PythonSource(ProjectAgent):
                 break
             except BaseException as err:
                 self.error(
-                    "Unable to load module %s: [%s] %s"
-                    % (name, err.__class__.__name__, err)
+                    "Unable to load module %s: [%s] %s" % (name, err.__class__.__name__, err)
                 )
                 self.modules_list.remove(name)
         if not self.modules_list:

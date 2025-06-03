@@ -80,9 +80,7 @@ class ArgumentGenerator:
         self.unicode_generator = UnicodeGenerator(1, 20, UNICODE_65535)
         self.ascii_generator = UnicodeGenerator(0, 20, ASCII8)
         self.unix_path_generator = UnixPathGenerator(100)
-        self.letters_generator = UnicodeGenerator(
-            1, 8, LETTERS | DECIMAL_DIGITS | ASCII8
-        )
+        self.letters_generator = UnicodeGenerator(1, 8, LETTERS | DECIMAL_DIGITS | ASCII8)
         self.float_int_generator = IntegerGenerator(4)
         self.float_float_generator = UnsignedGenerator(4)
 
@@ -134,7 +132,9 @@ class ArgumentGenerator:
 
         if not self.options.no_numpy and use_numpy:
             if use_h5py:
-                self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
+                self.simple_argument_generators += (
+                    self.h5py_argument_generator.genH5PyObject,
+                ) * 50
             self.complex_argument_generators += (self.genTrickyNumpy,) * 50
         if not self.options.no_tstrings and use_templates and TEMPLATES:
             self.complex_argument_generators += (self.genTrickyTemplate,)
@@ -318,9 +318,7 @@ class ArgumentGenerator:
             return ['"NO_FILE_AVAILABLE"']
         filename = choice(self.filenames)
         # Ensure filename is a valid string literal, escaping backslashes and quotes
-        return [
-            f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
-        ]
+        return [f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"]
 
     def genErrback(self) -> list[str]:
         """Generate the name of the error callback function."""
@@ -331,7 +329,9 @@ class ArgumentGenerator:
         if not self.filenames:
             return ["open('NO_FILE_AVAILABLE')"]  # Fallback
         filename = choice(self.filenames)
-        filename_literal = f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+        filename_literal = (
+            f"'{filename.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+        )
         return [f"open({filename_literal})"]
 
     def genException(self) -> list[str]:
@@ -392,15 +392,9 @@ class ArgumentGenerator:
         value_generator_func: Callable[[], list[str]] | None = None,
     ) -> list[str]:
         """Generate a key-value pair for a dictionary literal as a list of code lines."""
-        key_lines = (
-            key_generator_func()
-            if key_generator_func
-            else self.create_hashable_argument()
-        )
+        key_lines = key_generator_func() if key_generator_func else self.create_hashable_argument()
         value_lines = (
-            value_generator_func()
-            if value_generator_func
-            else self.create_simple_argument()
+            value_generator_func() if value_generator_func else self.create_simple_argument()
         )
 
         key_code = " ".join(key_lines)

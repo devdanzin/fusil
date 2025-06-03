@@ -23,153 +23,132 @@ tricky_h5py_names = [
     # File objects
     "h5_file_readonly_core",
     "h5_file_libver_earliest",
-    "h5_file_already_closed", # Reference to a closed file object
-
+    "h5_file_already_closed",  # Reference to a closed file object
     # Group objects
     "h5_group_deeply_nested",
     "h5_group_with_long_name",
     "h5_group_with_unicode_name",
     "h5_group_with_many_attrs",
-    "h5_group_with_cycle_softlink", # Softlink to itself
-
+    "h5_group_with_cycle_softlink",  # Softlink to itself
     # Dataset objects - Basic & Tricky Data
     "h5_dset_empty_int32",
     "h5_dset_scalar_object_none",
-    "h5_dset_0d_from_numpy_zerodim_int", # Using a numpy tricky input
+    "h5_dset_0d_from_numpy_zerodim_int",  # Using a numpy tricky input
     "h5_dset_numpy_object_array_mixed",  # Using a numpy tricky input
     "h5_dset_all_zeros_chunked",
     "h5_dset_all_nans_compressed",
     "h5_dset_large_compressible_data",
-
     # Dataset objects - Shapes & Layout
     "h5_dset_high_rank",
     "h5_dset_one_dim_zero_size",
     "h5_dset_resizable_unlimited",
-    "h5_dset_chunked_weird_shape", # Chunk shape not aligned or tiny
+    "h5_dset_chunked_weird_shape",  # Chunk shape not aligned or tiny
     "h5_dset_f_contiguous_source",
-
     # Dataset objects - Special dtypes
     "h5_dset_vlen_string_utf8",
     "h5_dset_vlen_bytes",
     "h5_dset_vlen_int_array",
     "h5_dset_enum_simple",
     "h5_dset_fixed_string_with_nulls",
-    "h5_dset_structured_numpy_simple", # Using a numpy tricky input
-    "h5_dset_structured_nested_numpy", # Using a numpy tricky input
+    "h5_dset_structured_numpy_simple",  # Using a numpy tricky input
+    "h5_dset_structured_nested_numpy",  # Using a numpy tricky input
     "h5_dset_object_references",
     "h5_dset_region_references",
-
     # Dataset objects - Features
     "h5_dset_with_fillvalue_nan",
-    "h5_dset_with_fillvalue_tuple_struct", # Fillvalue for structured array
-    "h5_dset_no_chunking_but_resizable", # Potentially problematic
+    "h5_dset_with_fillvalue_tuple_struct",  # Fillvalue for structured array
+    "h5_dset_no_chunking_but_resizable",  # Potentially problematic
     "h5_dset_scaleoffset_int16",
     "h5_dset_track_times_true",
-
     # AttributeManager objects (via a group)
     "h5_attrs_on_group_various_types",
     "h5_attrs_on_group_vlen_string",
     "h5_attrs_on_group_empty_numpy_array",
-
     # Datatype objects
     "h5_datatype_committed_vlen_str",
     "h5_datatype_committed_enum",
-    "h5_datatype_from_structured_numpy", # Datatype object from a tricky numpy dtype
-
+    "h5_datatype_from_structured_numpy",  # Datatype object from a tricky numpy dtype
     # Links
     "h5_softlink_dangling",
     "h5_hardlink_to_dataset",
-
     # References (raw, not in datasets yet, might be less useful directly)
     "h5_ref_to_group",
     "h5_ref_to_dataset",
     "h5_regionref_on_dataset_slice",
-
     # Objects related to a specific file instance
-    "h5_main_file_object_itself", # The main h5py.File instance
-
-# Additions to tricky_h5py_names for File Configurations
+    "h5_main_file_object_itself",  # The main h5py.File instance
+    # Additions to tricky_h5py_names for File Configurations
     # Basic modes and states
-    "h5_file_core_w_no_backing",          # 'w' mode, core, no backing
-    "h5_file_core_r_no_backing_nonexist", # 'r' mode, core, no backing, non-existent (will be None after creation attempt)
-    "h5_file_core_r_plus_with_backing",   # 'r+' mode, core, with backing (after creating it)
-    "h5_file_core_w_minus_exclusive",     # 'w-' mode, core, no backing
-    "h5_file_core_append_no_backing",     # 'a' mode, core, no backing
-    "h5_file_closed_after_create",        # A file object that has been closed
-
+    "h5_file_core_w_no_backing",  # 'w' mode, core, no backing
+    "h5_file_core_r_no_backing_nonexist",  # 'r' mode, core, no backing, non-existent (will be None after creation attempt)
+    "h5_file_core_r_plus_with_backing",  # 'r+' mode, core, with backing (after creating it)
+    "h5_file_core_w_minus_exclusive",  # 'w-' mode, core, no backing
+    "h5_file_core_append_no_backing",  # 'a' mode, core, no backing
+    "h5_file_closed_after_create",  # A file object that has been closed
     # Drivers and their options
-    "h5_file_driver_stdio",               # Stdio driver (posix only)
-    "h5_file_driver_sec2",                # Sec2 driver (posix only)
-    "h5_file_driver_core_block_lg",       # Core, no backing, large block_size
-    "h5_file_driver_core_backing_true",   # Core, with backing_store=True
+    "h5_file_driver_stdio",  # Stdio driver (posix only)
+    "h5_file_driver_sec2",  # Sec2 driver (posix only)
+    "h5_file_driver_core_block_lg",  # Core, no backing, large block_size
+    "h5_file_driver_core_backing_true",  # Core, with backing_store=True
     # "h5_file_driver_split",             # Split driver (creates multiple files, harder for self-contained) -  Might defer or handle carefully
-    "h5_file_driver_fileobj",             # Uses an in-memory tempfile.TemporaryFile()
-
+    "h5_file_driver_fileobj",  # Uses an in-memory tempfile.TemporaryFile()
     # Libver settings
     "h5_file_libver_earliest_v108",
     "h5_file_libver_v110_latest",
-    "h5_file_libver_latest_strict",       # ('latest', 'latest')
-
+    "h5_file_libver_latest_strict",  # ('latest', 'latest')
     # Userblock
     "h5_file_userblock_512",
     "h5_file_userblock_8192",
     # For testing errors:
-    "h5_file_path_for_userblock_append_test", # A path to a file created with a userblock
+    "h5_file_path_for_userblock_append_test",  # A path to a file created with a userblock
     "h5_file_obj_for_userblock_append_test",  # The actual file object for the above
-
     # File Space Strategy & Page Buffering (some combinations)
     "h5_file_fs_page_persist_thresh",
     "h5_file_fs_page_with_page_buffer",
     "h5_file_fs_fsm",
     "h5_file_fs_aggregate",
-
     # SWMR
     "h5_file_swmr_enabled_latest",
-
     # Locking (basic presence, actual locking behavior is complex)
     "h5_file_locking_true",
     "h5_file_locking_best_effort",
-
     # Path types
-    "h5_path_object_for_file_creation",   # A pathlib.Path object
+    "h5_path_object_for_file_creation",  # A pathlib.Path object
     "h5_str_path_for_unicode_file_TEMP",  # A string path with unicode (temp file on disk)
-
     # For error testing with modes
-    "h5_path_to_non_hdf5_file_TEMP",      # Path to a temp file with garbage data
-    "h5_path_to_readonly_hdf5_file_TEMP", # Path to a temp HDF5 file made OS-readonly
-
-# Additions to tricky_h5py_names for Core Dataset Creation Parameters
+    "h5_path_to_non_hdf5_file_TEMP",  # Path to a temp file with garbage data
+    "h5_path_to_readonly_hdf5_file_TEMP",  # Path to a temp HDF5 file made OS-readonly
+    # Additions to tricky_h5py_names for Core Dataset Creation Parameters
     "h5_dset_scalar_int",
-    "h5_dset_shape_none_null_dataspace", # dtype only, shape=None
-    "h5_dset_shape_zero_dim_1d",         # shape=(0,)
-    "h5_dset_shape_zero_dim_2d",         # shape=(5,0)
+    "h5_dset_shape_none_null_dataspace",  # dtype only, shape=None
+    "h5_dset_shape_zero_dim_1d",  # shape=(0,)
+    "h5_dset_shape_zero_dim_2d",  # shape=(5,0)
     "h5_dset_autochunk_large_elements",  # chunks=True with large dtype to force small chunk tuple
     "h5_dset_chunked_oversized_chunks",  # Chunks larger than shape (error case)
-    "h5_dset_chunked_irregular",         # Chunks=(7,13) for shape=(100,100)
-    "h5_dset_no_chunks_but_maxshape",    # Error: chunks=False, maxshape=(None,)
+    "h5_dset_chunked_irregular",  # Chunks=(7,13) for shape=(100,100)
+    "h5_dset_no_chunks_but_maxshape",  # Error: chunks=False, maxshape=(None,)
     "h5_dset_fillvalue_custom_int",
     "h5_dset_fillvalue_float_nan",
-    "h5_dset_filltime_never_float",      # Read uninitialized data
+    "h5_dset_filltime_never_float",  # Read uninitialized data
     "h5_dset_filltime_alloc_int",
     "h5_dset_compress_gzip_high",
     "h5_dset_compress_lzf",
     # "h5_dset_compress_szip_ec16", # Requires SZip to be available
     "h5_dset_compress_shuffle_gzip",
     "h5_dset_compress_fletcher32",
-    "h5_dset_compress_scaleoffset_int_auto", # scaleoffset=True
-    "h5_dset_compress_scaleoffset_int_bits", # scaleoffset=<nbits>
-    "h5_dset_compress_scaleoffset_float_factor_chunked", # scaleoffset=<factor_int>
-    "h5_dset_resizable_1d_unlimited",    # maxshape=(None,)
-    "h5_dset_resizable_2d_mixed",      # maxshape=(100, None)
+    "h5_dset_compress_scaleoffset_int_auto",  # scaleoffset=True
+    "h5_dset_compress_scaleoffset_int_bits",  # scaleoffset=<nbits>
+    "h5_dset_compress_scaleoffset_float_factor_chunked",  # scaleoffset=<factor_int>
+    "h5_dset_resizable_1d_unlimited",  # maxshape=(None,)
+    "h5_dset_resizable_2d_mixed",  # maxshape=(100, None)
     "h5_dset_initially_zero_resizable",  # shape=(0,5), maxshape=(None,5)
     "h5_dset_track_times_false",
     "h5_dset_created_from_data_implicit_shape",
     "h5_dset_created_from_data_reshaped",
     "h5_dset_created_with_h5py_empty",
-
-# Additions to tricky_h5py_names for Advanced/Tricky Dataset Datatypes
+    # Additions to tricky_h5py_names for Advanced/Tricky Dataset Datatypes
     "h5_dset_fixed_ascii_S10_with_nulls",
-    "h5_dset_fixed_utf8_len20_special_chars", # Using h5py.string_dtype
+    "h5_dset_fixed_utf8_len20_special_chars",  # Using h5py.string_dtype
     "h5_dset_vlen_ascii_basic",
     "h5_dset_vlen_utf8_mixed_scripts",
     "h5_dset_vlen_int32_array",
@@ -177,25 +156,25 @@ tricky_h5py_names = [
     "h5_dset_vlen_bool_array",
     "h5_dset_2d_vlen_int_variable_lengths",
     "h5_dset_enum_rgb_int8",
-    "h5_dset_enum_status_str_keys_int_vals", # Enum with string keys
+    "h5_dset_enum_status_str_keys_int_vals",  # Enum with string keys
     "h5_dset_compound_basic_mixed_types",
-    "h5_dset_compound_with_array_field",    # e.g., ('sensor_readings', '(10,)f4')
+    "h5_dset_compound_with_array_field",  # e.g., ('sensor_readings', '(10,)f4')
     "h5_dset_compound_with_vlen_str_field",
     "h5_dset_compound_with_vlen_int_field",
     "h5_dset_compound_nested_compound",
-    "h5_dset_compound_with_ref_field",      # Field of h5py.ref_dtype
+    "h5_dset_compound_with_ref_field",  # Field of h5py.ref_dtype
     "h5_dset_compound_with_regionref_field",
     "h5_dset_array_dtype_3x2_int16",
-    "h5_dset_object_references_standalone", # Dataset of just h5py.Reference
-    "h5_dset_region_references_standalone", # Dataset of just h5py.RegionReference
+    "h5_dset_object_references_standalone",  # Dataset of just h5py.Reference
+    "h5_dset_region_references_standalone",  # Dataset of just h5py.RegionReference
     "h5_dset_from_committed_compound_type",
     "h5_dset_from_committed_vlen_type",
-    "h5_dset_empty_vlen_str",             # Dataset with VLEN str dtype but no elements
-    "h5_dset_empty_compound",             # Dataset with Compound dtype but no elements
-# Additions to tricky_h5py_names for Dataset Operations
-    "h5_dset_for_read_direct_source",       # A dataset with known data to read from
-    "h5_dset_for_write_direct_dest_simple", # A simple dataset to be a target for write_direct
-    "h5_dset_for_fancy_indexing_setitem", # Shape suitable for arr[:, [idx], ...] =
+    "h5_dset_empty_vlen_str",  # Dataset with VLEN str dtype but no elements
+    "h5_dset_empty_compound",  # Dataset with Compound dtype but no elements
+    # Additions to tricky_h5py_names for Dataset Operations
+    "h5_dset_for_read_direct_source",  # A dataset with known data to read from
+    "h5_dset_for_write_direct_dest_simple",  # A simple dataset to be a target for write_direct
+    "h5_dset_for_fancy_indexing_setitem",  # Shape suitable for arr[:, [idx], ...] =
     "h5_dset_for_iteration_2d",
     "h5_dset_scalar_for_iteration_error",
     "h5_dset_for_astype_simple_int",
@@ -204,78 +183,61 @@ tricky_h5py_names = [
     "h5_dset_for_comparisons_float",
     # Views returned by methods could also be added if "deep diving" is implemented
     # e.g., "h5_dataset_fields_view_from_compound" (though these are harder to pre-define)
-
-# Additions to tricky_h5py_names for Advanced Slicing Arguments & Operations
+    # Additions to tricky_h5py_names for Advanced Slicing Arguments & Operations
     # Datasets suitable for these operations
-    "h5_dset_compound_for_field_slicing",    # A compound dataset from Cat C can be reused or a new one
-    "h5_dset_1d_for_multiblock_slicing",     # A simple 1D dataset, e.g., shape (100,)
-    "h5_dset_2d_for_regionref_slicing",    # A 2D dataset, e.g., shape (50,50)
-
+    "h5_dset_compound_for_field_slicing",  # A compound dataset from Cat C can be reused or a new one
+    "h5_dset_1d_for_multiblock_slicing",  # A simple 1D dataset, e.g., shape (100,)
+    "h5_dset_2d_for_regionref_slicing",  # A 2D dataset, e.g., shape (50,50)
     # Pre-defined slice argument objects
-    "h5_multiblockslice_simple_valid",       # A valid MultiBlockSlice instance
+    "h5_multiblockslice_simple_valid",  # A valid MultiBlockSlice instance
     "h5_multiblockslice_error_stride_zero",  # A MultiBlockSlice designed to cause an error
     "h5_multiblockslice_error_block_gt_stride",
-    "h5_regionref_from_dset_2d_part",      # A RegionReference to a part of h5_dset_2d_for_regionref_slicing
-    "h5_regionref_from_dset_2d_empty",     # A RegionReference to an empty part
-    "h5_regionref_from_dset_scalar",       # A RegionReference on a scalar dataset
-
-# Additions to tricky_h5py_names for Link Objects
-
+    "h5_regionref_from_dset_2d_part",  # A RegionReference to a part of h5_dset_2d_for_regionref_slicing
+    "h5_regionref_from_dset_2d_empty",  # A RegionReference to an empty part
+    "h5_regionref_from_dset_scalar",  # A RegionReference on a scalar dataset
+    # Additions to tricky_h5py_names for Link Objects
     # Target objects for linking (can reuse existing datasets/groups or create specific ones)
     "h5_link_target_dataset",
     "h5_link_target_group",
-    "h5_extlink_target_file_object_itself", # The secondary file for external links
+    "h5_extlink_target_file_object_itself",  # The secondary file for external links
     "h5_extlink_target_dataset_in_secondary_file",
-
     # Soft Links
     "h5_softlink_valid_to_dataset",
     "h5_softlink_valid_to_group",
     "h5_softlink_dangling_nonexistent_path",
-    "h5_softlink_circular_to_self_in_group",    # group/link_name -> /group/link_name (or .)
-    "h5_softlink_circular_to_ancestor", # group/subgroup/link_name -> /group
-    "h5_softlink_relative_path_valid",      # e.g., link to 'sibling_dataset'
-    "h5_softlink_relative_path_dotdot",     # e.g., link to '../sibling_of_parent'
-
+    "h5_softlink_circular_to_self_in_group",  # group/link_name -> /group/link_name (or .)
+    "h5_softlink_circular_to_ancestor",  # group/subgroup/link_name -> /group
+    "h5_softlink_relative_path_valid",  # e.g., link to 'sibling_dataset'
+    "h5_softlink_relative_path_dotdot",  # e.g., link to '../sibling_of_parent'
     # External Links
     "h5_extlink_valid_to_secondary_file_dataset",
     "h5_extlink_dangling_bad_internal_path",  # Target file exists, path inside doesn't
-    "h5_extlink_dangling_bad_filename",       # Target filename doesn't exist (harder with core)
-    "h5_extlink_relative_filename",           # Needs efile_prefix setup on parent file
-
+    "h5_extlink_dangling_bad_filename",  # Target filename doesn't exist (harder with core)
+    "h5_extlink_relative_filename",  # Needs efile_prefix setup on parent file
     # Hard Links (These will resolve to the target object, so their "trickiness" is in their existence)
     # We won't store the link itself as a distinct object type in h5py_tricky_objects,
     # but tricky_h5py_code will create them. The fuzzer might then pick up the target
     # object through multiple paths. We can add a group that *contains* such links.
     "h5_group_containing_hardlinks",
-
     # Link objects themselves (obtained via get(..., getlink=True))
-    "h5_softlink_object_itself",      # The h5py.SoftLink instance
-    "h5_extlink_object_itself",       # The h5py.ExternalLink instance
-
-# Additions to tricky_h5py_names for Specific Bug Replication Scenarios
-
+    "h5_softlink_object_itself",  # The h5py.SoftLink instance
+    "h5_extlink_object_itself",  # The h5py.ExternalLink instance
+    # Additions to tricky_h5py_names for Specific Bug Replication Scenarios
     # For Issue 135 & Compound Type tests
-    "h5_dset_scalar_compound_for_itemget", # A scalar dataset with compound type
-
+    "h5_dset_scalar_compound_for_itemget",  # A scalar dataset with compound type
     # For Issue 211 & Array Dtype tests
-    "h5_dset_array_dtype_for_scalar_assign_error", # e.g., shape=(10,), dtype='(3,)i4'
+    "h5_dset_array_dtype_for_scalar_assign_error",  # e.g., shape=(10,), dtype='(3,)i4'
     "h5_dset_array_dtype_for_element_write",
-
     # For Issue #1475
-    "h5_dset_null_dataspace_for_storage_check", # Created with shape=None
-
+    "h5_dset_null_dataspace_for_storage_check",  # Created with shape=None
     # For Issue #1547
     "h5_dset_uint64_for_large_py_int",
-
     # For Issue #1593 (dataset structure, actual indexing is a dynamic operation)
-    "h5_dset_for_issue1593_fancy_setitem", # e.g., shape (5, 10, 2)
-
+    "h5_dset_for_issue1593_fancy_setitem",  # e.g., shape (5, 10, 2)
     # For Issue #1852 (GC Close Bug) - the file itself is the primary tricky object
     "h5_file_for_issue1852_gc_close_test",
-
     # For Issue #2549 (Zero-size resizable)
-    "h5_dset_zerosize_resizable_for_write_test", # e.g., shape=(0,), maxshape=(None,)
-
+    "h5_dset_zerosize_resizable_for_write_test",  # e.g., shape=(0,), maxshape=(None,)
     # Note: Issue #2558 (libver with core driver) is covered by dynamic file creation (Category A additions to AG)
     # and the existing "h5_file_libver_*" objects, if they use the core driver.
 ]

@@ -43,7 +43,6 @@ except ImportError:
     _ARG_GEN_USE_NUMPY = False
 
 
-
 time_start = time.time()
 USE_MANGLE_FEATURE = False
 CALL_REPETITION_COUNT_CONST = 3
@@ -53,8 +52,20 @@ EXCEPTION_NAMES = {
     for cls in builtins.__dict__.values()
     if isinstance(cls, type) and issubclass(cls, Exception)
 }
-TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None),}
+TRIVIAL_TYPES = {
+    int,
+    str,
+    float,
+    bool,
+    bytes,
+    tuple,
+    list,
+    dict,
+    set,
+    type(None),
+}
 TRIVIAL_TYPES_STR = "{int, str, float, bool, bytes, tuple, list, dict, set, type(None),}"
+
 
 class PythonFuzzerError(Exception):
     """Custom exception raised when fuzzer encounters unrecoverable errors."""
@@ -92,15 +103,9 @@ class WritePythonCode(WriteCode):
         self.module_functions: list[str]
         self.module_classes: list[str]
         self.module_objects: list[str]
-        self.module_functions, self.module_classes, self.module_objects = (
-            self._get_module_members()
-        )
+        self.module_functions, self.module_classes, self.module_objects = self._get_module_members()
 
-        if (
-            not self.module_functions
-            and not self.module_classes
-            and not self.module_objects
-        ):
+        if not self.module_functions and not self.module_classes and not self.module_objects:
             raise PythonFuzzerError(
                 f"Module {self.module_name} has no function, no class, and no object to fuzz!"
             )
@@ -205,8 +210,7 @@ class WritePythonCode(WriteCode):
             if name in blacklist:
                 continue
             if (
-                (not self.options.test_private)
-                and name.startswith("__")
+                (not self.options.test_private) and name.startswith("__")
                 # and not name.endswith("__")
             ):
                 # if name not in {
@@ -226,11 +230,9 @@ class WritePythonCode(WriteCode):
                 #     "__repr__",
                 #     "__str__",
                 # }:
-                    continue
+                continue
 
-            if (
-                is_exception_type_or_instance and name == "__init__"
-            ):  # Avoid re-initing exceptions
+            if is_exception_type_or_instance and name == "__init__":  # Avoid re-initing exceptions
                 continue
 
             try:
@@ -275,13 +277,16 @@ class WritePythonCode(WriteCode):
         if self.h5py_writer:
             self.h5py_writer._write_h5py_script_header_and_imports()
 
-        self.write(0, dedent(f"""\
+        self.write(
+            0,
+            dedent(f"""\
         TRIVIAL_TYPES = {TRIVIAL_TYPES_STR}
         def skip_trivial_type(obj_instance_or_class):
             if type(obj_instance_or_class) in TRIVIAL_TYPES:
                 return True
             return False
-        """))
+        """),
+        )
         self.emptyLine()
 
     def _write_tricky_definitions(self) -> None:
@@ -446,9 +451,7 @@ class WritePythonCode(WriteCode):
                 except AttributeError:
                     continue
 
-                self._fuzz_one_class(
-                    class_idx=i, class_name_str=class_name, class_type=class_obj
-                )
+                self._fuzz_one_class(class_idx=i, class_name_str=class_name, class_type=class_obj)
         self.emptyLine()
 
         if self.module_objects:
@@ -475,24 +478,27 @@ class WritePythonCode(WriteCode):
 
         self.emptyLine()
 
-    def _fuzz_one_class(
-        self, class_idx: int, class_name_str: str, class_type: type
-    ) -> None:
+    def _fuzz_one_class(self, class_idx: int, class_name_str: str, class_type: type) -> None:
         """Generates code to instantiate a class and fuzz its methods."""
         prefix = f"c{class_idx + 1}"
         self.write_print_to_stderr(
             0, f'"[{prefix}] Attempting to instantiate class: {class_name_str}"'
         )
 
-        instance_var_name = f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
+        instance_var_name = (
+            f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
+        )
 
-        if not self.h5py_writer.fuzz_one_h5py_class(class_name_str, class_type, instance_var_name, prefix):
+        if not self.h5py_writer.fuzz_one_h5py_class(
+            class_name_str, class_type, instance_var_name, prefix
+        ):
             num_constructor_args = class_arg_number(class_name_str, class_type)
             self.write(0, f"{instance_var_name} = None # Initialize instance variable")
             self.write(0, "try:")
             self.addLevel(1)
-            self.write(0,
-                       f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',")  # prefix was from original _fuzz_one_class
+            self.write(
+                0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
+            )  # prefix was from original _fuzz_one_class
             self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
             self.write(0, "  )")  # Close callFunc
             if USE_MANGLE_FEATURE:  # Assuming USE_MANGLE_FEATURE is defined
@@ -531,7 +537,9 @@ class WritePythonCode(WriteCode):
 
         # Common logic: if instance_var_name was successfully created, fuzz its methods
         # Inside _fuzz_one_class, after instance_var_name is potentially defined:
-        self.write(0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:")
+        self.write(
+            0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:"
+        )
         current_level = self.addLevel(1)
         # class_type is the type object of the class that was "instantiated"
         self._fuzz_methods_on_object_or_specific_types(
@@ -539,7 +547,7 @@ class WritePythonCode(WriteCode):
             target_obj_expr_str=instance_var_name,
             target_obj_class_name=class_name_str,  # Original class name string
             target_obj_actual_type_obj=class_type,  # The actual type object
-            num_method_calls_to_make=self.options.methods_number
+            num_method_calls_to_make=self.options.methods_number,
         )
         # self.restoreLevel(self.base_level - 1)
         self.write(0, f"del {instance_var_name} # Cleanup instance")
@@ -550,24 +558,27 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(current_level)
         self.emptyLine()
 
-
     MAX_FUZZ_GENERATION_DEPTH = 2  # Adjust as needed; 3-5 is usually a good start
 
     def _dispatch_fuzz_on_instance(
-            self,
-            current_prefix: str,
-            target_obj_expr_str: str,
-            class_name_hint: str,  # Can be a runtime type string like "type(obj).__name__"
-            generation_depth: int
+        self,
+        current_prefix: str,
+        target_obj_expr_str: str,
+        class_name_hint: str,  # Can be a runtime type string like "type(obj).__name__"
+        generation_depth: int,
     ):
         """Dispatches fuzzing operations for a given object instance."""
         if generation_depth > self.MAX_FUZZ_GENERATION_DEPTH:
-            self.write_print_to_stderr(0,
-                                       f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'")
+            self.write_print_to_stderr(
+                0,
+                f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'",
+            )
             return
 
-        self.write_print_to_stderr(0,
-                                   f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{ {target_obj_expr_str}!r }} (hint: {class_name_hint}, prefix: {current_prefix}) ---"')
+        self.write_print_to_stderr(
+            0,
+            f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{ {target_obj_expr_str}!r }} (hint: {class_name_hint}, prefix: {current_prefix}) ---"',
+        )
 
         self.write(0, f"# {self.base_level=}")
         self.write(0, f"if {target_obj_expr_str} is not None:")
@@ -578,20 +589,25 @@ class WritePythonCode(WriteCode):
         try:
             self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
             skiplevel = self.addLevel(1)
-            self.write_print_to_stderr(0,
-                                       f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+            self.write_print_to_stderr(
+                0,
+                f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
+            )
             self.restoreLevel(skiplevel)
             if self.h5py_writer:
-                L_else_generic = self.h5py_writer._dispatch_fuzz_on_h5py_instance(class_name_hint, current_prefix, generation_depth,
-                                                                  target_obj_expr_str)
+                L_else_generic = self.h5py_writer._dispatch_fuzz_on_h5py_instance(
+                    class_name_hint, current_prefix, generation_depth, target_obj_expr_str
+                )
             try:
-                self.write_print_to_stderr(0,
-                                           f"f'Instance {{ {target_obj_expr_str}!r }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'")
+                self.write_print_to_stderr(
+                    0,
+                    f"f'Instance {{ {target_obj_expr_str}!r }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
+                )
                 self._fuzz_generic_object_methods(
                     f"{current_prefix}_generic",
                     target_obj_expr_str,
                     # class_name_hint, # Not directly used by _fuzz_generic_object_methods as it uses dir()
-                    self.options.methods_number  # Generic number of calls
+                    self.options.methods_number,  # Generic number of calls
                 )
             finally:
                 if self.h5py_writer:
@@ -600,7 +616,9 @@ class WritePythonCode(WriteCode):
             self.restoreLevel(L_main_if_target_not_none)
         # ---- END BLOCK: Main if target_obj_expr_str not None ----
 
-    def _fuzz_generic_object_methods(self, current_prefix: str, target_obj_expr_str: str, num_calls: int):
+    def _fuzz_generic_object_methods(
+        self, current_prefix: str, target_obj_expr_str: str, num_calls: int
+    ):
         """
         Generates code for fuzzing methods of a generic object.
         (This is the generic part previously in _dispatch_fuzz_on_instance's else block)
@@ -619,12 +637,16 @@ class WritePythonCode(WriteCode):
         # The deep dive part comes if _generate_and_write_call is enhanced.
         self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
         skiplevel = self.addLevel(1)
-        self.write_print_to_stderr(0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+        self.write_print_to_stderr(
+            0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'"
+        )
         self.restoreLevel(skiplevel)
         self.write(0, "else:")
         elselevel = self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'")
+        self.write_print_to_stderr(
+            0,
+            f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'",
+        )
         # --- Generic Method Fuzzing Logic ---
         # This is where you'd put your existing loop that gets methods via dir() or _get_object_methods
         # and calls them randomly using _generate_and_write_call.
@@ -638,13 +660,19 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, f"for {current_prefix}_attr_name in dir({target_obj_expr_str}):")
         self.addLevel(1)
-        self.write(0,
-                   f"if {current_prefix}_attr_name.startswith('_'): continue")  # Skip private/dunder for simplicity
+        self.write(
+            0, f"if {current_prefix}_attr_name.startswith('_'): continue"
+        )  # Skip private/dunder for simplicity
         self.write(0, f"try:")  # Inner try for getattr
         self.addLevel(1)
-        self.write(0, f"{current_prefix}_attr_val = getattr({target_obj_expr_str}, {current_prefix}_attr_name)")
-        self.write(0,
-                   f"if callable({current_prefix}_attr_val): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))")
+        self.write(
+            0,
+            f"{current_prefix}_attr_val = getattr({target_obj_expr_str}, {current_prefix}_attr_name)",
+        )
+        self.write(
+            0,
+            f"if callable({current_prefix}_attr_val): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
+        )
         self.restoreLevel(self.base_level - 1)  # Exit inner try
         self.write(0, f"except Exception: pass")
         self.restoreLevel(self.base_level - 1)  # Exit for loop
@@ -653,51 +681,67 @@ class WritePythonCode(WriteCode):
 
         self.write(0, f"if {current_prefix}_methods:")
         self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f"f'Found {{len({current_prefix}_methods)}} callable methods for generic fuzzing of {target_obj_expr_str}'")
-        self.write(0,
-                   f"for _i_{current_prefix} in range(min(len({current_prefix}_methods), {self.options.methods_number})):")  # Use configured num calls
+        self.write_print_to_stderr(
+            0,
+            f"f'Found {{len({current_prefix}_methods)}} callable methods for generic fuzzing of {target_obj_expr_str}'",
+        )
+        self.write(
+            0,
+            f"for _i_{current_prefix} in range(min(len({current_prefix}_methods), {self.options.methods_number})):",
+        )  # Use configured num calls
         self.addLevel(1)
-        self.write(0,
-                   f"{current_prefix}_method_name_to_call, {current_prefix}_method_obj_to_call = choice({current_prefix}_methods)")
+        self.write(
+            0,
+            f"{current_prefix}_method_name_to_call, {current_prefix}_method_obj_to_call = choice({current_prefix}_methods)",
+        )
         # Now call _generate_and_write_call using {current_prefix}_method_name_to_call (string)
         # and {current_prefix}_method_obj_to_call (the callable).
         # _generate_and_write_call needs adaptation if method_obj is a runtime variable.
         # For simplicity here, let's assume _generate_and_write_call can take the method *name*
         # and the target object expression.
         self.write(0, f"# Conceptual call to generic method fuzzer")
-        self.write(0,
-                   f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)")  # Example simplified call
+        self.write(
+            0,
+            f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
+        )  # Example simplified call
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit if methods
         self.restoreLevel(elselevel)  # Exit else
         self.emptyLine()
 
     def _fuzz_methods_on_object_or_specific_types(
-            self,
-            current_prefix: str,  # e.g., "o1m", "c1_instm"
-            target_obj_expr_str: str,  # e.g., "instance_c0_dataset", "h5py_tricky_objects.get('some_key')"
-            target_obj_class_name: str,  # e.g., "Dataset", "File", "MyClass" (for logging/heuristics)
-            target_obj_actual_type_obj: Any,  # The actual type object if available to WritePythonCode, else None
-            num_method_calls_to_make: int
+        self,
+        current_prefix: str,  # e.g., "o1m", "c1_instm"
+        target_obj_expr_str: str,  # e.g., "instance_c0_dataset", "h5py_tricky_objects.get('some_key')"
+        target_obj_class_name: str,  # e.g., "Dataset", "File", "MyClass" (for logging/heuristics)
+        target_obj_actual_type_obj: Any,  # The actual type object if available to WritePythonCode, else None
+        num_method_calls_to_make: int,
     ):
         """Fuzzes methods of a given object, with special handling for specific types."""
-        self.write_print_to_stderr(0,
-                                   f'f"--- Fuzzing instance: {target_obj_expr_str} (type hint: {target_obj_class_name}, prefix: {current_prefix}) ---"')
+        self.write_print_to_stderr(
+            0,
+            f'f"--- Fuzzing instance: {target_obj_expr_str} (type hint: {target_obj_class_name}, prefix: {current_prefix}) ---"',
+        )
 
         self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
         skiplevel = self.addLevel(1)
-        self.write_print_to_stderr(0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'")
+        self.write_print_to_stderr(
+            0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'"
+        )
         self.restoreLevel(skiplevel)
 
         if self.h5py_writer:
-            self.h5py_writer._fuzz_methods_on_h5py_object_or_specific_types(current_prefix, target_obj_expr_str)
+            self.h5py_writer._fuzz_methods_on_h5py_object_or_specific_types(
+                current_prefix, target_obj_expr_str
+            )
 
         # else: # General method fuzzing for other types
         self.write(0, f"# General method fuzzing for {target_obj_expr_str}")
         methods_dict = {}
         if target_obj_actual_type_obj:  # If WritePythonCode has the type
-            methods_dict = self._get_object_methods(target_obj_actual_type_obj, target_obj_class_name)
+            methods_dict = self._get_object_methods(
+                target_obj_actual_type_obj, target_obj_class_name
+            )
         else:  # Try to get methods at runtime in generated script (less ideal for setup)
             # self.write(0,
             #            f"try: runtime_methods_{current_prefix} = {{name: getattr({target_obj_expr_str}, name) for name in dir({target_obj_expr_str}) if callable(getattr({target_obj_expr_str}, name, None))}}")
@@ -713,22 +757,22 @@ class WritePythonCode(WriteCode):
             if method_names_list:
                 for m_idx in range(num_method_calls_to_make):
                     chosen_method_name = choice(method_names_list)
-                    chosen_method_obj = methods_dict[chosen_method_name] # Actual method callable
-                    self._generate_and_write_call( # Your generic method call writer
-                        prefix=f"{current_prefix}{m_idx+1}",
+                    chosen_method_obj = methods_dict[chosen_method_name]  # Actual method callable
+                    self._generate_and_write_call(  # Your generic method call writer
+                        prefix=f"{current_prefix}{m_idx + 1}",
                         callable_name=chosen_method_name,
                         callable_obj=chosen_method_obj,
-                        min_arg_count=0, # Heuristic for methods
+                        min_arg_count=0,  # Heuristic for methods
                         target_obj_expr=target_obj_expr_str,
                         is_method_call=True,
                         generation_depth=0,
                     )
-        self.write_print_to_stderr(0, f'f"--- Finished fuzzing instance: {target_obj_expr_str} ---"')
+        self.write_print_to_stderr(
+            0, f'f"--- Finished fuzzing instance: {target_obj_expr_str} ---"'
+        )
         self.emptyLine()
 
-    def _fuzz_one_module_object(
-        self, obj_idx: int, obj_name_str: str, obj_instance: Any
-    ) -> None:
+    def _fuzz_one_module_object(self, obj_idx: int, obj_name_str: str, obj_instance: Any) -> None:
         """Generates code to fuzz methods of a given module-level object."""
         prefix = f"obj{obj_idx + 1}"
         obj_expr_in_script = f"fuzz_target_module.{obj_name_str}"
@@ -738,7 +782,7 @@ class WritePythonCode(WriteCode):
             target_obj_expr_str=obj_expr_in_script,
             target_obj_class_name=obj_instance.__class__.__name__,  # Get class name from instance
             target_obj_actual_type_obj=type(obj_instance),  # Get type from instance
-            num_method_calls_to_make=self.options.methods_number
+            num_method_calls_to_make=self.options.methods_number,
         )
         self.write_print_to_stderr(
             0, f'"[{prefix}] -explicit garbage collection for module object bindings-"'
@@ -746,9 +790,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "collect()")
         self.emptyLine()
 
-    def _write_arguments_for_call_lines(
-        self, num_args: int, base_indent_level: int
-    ) -> None:
+    def _write_arguments_for_call_lines(self, num_args: int, base_indent_level: int) -> None:
         """Generates and writes argument lines for a function/method call."""
         for i in range(num_args):
             arg_lines = self.arg_generator.create_complex_argument()
@@ -765,8 +807,7 @@ class WritePythonCode(WriteCode):
             for arg_line_part in arg_lines[1:]:
                 self.write(
                     base_indent_level,
-                    arg_line_part
-                    + (last_char if arg_line_part == arg_lines[-1] else ""),
+                    arg_line_part + (last_char if arg_line_part == arg_lines[-1] else ""),
                 )
 
     def _generate_and_write_call(
@@ -816,20 +857,24 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         self.write(0, f"# Deep dive on result of {callable_name}")
-        self.write(0,
-                   f"if 'res_{prefix}' in locals() and res_{prefix} is not None and res_{prefix} is not SENTINEL_VALUE:")
+        self.write(
+            0,
+            f"if 'res_{prefix}' in locals() and res_{prefix} is not None and res_{prefix} is not SENTINEL_VALUE:",
+        )
         # We need to ensure SENTINEL_VALUE is defined if callMethod uses it.
         # Let's assume res_{prefix} is the actual return value.
         L_deep_dive_res = self.addLevel(1)
         try:
             self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
-            self.write_print_to_stderr(0,
-                                       f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'")
+            self.write_print_to_stderr(
+                0,
+                f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
+            )
             self._dispatch_fuzz_on_instance(
                 current_prefix=f"{prefix}_res_dive",
                 target_obj_expr_str=f"res_{prefix}",  # The variable holding the result
                 class_name_hint=f"{prefix}_res_type_name",  # Runtime type name
-                generation_depth=generation_depth + 1  # Incremented depth
+                generation_depth=generation_depth + 1,  # Incremented depth
             )
         finally:
             self.restoreLevel(L_deep_dive_res)
@@ -837,9 +882,7 @@ class WritePythonCode(WriteCode):
         if self.enable_threads or self.enable_async:
             self.write(0, "target_func = None")
             self.write(0, "try:")
-            self.write(
-                1, f"target_func = getattr({target_obj_expr}, '{callable_name}')"
-            )
+            self.write(1, f"target_func = getattr({target_obj_expr}, '{callable_name}')")
             self.write(0, "except Exception as e_get_target_func:")
             self.write_print_to_stderr(
                 1,
@@ -891,9 +934,7 @@ class WritePythonCode(WriteCode):
 
             args_str_async = ", ".join(arg_expr_list_async)
 
-            self.write(
-                0, f"target_func({args_str_async})"
-            )
+            self.write(0, f"target_func({args_str_async})")
             self.addLevel(-1)
             self.write(0, "except Exception as e_async_call:")
             self.write_print_to_stderr(
@@ -909,9 +950,7 @@ class WritePythonCode(WriteCode):
     def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
         if self.enable_threads:
-            self.write_print_to_stderr(
-                0, '"--- Starting and Joining Fuzzer Threads ---"'
-            )
+            self.write_print_to_stderr(0, '"--- Starting and Joining Fuzzer Threads ---"')
             self.write(0, "for t_obj in fuzzer_threads_alive:")
             self.write(1, "try:")
             self.write_print_to_stderr(2, 'f"Starting thread: {t_obj.name}"')
@@ -947,7 +986,10 @@ class WritePythonCode(WriteCode):
             self.write(0, "try:")
             self.write(1, "runner.run(main_async_fuzzer_tasks())")
             self.write(0, "except Exception as e_async_runner_run:")
-            self.write(1, "print(f'Exception in async runner: {e_async_runner_run.__class__.__name__} {e_async_runner_run}')")
+            self.write(
+                1,
+                "print(f'Exception in async runner: {e_async_runner_run.__class__.__name__} {e_async_runner_run}')",
+            )
             self.write(0, "finally:")
             self.write(1, "runner.close()")
             self.emptyLine()
@@ -963,6 +1005,6 @@ class WritePythonCode(WriteCode):
         self._write_concurrency_finalization()
 
         self.parent_python_source.warning(
-            f'--- Fuzzing script generation for {self.module_name} complete ---'
+            f"--- Fuzzing script generation for {self.module_name} complete ---"
         )
         self.close()

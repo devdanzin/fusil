@@ -123,8 +123,7 @@ class Fuzzer(Application):
         fuzzing_options = OptionGroupWithSections(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
-            help="Number of function calls to generate per module (default: %d)"
-            % DEFAULT_NB_CALL,
+            help="Number of function calls to generate per module (default: %d)" % DEFAULT_NB_CALL,
             type="int",
             default=DEFAULT_NB_CALL,
         )
@@ -137,8 +136,7 @@ class Fuzzer(Application):
         )
         fuzzing_options.add_option(
             "--classes-number",
-            help="Number of classes to fuzz per module (default: %d)"
-            % DEFAULT_NB_CLASS,
+            help="Number of classes to fuzz per module (default: %d)" % DEFAULT_NB_CLASS,
             type="int",
             default=DEFAULT_NB_CLASS,
         )
@@ -185,8 +183,7 @@ class Fuzzer(Application):
         )
         fuzzing_options.add_option(
             "--filenames",
-            help="Names separated by commas of readable files (default: %s)"
-            % FILENAMES,
+            help="Names separated by commas of readable files (default: %s)" % FILENAMES,
             type="str",
             default=FILENAMES,
         )
