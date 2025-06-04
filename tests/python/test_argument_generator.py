@@ -1,67 +1,104 @@
-import re
 import unittest
 import sys
-from ast import literal_eval
-from random import seed, choice as random_choice  # For potentially overriding choice
-from unittest.mock import patch  # For more advanced mocking if needed
+import re  # For test_genWeirdUnion and test_genWeirdType
+from random import randint, sample, seed, choice as random_choice
+from unittest.mock import patch, MagicMock  # MagicMock for placeholders
 
-# Add fusil to path if tests are run from a different directory
-# (Adjust as per your project structure)
+# (Your sys.path setup if needed)
 # import os
 # SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', '..')) # Assuming tests/python/
+# sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', '..'))
 
-from fusil.python.argument_generator import ArgumentGenerator, TEMPLATES
+import fusil.python.argument_generator
 from fusil.config import FusilConfig
-import fusil.python.tricky_weird  # To access its defined names
+import fusil.python.tricky_weird
+import fusil.python.values
+import fusil.python.h5py.h5py_tricky_weird  # For h5py_tricky_names
+import numpy  # For numpy placeholders
+import h5py  # For h5py placeholders (like h5py.File)
 
-
-# Ensure dummy files exist if genExistingFilename is tested heavily
-# For simplicity, we'll mock its output or check if it gracefully handles missing files.
 
 class TestArgumentGenerator(unittest.TestCase):
 
-    def _setup_arg_gen(self, use_numpy=True, use_templates=True, use_h5py=True, no_numpy_opt=False,
-                       no_tstrings_opt=False):
-        """Helper to initialize ArgumentGenerator with specific options."""
+    def _setup_arg_gen(self, use_numpy=True, use_templates=True, use_h5py_arg_gen=True,  # Renamed use_h5py for clarity
+                       no_numpy_opt=False, no_tstrings_opt=False):
         mock_options = FusilConfig(read=False)
-
-        # Apply options that affect ArgumentGenerator's internal lists
         mock_options.no_numpy = no_numpy_opt
         mock_options.no_tstrings = no_tstrings_opt
-
-        # Ensure other potentially accessed options have defaults
-        mock_options.functions_number = getattr(mock_options, 'functions_number', 10)  # Example default
+        mock_options.functions_number = getattr(mock_options, 'functions_number', 10)
         mock_options.methods_number = getattr(mock_options, 'methods_number', 5)
         mock_options.classes_number = getattr(mock_options, 'classes_number', 5)
         mock_options.objects_number = getattr(mock_options, 'objects_number', 5)
         mock_options.fuzz_exceptions = getattr(mock_options, 'fuzz_exceptions', False)
 
-        # Default filenames, can be overridden in specific tests if needed
         default_filenames = ["/tmp/testfile1.txt", "/tmp/testfile2.log"]
         if hasattr(mock_options, 'filenames') and not mock_options.filenames:
             mock_options.filenames = ",".join(default_filenames)
         elif not hasattr(mock_options, 'filenames'):
             mock_options.filenames = ",".join(default_filenames)
 
-        self.arg_gen = ArgumentGenerator(
+        self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(
             options=mock_options,
             filenames=mock_options.filenames.split(',') if mock_options.filenames else default_filenames,
             use_numpy=use_numpy,
             use_templates=use_templates,
-            use_h5py=use_h5py
+            use_h5py=use_h5py_arg_gen  # Pass the renamed flag
         )
-        # Optional: seed(12345) for reproducibility during development
+
+        # --- Define globals for eval() ---
+        self.test_globals = {
+            "sys": sys,  # For sys.maxsize, etc.
+            "numpy": numpy,  # For numpy.nan, numpy.inf, etc. and direct numpy calls
+            "h5py": h5py,  # For h5py.File, h5py.Empty etc.
+            "MagicMock": MagicMock,  # For "MagicMock()" expressions
+            "Liar1": MagicMock(name="Liar1_mock"),
+            "Liar2": MagicMock(name="Liar2_mock"),
+            "Evil": MagicMock(name="Evil_mock"),
+            fusil.python.argument_generator.ERRBACK_NAME_CONST: MagicMock(name="errback_mock"),  # For "errback"
+            "True": True, "False": False, "None": None,  # Basic builtins
+            "object": object, "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "int": int, "float": float, "str": str, "bytes": bytes, "bytearray": bytearray,
+            "Exception": Exception,
+            "range": range, "len": len, "repr": repr, "choice": random_choice,  # if generated code uses them
+            "randint": randint, "sample": sample,  # if generated code uses them
+            # For template strings, if they were to be eval'd directly (they usually create Template objects)
+            "Template": MagicMock(name="Template_mock"),
+            "Interpolation": MagicMock(name="Interpolation_mock"),
+        }
+
+        # Placeholder for h5py_tricky_objects.get('name')
+        # The .get() method will be called on this mock.
+        h5py_tricky_objects_mock = MagicMock(name="h5py_tricky_objects_mock")
+        h5py_tricky_objects_mock.get.return_value = "mocked_h5py_object"  # Default return for any .get()
+        self.test_globals["h5py_tricky_objects"] = h5py_tricky_objects_mock
+
+        # Placeholders for tricky_numpy names
+        for name in fusil.python.tricky_weird.tricky_numpy_names:
+            self.test_globals[name] = f"numpy_placeholder_for_{name}"
+
+        # Placeholders for tricky_objects names
+        for name in fusil.python.tricky_weird.tricky_objects_names:
+            self.test_globals[name] = f"tricky_obj_placeholder_for_{name}"
+
+        # Placeholders for weird_classes and weird_instances
+        weird_classes_mock = MagicMock(name="weird_classes_mock")
+        weird_classes_mock.__getitem__.return_value = "mocked_weird_class"
+        self.test_globals["weird_classes"] = weird_classes_mock
+
+        weird_instances_mock = MagicMock(name="weird_instances_mock")
+        weird_instances_mock.__getitem__.return_value = "mocked_weird_instance"
+        self.test_globals["weird_instances"] = weird_instances_mock
+
+        # Placeholder for big_union (if it's just a name)
+        self.test_globals["big_union"] = "mocked_big_union"
 
     def setUp(self):
-        """Default setup: all features enabled in ArgumentGenerator construction,
-           and no conflicting options."""
-        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py=True,
+        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py_arg_gen=True,
                             no_numpy_opt=False, no_tstrings_opt=False)
 
     def assertIsListOfStrings(self, result, method_name):
         self.assertIsInstance(result, list, f"{method_name} should return a list.")
-        if result:  # Only check items if list is not empty
+        if result:
             for item in result:
                 self.assertIsInstance(item, str,
                                       f"Items in list from {method_name} should be strings. Got: {type(item)} for item '{item}'")
@@ -118,8 +155,7 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("[") and full_expr.endswith("]"),
                         f"genList output '{full_expr}' should start with [ and end with ].")
         try:
-            # This is a more robust check, but relies on generated content also being valid
-            eval(full_expr)
+            eval(full_expr, self.test_globals) # Pass globals
         except Exception as e:
             self.fail(f"genList produced an invalid expression '{full_expr}': {e}")
 
@@ -130,7 +166,7 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("(") and full_expr.endswith(")"),
                         f"genTuple output '{full_expr}' should start with ( and end with ).")
         try:
-            eval(full_expr)
+            eval(full_expr, self.test_globals) # Pass globals
         except Exception as e:
             self.fail(f"genTuple produced an invalid expression '{full_expr}': {e}")
 
@@ -141,14 +177,14 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("{") and full_expr.endswith("}"),
                         f"genDict output '{full_expr}' should start with {{ and end with }}.")
         try:
-            eval(full_expr)
+            eval(full_expr, self.test_globals) # Pass globals
         except Exception as e:
             self.fail(f"genDict produced an invalid expression '{full_expr}': {e}")
 
     def test_genList_empty(self):
         # To test empty list generation, we might need to influence randint or run many times
         # For now, let's assume it *can* generate empty lists. A more targeted test:
-        with patch('random.randint', return_value=0):  # Force nb_item = 0
+        with patch('fusil.python.argument_generator.randint', return_value=0):  # Force nb_item = 0
             result = self.arg_gen.genList()
             self.assertEqual("".join(result), "[]")
 
@@ -165,7 +201,7 @@ class TestArgumentGenerator(unittest.TestCase):
                       f"genExistingFilename did not return one of the expected filenames: {result[0]}")
 
         # Test with no filenames provided to ArgumentGenerator
-        self._setup_arg_gen(use_numpy=False, use_templates=False, use_h5py=False)  # Re-init with no filenames
+        self._setup_arg_gen(use_numpy=False, use_templates=False, use_h5py_arg_gen=False)  # Re-init with no filenames
         self.arg_gen.filenames = []  # Explicitly empty it
         result_no_files = self.arg_gen.genExistingFilename()
         self.assertIsListOfStrings(result_no_files, "genExistingFilename (no files)")
@@ -206,23 +242,23 @@ class TestArgumentGenerator(unittest.TestCase):
         return False
 
     def test_simple_generators_composition_with_numpy_h5py(self):
-        self._setup_arg_gen(use_numpy=True, use_h5py=True, no_numpy_opt=False)
+        self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=False)
         self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
         self.assertTrue(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
 
     def test_simple_generators_composition_without_numpy_opt(self):
-        self._setup_arg_gen(use_numpy=True, use_h5py=True, no_numpy_opt=True)  # no_numpy option is True
+        self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=True)  # no_numpy option is True
         self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
         # genH5PyObject also depends on numpy not being disabled by options
         self.assertFalse(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
 
     def test_simple_generators_composition_without_numpy_init(self):
-        self._setup_arg_gen(use_numpy=False, use_h5py=True, no_numpy_opt=False)  # use_numpy init flag is False
+        self._setup_arg_gen(use_numpy=False, use_h5py_arg_gen=True, no_numpy_opt=False)  # use_numpy init flag is False
         self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
         self.assertFalse(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
 
     def test_complex_generators_composition_with_templates(self):
-        if TEMPLATES:  # Only run if templates are supposed to be available
+        if fusil.python.argument_generator.TEMPLATES:  # Only run if templates are supposed to be available
             self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)
             self.assertTrue(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
         else:
@@ -238,7 +274,7 @@ class TestArgumentGenerator(unittest.TestCase):
 
     def test_create_simple_argument_variety(self):
         """Try to detect if create_simple_argument uses different sub-generators."""
-        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py=True,
+        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py_arg_gen=True,
                             no_numpy_opt=False, no_tstrings_opt=False)
 
         # This is a probabilistic test. We try to see if different kinds of expressions are generated.
@@ -547,7 +583,7 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
 
     def test_create_complex_argument_with_templates(self):
-        if TEMPLATES:
+        if fusil.python.argument_generator.TEMPLATES:
             self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)
             self.assertTrue(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
 
