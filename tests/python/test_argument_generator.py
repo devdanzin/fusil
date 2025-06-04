@@ -268,6 +268,186 @@ class TestArgumentGenerator(unittest.TestCase):
         # Expect to see a few different types of arguments generated
         self.assertTrue(len(seen_types) > 3, f"create_simple_argument did not show much variety. Seen: {seen_types}")
 
+    def test_genSmallUint(self):
+        result = self.arg_gen.genSmallUint()
+        self.assertIsListOfStrings(result, "genSmallUint")
+        self.assertEqual(len(result), 1)
+        try:
+            val = eval(result[0])
+            self.assertIsInstance(val, int, "genSmallUint should produce an integer string.")
+            self.assertTrue(-19 <= val <= 19,
+                            f"genSmallUint produced {val}, which is outside the expected range -19 to 19.")
+        except Exception as e:
+            self.fail(f"eval({result[0]}) from genSmallUint failed: {e}")
+
+        # Check for variety
+        outputs = {int(self.arg_gen.genSmallUint()[0]) for _ in range(50)} # More iterations for better chance of variety
+        self.assertTrue(len(outputs) > 1, "genSmallUint should ideally produce varied outputs.")
+
+    def test_genBytes(self):
+        result = self.arg_gen.genBytes()
+        self.assertIsListOfStrings(result, "genBytes")
+        self.assertEqual(len(result), 1)
+        val_str = result[0]
+        self.assertTrue(
+            (val_str.startswith('b"') and val_str.endswith('"')) or \
+            (val_str.startswith("b'") and val_str.endswith("'")),
+            f"genBytes output '{val_str}' should be a quoted bytes literal."
+        )
+        try:
+            val_bytes = eval(val_str)
+            self.assertIsInstance(val_bytes, bytes, "genBytes should produce a bytes object.")
+        except Exception as e:
+            self.fail(f"eval({val_str}) from genBytes failed: {e}")
+
+        # Test for empty bytes generation (might require mocking or many runs)
+        # Forcing it with a patch:
+        with patch.object(self.arg_gen.bytes_generator, 'createLength', return_value=0):
+            result_empty = self.arg_gen.genBytes()
+            self.assertEqual(eval("".join(result_empty)), b"")
+
+    def test_genLetterDigit(self):
+        result = self.arg_gen.genLetterDigit()
+        self.assertIsListOfStrings(result, "genLetterDigit")
+        self.assertEqual(len(result), 1)
+        val_str = result[0]
+        self.assertTrue(
+            (val_str.startswith('"') and val_str.endswith('"')) or \
+            (val_str.startswith("'") and val_str.endswith("'")),
+            f"genLetterDigit output '{val_str}' should be a quoted string."
+        )
+        try:
+            # Check if it's a valid string literal. Content check is harder without knowing exact charset.
+            eval(val_str)
+        except SyntaxError:
+            self.fail(f"genLetterDigit produced a syntactically invalid string literal: {val_str}")
+
+    def test_genAsciiString(self):
+        result = self.arg_gen.genAsciiString()
+        self.assertIsListOfStrings(result, "genAsciiString")
+        self.assertEqual(len(result), 1)
+        val_str = result[0]
+        self.assertTrue(
+            (val_str.startswith('"') and val_str.endswith('"')) or \
+            (val_str.startswith("'") and val_str.endswith("'")),
+            f"genAsciiString output '{val_str}' should be a quoted string."
+        )
+        try:
+            evaluated_str = eval(val_str)
+            self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_str), # From ASCII8
+                            f"genAsciiString content '{evaluated_str}' not in ASCII8 range.")
+        except Exception as e: # Catches eval errors or issues in ord(c)
+            self.fail(f"genAsciiString produced an invalid string or content: {val_str}, error: {e}")
+
+    def test_genUnixPath(self):
+        result = self.arg_gen.genUnixPath()
+        self.assertIsListOfStrings(result, "genUnixPath")
+        self.assertEqual(len(result), 1)
+        val_str = result[0]
+        self.assertTrue(
+            (val_str.startswith('"') and val_str.endswith('"')) or \
+            (val_str.startswith("'") and val_str.endswith("'")),
+            f"genUnixPath output '{val_str}' should be a quoted string."
+        )
+        # Content check: should ideally resemble a path. For now, just eval.
+        try:
+            eval(val_str)
+        except SyntaxError:
+            self.fail(f"genUnixPath produced a syntactically invalid string literal: {val_str}")
+
+    def test_genFloat(self):
+        result = self.arg_gen.genFloat()
+        self.assertIsListOfStrings(result, "genFloat")
+        self.assertEqual(len(result), 1)
+        try:
+            val = eval(result[0])
+            self.assertIsInstance(val, float, "genFloat should produce a string representing a float.")
+        except Exception as e:
+            self.fail(f"eval({result[0]}) from genFloat failed: {e}")
+
+    def test_genErrback(self):
+        result = self.arg_gen.genErrback()
+        self.assertIsListOfStrings(result, "genErrback")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], self.arg_gen.errback_name,
+                         f"genErrback should return the errback_name ('{self.arg_gen.errback_name}').")
+
+    def test_genOpenFile(self):
+        # Case 1: Filenames are available
+        self._setup_arg_gen() # Ensures self.arg_gen.filenames is populated
+        result_with_files = self.arg_gen.genOpenFile()
+        self.assertIsListOfStrings(result_with_files, "genOpenFile (with files)")
+        self.assertEqual(len(result_with_files), 1)
+        expr_str = result_with_files[0]
+        self.assertTrue(expr_str.startswith("open(") and expr_str.endswith(")"),
+                        "genOpenFile should produce an open(...) expression.")
+        # Ensure the filename inside open() is one of the provided ones
+        opened_file_arg = expr_str[len("open("):-1]
+        expected_filenames_quoted = [f"'{f.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+                                     for f in self.arg_gen.filenames]
+        self.assertIn(opened_file_arg, expected_filenames_quoted,
+                      f"genOpenFile arg {opened_file_arg} not in expected {expected_filenames_quoted}")
+
+        # Case 2: No filenames available
+        self.arg_gen.filenames = []
+        result_no_files = self.arg_gen.genOpenFile()
+        self.assertIsListOfStrings(result_no_files, "genOpenFile (no files)")
+        self.assertEqual(result_no_files[0], "open('NO_FILE_AVAILABLE')")
+
+    def test_genException(self):
+        result = self.arg_gen.genException()
+        self.assertIsListOfStrings(result, "genException")
+        self.assertEqual(len(result), 1)
+        expr_str = result[0]
+        self.assertTrue(expr_str.startswith("Exception(") and expr_str.endswith(")"),
+                        "genException should produce an Exception(...) expression.")
+        try:
+            # Check it's a valid expression that would create an Exception
+            compile(expr_str, '<string>', 'eval')
+        except SyntaxError:
+            self.fail(f"genException produced a syntactically invalid expression: {expr_str}")
+
+    def test_genBufferObject(self):
+        result = self.arg_gen.genBufferObject()
+        self.assertIsListOfStrings(result, "genBufferObject")
+        self.assertEqual(len(result), 1)
+        self.assertIn(result[0], fusil.python.values.BUFFER_OBJECTS,
+                      "genBufferObject should pick from BUFFER_OBJECTS.")
+
+    def test_genTricky(self):
+        result = self.arg_gen.genTricky()
+        self.assertIsListOfStrings(result, "genTricky")
+        self.assertEqual(len(result), 1)
+        # Just check it's one of the predefined strings, actual behavior is too complex for unit test here
+        predefined_tricky = [
+            "liar1", "liar2", "lambda *args, **kwargs: 1/0", "int", "type", "object()",
+            "[[[[[[[[[[[[[[]]]]]]]]]]]]]]", "MagicMock()", "Evil()", "MagicMock", "Evil", "Liar1", "Liar2",
+        ]
+        self.assertIn(result[0], predefined_tricky)
+
+    def test_genWeirdClass(self):
+        result = self.arg_gen.genWeirdClass()
+        self.assertIsListOfStrings(result, "genWeirdClass")
+        self.assertEqual(len(result), 1)
+        expr_str = result[0]
+        # Example: "weird_classes['weird_list']"
+        self.assertTrue(expr_str.startswith("weird_classes['") and expr_str.endswith("']"),
+                        f"genWeirdClass expression '{expr_str}' has incorrect format.")
+        weird_class_key = expr_str[len("weird_classes['"):-len("']")]
+        self.assertIn(weird_class_key, fusil.python.tricky_weird.weird_names,
+                      f"Key '{weird_class_key}' from genWeirdClass not in tricky_weird.weird_names")
+
+    def test_genWeirdInstance(self):
+        result = self.arg_gen.genWeirdInstance()
+        self.assertIsListOfStrings(result, "genWeirdInstance")
+        self.assertEqual(len(result), 1)
+        expr_str = result[0]
+        self.assertTrue(expr_str.startswith("weird_instances['") and expr_str.endswith("']"),
+                        f"genWeirdInstance expression '{expr_str}' has incorrect format.")
+        weird_instance_key = expr_str[len("weird_instances['"):-len("']")]
+        self.assertIn(weird_instance_key, fusil.python.tricky_weird.weird_instance_names,
+                      f"Key '{weird_instance_key}' from genWeirdInstance not in tricky_weird.weird_instance_names")
+
 
 if __name__ == '__main__':
     unittest.main()
