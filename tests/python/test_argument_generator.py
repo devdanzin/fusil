@@ -1,5 +1,7 @@
+import re
 import unittest
 import sys
+from ast import literal_eval
 from random import seed, choice as random_choice  # For potentially overriding choice
 from unittest.mock import patch  # For more advanced mocking if needed
 
@@ -447,6 +449,131 @@ class TestArgumentGenerator(unittest.TestCase):
         weird_instance_key = expr_str[len("weird_instances['"):-len("']")]
         self.assertIn(weird_instance_key, fusil.python.tricky_weird.weird_instance_names,
                       f"Key '{weird_instance_key}' from genWeirdInstance not in tricky_weird.weird_instance_names")
+
+    def test_genRawString(self):
+        result = self.arg_gen.genRawString()
+        self.assertIsListOfStrings(result, "genRawString")
+        self.assertEqual(len(result), 1)
+        val_str = result[0]
+        self.assertTrue(
+            (val_str.startswith('r"') and val_str.endswith('"')) or \
+            (val_str.startswith("r'") and val_str.endswith("'")),
+            f"genRawString output '{val_str}' should be a raw string literal (r'...' or r\"...\")."
+        )
+        # Check if it's a valid Python string expression (compiles as a raw string)
+        try:
+            compile(val_str, '<string>', 'eval')
+        except SyntaxError:
+            self.fail(f"genRawString produced a syntactically invalid raw string literal: {val_str}")
+
+    def test_genSurrogates(self):
+        result = self.arg_gen.genSurrogates()
+        self.assertIsListOfStrings(result, "genSurrogates")
+        self.assertEqual(len(result), 1)
+        self.assertIn(result[0], fusil.python.values.SURROGATES,
+                      "genSurrogates should pick from fusil.python.values.SURROGATES.")
+
+    def test_genWeirdType(self):
+        result = self.arg_gen.genWeirdType()
+        self.assertIsListOfStrings(result, "genWeirdType")
+        self.assertEqual(len(result), 1)
+        expr_str = result[0]
+        # Example: "list[weird_classes['weird_someclass']]"
+        # We need to check if it matches the pattern: type_name[weird_classes['class_name']]
+        match = re.match(r"(\w+)\[weird_classes\['(\w+)'\]\]", expr_str)
+        self.assertIsNotNone(match,
+                             f"genWeirdType expression '{expr_str}' has incorrect format.")
+        if match:
+            type_name_generated = match.group(1)
+            weird_class_key_generated = match.group(2)
+            self.assertIn(type_name_generated, fusil.python.tricky_weird.type_names,
+                          f"Type name '{type_name_generated}' from genWeirdType not in tricky_weird.type_names.")
+            self.assertIn(weird_class_key_generated, fusil.python.tricky_weird.weird_names,
+                          f"Key '{weird_class_key_generated}' from genWeirdType not in tricky_weird.weird_names.")
+
+    def test_genWeirdUnion(self):
+        result = self.arg_gen.genWeirdUnion()
+        self.assertIsListOfStrings(result, "genWeirdUnion")
+        self.assertEqual(len(result), 1)
+        expr_str = result[0]
+        # Example: "list[weird_classes['weird_class1']] | weird_classes['weird_class2'] | big_union"
+        # This regex is a bit more complex due to the optional type_name[] part
+        # It tries to match the general structure.
+        # type_name[weird_classes['weird_class1']] | weird_classes['weird_class2'] | big_union
+        pattern = r"(\w+)\[weird_classes\['(\w+)'\]\]\s*\|\s*weird_classes\['(\w+)'\]\s*\|\s*big_union"
+        match = re.match(pattern, expr_str)
+
+        self.assertIsNotNone(match,
+                             f"genWeirdUnion expression '{expr_str}' did not match expected format.")
+
+        if match:
+            type_name_generated = match.group(1)
+            weird_class_key1_generated = match.group(2)
+            weird_class_key2_generated = match.group(3)
+
+            self.assertIn(type_name_generated, fusil.python.tricky_weird.type_names,
+                          f"Type name '{type_name_generated}' from genWeirdUnion not in tricky_weird.type_names.")
+            self.assertIn(weird_class_key1_generated, fusil.python.tricky_weird.weird_names,
+                          f"Key 1 '{weird_class_key1_generated}' from genWeirdUnion not in tricky_weird.weird_names.")
+            self.assertIn(weird_class_key2_generated, fusil.python.tricky_weird.weird_names,
+                          f"Key 2 '{weird_class_key2_generated}' from genWeirdUnion not in tricky_weird.weird_names.")
+
+    # --- Testing create_complex_argument composition ---
+    def test_create_complex_argument_with_numpy(self):
+        self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
+        self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+
+        # Probabilistic check that genTrickyNumpy can be chosen
+        numpy_seen = False
+        for _ in range(100):  # Increase iterations if this is flaky
+            # Temporarily make genTrickyNumpy the only choice to ensure it's picked
+            with patch.object(self.arg_gen, 'complex_argument_generators', (self.arg_gen.genTrickyNumpy,)):
+                result = self.arg_gen.create_complex_argument()
+                if "numpy" in "".join(result) or any(
+                        name in "".join(result) for name in fusil.python.tricky_weird.tricky_numpy_names):
+                    numpy_seen = True
+                    break
+        self.assertTrue(numpy_seen,
+                        "create_complex_argument with numpy enabled did not seem to produce numpy output after forced choice.")
+        # Restore original setup for other tests
+        self.setUp()
+
+    def test_create_complex_argument_without_numpy_opt(self):
+        self._setup_arg_gen(use_numpy=True, no_numpy_opt=True)  # no_numpy option is True
+        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+
+    def test_create_complex_argument_without_numpy_init(self):
+        self._setup_arg_gen(use_numpy=False, no_numpy_opt=False)  # use_numpy init flag is False
+        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+
+    def test_create_complex_argument_with_templates(self):
+        if TEMPLATES:
+            self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)
+            self.assertTrue(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+
+            # Probabilistic check
+            template_seen = False
+            # Temporarily make genTrickyTemplate the only choice
+            with patch.object(self.arg_gen, 'complex_argument_generators', (self.arg_gen.genTrickyTemplate,)):
+                for _ in range(10):  # Should be quick if it's the only choice
+                    result = self.arg_gen.create_complex_argument()
+                    if any(tmpl_part in "".join(result) for tmpl_part in ["Template(", "Interpolation("]):
+                        template_seen = True
+                        break
+            self.assertTrue(template_seen,
+                            "create_complex_argument with templates enabled did not seem to produce template output after forced choice.")
+            self.setUp()  # Restore
+        else:
+            self.skipTest(
+                "Template strings (TEMPLATES) not available for testing genTrickyTemplate with create_complex_argument.")
+
+    def test_create_complex_argument_without_templates_opt(self):
+        self._setup_arg_gen(use_templates=True, no_tstrings_opt=True)
+        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+
+    def test_create_complex_argument_without_templates_init(self):
+        self._setup_arg_gen(use_templates=False, no_tstrings_opt=False)
+        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
 
 
 if __name__ == '__main__':
