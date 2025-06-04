@@ -1,3 +1,4 @@
+import ast
 import unittest
 import sys
 import re  # For test_genWeirdUnion and test_genWeirdType
@@ -127,8 +128,11 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertIsListOfStrings(result, "genInt")
         self.assertEqual(len(result), 1)
         try:
-            val = eval(result[0])  # Use eval cautiously
-            self.assertIsInstance(val, int, "genInt should produce a string representing an integer.")
+            try:
+                val = ast.literal_eval(result[0])  # Use ast.literal_eval
+                self.assertIsInstance(val, int, f"{result[0]} did not evaluate to an integer.")
+            except (ValueError, SyntaxError) as e:  # ast.literal_eval raises these
+                self.fail(f"ast.literal_eval({result[0]}) failed: {e}")
         except Exception as e:
             self.fail(f"eval({result[0]}) from genInt failed: {e}")
 
@@ -143,10 +147,12 @@ class TestArgumentGenerator(unittest.TestCase):
             f"genString output '{val_str}' should be a quoted string."
         )
         try:
-            eval(val_str)
-        except SyntaxError:
-            self.fail(f"genString produced a syntactically invalid string literal: {val_str}")
-
+            evaluated_content = ast.literal_eval(val_str)
+            self.assertIsInstance(evaluated_content, str)  # Ensure it evaluated to a Python string
+            # For test_genAsciiString, you can keep the content check:
+            # self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_content), ...)
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
     # --- Tests for collection types ---
     def test_genList_structure(self):
         result = self.arg_gen.genList()
@@ -155,9 +161,13 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("[") and full_expr.endswith("]"),
                         f"genList output '{full_expr}' should start with [ and end with ].")
         try:
-            eval(full_expr, self.test_globals) # Pass globals
-        except Exception as e:
-            self.fail(f"genList produced an invalid expression '{full_expr}': {e}")
+            parsed_ast = ast.parse(full_expr)  # Parse the expression
+            self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
+            self.assertIsInstance(parsed_ast.body[0], ast.Expr, "Parsed expression should be an ast.Expr")
+            self.assertIsInstance(parsed_ast.body[0].value, ast.List,  # Check the value is an ast.List node
+                                  f"Parsed expression '{full_expr}' is not an AST List node.")
+        except SyntaxError as e:
+            self.fail(f"genList produced a syntactically invalid expression '{full_expr}': {e}")
 
     def test_genTuple_structure(self):
         result = self.arg_gen.genTuple()
@@ -166,9 +176,13 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("(") and full_expr.endswith(")"),
                         f"genTuple output '{full_expr}' should start with ( and end with ).")
         try:
-            eval(full_expr, self.test_globals) # Pass globals
-        except Exception as e:
-            self.fail(f"genTuple produced an invalid expression '{full_expr}': {e}")
+            parsed_ast = ast.parse(full_expr)
+            self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
+            self.assertIsInstance(parsed_ast.body[0], ast.Expr)
+            self.assertIsInstance(parsed_ast.body[0].value, ast.Tuple,
+                                  f"Parsed expression '{full_expr}' is not an AST Tuple node.")
+        except SyntaxError as e:
+            self.fail(f"genTuple produced a syntactically invalid expression '{full_expr}': {e}")
 
     def test_genDict_structure(self):
         result = self.arg_gen.genDict()
@@ -177,9 +191,13 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertTrue(full_expr.startswith("{") and full_expr.endswith("}"),
                         f"genDict output '{full_expr}' should start with {{ and end with }}.")
         try:
-            eval(full_expr, self.test_globals) # Pass globals
-        except Exception as e:
-            self.fail(f"genDict produced an invalid expression '{full_expr}': {e}")
+            parsed_ast = ast.parse(full_expr)
+            self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
+            self.assertIsInstance(parsed_ast.body[0], ast.Expr)
+            self.assertIsInstance(parsed_ast.body[0].value, ast.Dict,
+                                  f"Parsed expression '{full_expr}' is not an AST Dict node.")
+        except SyntaxError as e:
+            self.fail(f"genDict produced a syntactically invalid expression '{full_expr}': {e}")
 
     def test_genList_empty(self):
         # To test empty list generation, we might need to influence randint or run many times
@@ -311,10 +329,13 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertIsListOfStrings(result, "genSmallUint")
         self.assertEqual(len(result), 1)
         try:
-            val = eval(result[0])
-            self.assertIsInstance(val, int, "genSmallUint should produce an integer string.")
-            self.assertTrue(-19 <= val <= 19,
-                            f"genSmallUint produced {val}, which is outside the expected range -19 to 19.")
+            try:
+                val = ast.literal_eval(result[0])  # Use ast.literal_eval
+                self.assertIsInstance(val, int, f"{result[0]} did not evaluate to an integer.")
+                self.assertTrue(-19 <= val <= 19,
+                                f"genSmallUint produced {val}, which is outside the expected range -19 to 19.")
+            except (ValueError, SyntaxError) as e:  # ast.literal_eval raises these
+                self.fail(f"ast.literal_eval({result[0]}) failed: {e}")
         except Exception as e:
             self.fail(f"eval({result[0]}) from genSmallUint failed: {e}")
 
@@ -333,16 +354,17 @@ class TestArgumentGenerator(unittest.TestCase):
             f"genBytes output '{val_str}' should be a quoted bytes literal."
         )
         try:
-            val_bytes = eval(val_str)
-            self.assertIsInstance(val_bytes, bytes, "genBytes should produce a bytes object.")
-        except Exception as e:
-            self.fail(f"eval({val_str}) from genBytes failed: {e}")
+            val_bytes = ast.literal_eval(val_str)  # ast.literal_eval handles bytes literals
+            self.assertIsInstance(val_bytes, bytes, f"'{val_str}' did not evaluate to bytes.")
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
 
         # Test for empty bytes generation (might require mocking or many runs)
         # Forcing it with a patch:
         with patch.object(self.arg_gen.bytes_generator, 'createLength', return_value=0):
             result_empty = self.arg_gen.genBytes()
-            self.assertEqual(eval("".join(result_empty)), b"")
+            # self.assertEqual(eval("".join(result_empty)), b"") # Old
+            self.assertEqual(ast.literal_eval("".join(result_empty)), b"")
 
     def test_genLetterDigit(self):
         result = self.arg_gen.genLetterDigit()
@@ -354,11 +376,14 @@ class TestArgumentGenerator(unittest.TestCase):
             (val_str.startswith("'") and val_str.endswith("'")),
             f"genLetterDigit output '{val_str}' should be a quoted string."
         )
+        # Check if it's a valid string literal. Content check is harder without knowing exact charset.
         try:
-            # Check if it's a valid string literal. Content check is harder without knowing exact charset.
-            eval(val_str)
-        except SyntaxError:
-            self.fail(f"genLetterDigit produced a syntactically invalid string literal: {val_str}")
+            evaluated_content = ast.literal_eval(val_str)
+            self.assertIsInstance(evaluated_content, str)  # Ensure it evaluated to a Python string
+            # For test_genAsciiString, you can keep the content check:
+            # self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_content), ...)
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
 
     def test_genAsciiString(self):
         result = self.arg_gen.genAsciiString()
@@ -371,9 +396,13 @@ class TestArgumentGenerator(unittest.TestCase):
             f"genAsciiString output '{val_str}' should be a quoted string."
         )
         try:
-            evaluated_str = eval(val_str)
-            self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_str), # From ASCII8
-                            f"genAsciiString content '{evaluated_str}' not in ASCII8 range.")
+            try:
+                evaluated_content = ast.literal_eval(val_str)
+                self.assertIsInstance(evaluated_content, str)  # Ensure it evaluated to a Python string
+            except (ValueError, SyntaxError) as e:
+                self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
+            self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_content), # From ASCII8
+                            f"genAsciiString content '{evaluated_content}' not in ASCII8 range.")
         except Exception as e: # Catches eval errors or issues in ord(c)
             self.fail(f"genAsciiString produced an invalid string or content: {val_str}, error: {e}")
 
@@ -389,19 +418,20 @@ class TestArgumentGenerator(unittest.TestCase):
         )
         # Content check: should ideally resemble a path. For now, just eval.
         try:
-            eval(val_str)
-        except SyntaxError:
-            self.fail(f"genUnixPath produced a syntactically invalid string literal: {val_str}")
+            evaluated_content = ast.literal_eval(val_str)
+            self.assertIsInstance(evaluated_content, str)  # Ensure it evaluated to a Python string
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
 
     def test_genFloat(self):
         result = self.arg_gen.genFloat()
         self.assertIsListOfStrings(result, "genFloat")
         self.assertEqual(len(result), 1)
         try:
-            val = eval(result[0])
-            self.assertIsInstance(val, float, "genFloat should produce a string representing a float.")
-        except Exception as e:
-            self.fail(f"eval({result[0]}) from genFloat failed: {e}")
+            val = ast.literal_eval(result[0])  # ast.literal_eval handles floats
+            self.assertIsInstance(val, float, f"'{result[0]}' did not evaluate to a float.")
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"ast.literal_eval({result[0]}) failed: {e}")
 
     def test_genErrback(self):
         result = self.arg_gen.genErrback()
