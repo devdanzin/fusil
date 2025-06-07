@@ -8,7 +8,6 @@ from textwrap import dedent
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
-import fusil.python.h5py.h5py_tricky_weird
 import fusil.python.tricky_weird
 from fusil.python.arg_numbers import class_arg_number, get_arg_number
 from fusil.python.argument_generator import ArgumentGenerator
@@ -17,7 +16,6 @@ from fusil.python.blacklists import (
     METHOD_BLACKLIST,
     OBJECT_BLACKLIST,
 )
-from fusil.python.h5py.write_h5py_code import WriteH5PyCode
 from fusil.python.mangle import mangle_loop, mangle_obj
 from fusil.write_code import WriteCode
 
@@ -42,6 +40,17 @@ except ImportError:
     print("Numpy is not available.")
     _ARG_GEN_USE_NUMPY = False
 
+_ARG_GEN_USE_H5PY = False
+if _ARG_GEN_USE_NUMPY:
+    try:
+        import h5py
+        print(f"h5py is available.")
+        _ARG_GEN_USE_H5PY = True
+        from fusil.python.h5py.write_h5py_code import WriteH5PyCode
+        import fusil.python.h5py.h5py_tricky_weird
+    except ImportError:
+        print("h5py is not available.")
+        _ARG_GEN_USE_H5PY = False
 
 time_start = time.time()
 USE_MANGLE_FEATURE = False
@@ -82,7 +91,7 @@ class WritePythonCode(WriteCode):
         module_name: str,
         threads: bool = True,
         _async: bool = True,
-        use_h5py: bool = True,
+        use_h5py: bool = False,
     ):
         """Initialize the Python code writer."""
         super().__init__()  # Initialize base WriteCode
@@ -97,7 +106,7 @@ class WritePythonCode(WriteCode):
         self.h5py_writer = WriteH5PyCode(self) if use_h5py else None
 
         self.arg_generator = ArgumentGenerator(
-            self.options, self.filenames, _ARG_GEN_USE_NUMPY, _ARG_GEN_USE_TEMPLATES
+            self.options, self.filenames, _ARG_GEN_USE_NUMPY, _ARG_GEN_USE_TEMPLATES, _ARG_GEN_USE_H5PY
         )
 
         self.module_functions: list[str]
@@ -257,6 +266,7 @@ class WritePythonCode(WriteCode):
                 from random import choice, randint, random
                 from sys import stderr, path as sys_path
                 from os.path import dirname
+                import ast
                 import inspect
                 import io
                 import time
@@ -297,12 +307,12 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, fusil.python.tricky_weird.tricky_objects)
         self.emptyLine()
-        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY and _ARG_GEN_USE_H5PY:
             self.write(0, "import numpy")
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
             self.emptyLine()
 
-        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY and _ARG_GEN_USE_H5PY:
             self.write(0, "# Executing HDF5 tricky object generation code")
             self.write(0, fusil.python.h5py.h5py_tricky_weird.tricky_h5py_code)
             self.emptyLine()
@@ -489,9 +499,9 @@ class WritePythonCode(WriteCode):
             f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
         )
 
-        if self.h5py_writer and not self.h5py_writer.fuzz_one_h5py_class(
-            class_name_str, class_type, instance_var_name, prefix
-        ):
+        if 1: # self.h5py_writer and not self.h5py_writer.fuzz_one_h5py_class(
+            # class_name_str, class_type, instance_var_name, prefix
+        # ):
             num_constructor_args = class_arg_number(class_name_str, class_type)
             self.write(0, f"{instance_var_name} = None # Initialize instance variable")
             self.write(0, "try:")
@@ -506,6 +516,7 @@ class WritePythonCode(WriteCode):
             self.restoreLevel(self.base_level - 1)  # Exit try's indentation (level 1)
             self.write(0, "except Exception as e_instantiate:")
             self.addLevel(1)  # Indent for except block contents
+            self.write(0, f"{instance_var_name} = None")
             self.write_print_to_stderr(
                 0,  # This 0 is relative to current base_level (which is parent's level + 1)
                 f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
