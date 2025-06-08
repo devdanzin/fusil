@@ -179,7 +179,7 @@ class WritePythonCode(WriteCode):
                     not self.options.fuzz_exceptions
                     and isinstance(attr, type)
                     and issubclass(attr, BaseException)
-                    and attr.__name__ in _EXCEPTION_NAMES
+                    # and attr.__name__ in _EXCEPTION_NAMES
                 ):
                     continue
                 classes.append(name)
@@ -189,7 +189,7 @@ class WritePythonCode(WriteCode):
                 if (
                     not self.options.fuzz_exceptions
                     and isinstance(attr, BaseException)
-                    and attr.__class__.__name__ in _EXCEPTION_NAMES
+                    # and attr.__class__.__name__ in _EXCEPTION_NAMES
                 ):
                     continue
                 objects.append(name)
@@ -219,7 +219,7 @@ class WritePythonCode(WriteCode):
             if name in blacklist:
                 continue
             if (
-                (not self.options.test_private) and name.startswith("__")
+                (not self.options.test_private) and name.startswith("_")
                 # and not name.endswith("__")
             ):
                 # if name not in {
