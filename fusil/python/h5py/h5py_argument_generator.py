@@ -411,16 +411,22 @@ class H5PyArgumentGenerator:
             A string expression for a fillvalue, or "None".
         """
         try:  # Attempt to eval dtype locally
-            dt_val = eval(dtype_expr_str)
+            # We need the actual dtype object if possible.
+            # The expression string dtype_expr_str might be like 'numpy.dtype("i4")' or just "'i4'"
+            dt_val = eval(dtype_expr_str, {"numpy": numpy})  # Provide numpy for eval
+
             if numpy.issubdtype(dt_val, numpy.integer):
                 return str(randint(-100, 100))
             if numpy.issubdtype(dt_val, numpy.floating):
-                return choice(
-                    [str(round(uniform(-100, 100), 2)), "numpy.nan", "numpy.inf", "-numpy.inf"]
-                )
+                return choice([str(round(uniform(-100, 100), 2)), "numpy.nan", "numpy.inf", "-numpy.inf"])
             if numpy.issubdtype(dt_val, numpy.bool_):
                 return choice(["True", "False"])
+            # For string/bytes or complex types, "None" might be acceptable or lead to other behavior.
+            # If it's a string/bytes dtype, an empty string/bytes might be better than None for numpy.full
+            if dt_val.kind in ('S', 'a'): return "b''"  # Empty bytes
+            if dt_val.kind == 'U': return "''"  # Empty unicode string
         except Exception:
+            # Fallback if evaling dtype_expr_str fails or type is complex
             pass
         return "None"
 
@@ -614,6 +620,11 @@ class H5PyArgumentGenerator:
                     slices.append(f"{start}:{stop}:{step}")
                 else:
                     slices.append(f"{start}:{stop}")
+        if not slices:
+            if int(dataset_rank) == 0:  # Scalar
+                return "()"  # Scalar indexing
+            else:  # Should not happen if rank > 0 and loop ran, but as a fallback
+                return "numpy.s_[...]"
         return f"numpy.s_[{', '.join(slices)}]"
 
     def genH5PySliceForDirectIO_expr_runtime(self, rank_variable_name_in_script: str) -> str:
@@ -660,12 +671,19 @@ class H5PyArgumentGenerator:
         order_opt = ""
         if allow_non_contiguous and random() < 0.2:
             order_opt = ", order='F'"
-        if random() < 0.5:  # Fixed small array for some cases
+
+        is_bool_dtype = "'bool'" in dtype_expr.lower()
+        if random() < 0.5 and not is_bool_dtype:
             return f"numpy.arange(10, dtype={dtype_expr}).reshape(2,5){order_opt}"
-        return (
-            f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, "
-            f"fill_value={self.genH5PyFillvalue_expr(dtype_expr)}, dtype={dtype_expr}{order_opt})"
-        )
+
+        fill_value_expr = self.genH5PyFillvalue_expr(dtype_expr)
+
+        # Avoid passing fill_value=None to numeric dtypes.
+        if fill_value_expr == "None" and not ('S' in dtype_expr or 'U' in dtype_expr or 'object' in dtype_expr):
+            fill_value_expr = "0"  # Default to 0 for numeric types if fill value is None
+
+        return (f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, "
+                f"fill_value={fill_value_expr}, dtype={dtype_expr}{order_opt})")
 
     def genH5PyAsTypeDtype_expr(self) -> str:
         """
@@ -889,9 +907,11 @@ class H5PyArgumentGenerator:
         Returns:
             A Python expression string to create a NumPy array with random integer data.
         """
-        return (
-            f"numpy.random.randint(0, 255, size=({block_shape_expr_str}), dtype={dtype_expr_str})"
-        )
+        if "f" in dtype_expr_str.lower() or "float" in dtype_expr_str.lower():
+            # Use numpy.random.rand for floats and scale
+            return f"(numpy.random.rand({block_shape_expr_str}) * 255).astype({dtype_expr_str})"
+        else:
+            return f"numpy.random.randint(0, 255, size={block_shape_expr_str}, dtype={dtype_expr_str})"
 
     def genLargePythonInt_expr(self) -> str:
         """
@@ -924,8 +944,12 @@ class H5PyArgumentGenerator:
             A Python expression string like
             "numpy.arange(numpy.prod(shape_tuple)).astype(dtype).reshape(shape_tuple)".
         """
+        # Ensure prod operates on an actual tuple, not its string representation
+        prod_arg = f"ast.literal_eval({element_shape_tuple_expr_str})" \
+            if element_shape_tuple_expr_str.startswith("'(") \
+            else element_shape_tuple_expr_str
         return (
-            f"numpy.arange(int(numpy.prod({element_shape_tuple_expr_str})))"
+            f"numpy.arange(int(numpy.prod({prod_arg})))"
             f".astype({base_dtype_expr_str})"
             f".reshape({element_shape_tuple_expr_str})"
         )
@@ -964,5 +988,13 @@ class H5PyArgumentGenerator:
         elif choice_val == 2:  # String
             return self.parent.genString()[0]
         else:  # Small numpy array
-            dtype_expr = self.genH5PySimpleDtype_expr()
-            return f"numpy.arange({randint(1, 5)}, dtype={dtype_expr})"
+            dtype_expr_str = self.genH5PySimpleDtype_expr()
+            # Check if dtype_expr_str is likely boolean for arange constraint
+            # This is a heuristic based on common string representations
+            is_bool_dtype = "'bool'" in dtype_expr_str.lower()
+
+            if is_bool_dtype:
+                size = randint(0, 2)  # arange for bool supports 0, 1, or 2
+            else:
+                size = randint(1, 5)
+            return [f"numpy.arange({size}, dtype={dtype_expr_str})"]
