@@ -580,17 +580,28 @@ class WritePythonCode(WriteCode):
     ):
         """Dispatches fuzzing operations for a given object instance."""
         if generation_depth > self.MAX_FUZZ_GENERATION_DEPTH:
+            self.write(0, f"try:")
             self.write_print_to_stderr(
-                0,
+                1,
                 f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'",
             )
-            return
+            self.write(0, f"except Exception:")
+            self.write_print_to_stderr(
+                1,
+                f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {class_name_hint}, not generating deeper fuzzing.'",
+            )
 
+            return
+        self.write(0, f"try:")
         self.write_print_to_stderr(
-            0,
+            1,
             f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{ {target_obj_expr_str}!r }} (hint: {class_name_hint}, prefix: {current_prefix}) ---"',
         )
-
+        self.write(0, f"except Exception as e:")
+        self.write_print_to_stderr(
+            1,
+            f'f"--- (Depth {generation_depth}) Error calling repr() prefix: {current_prefix}) ---"',
+        )
         self.write(0, f"# {self.base_level=}")
         self.write(0, f"if {target_obj_expr_str} is not None:")
         # ---- BLOCK: Main if target_obj_expr_str not None ----
@@ -610,10 +621,17 @@ class WritePythonCode(WriteCode):
                     class_name_hint, current_prefix, generation_depth, target_obj_expr_str
                 )
             try:
+                self.write(0, f"try:")
                 self.write_print_to_stderr(
-                    0,
+                    1,
                     f"f'Instance {{ {target_obj_expr_str}!r }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
                 )
+                self.write(0, f"except Exception as e:")
+                self.write_print_to_stderr(
+                    1,
+                    f"f'Error printing instance repr() {{ e }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
+                )
+
                 self._fuzz_generic_object_methods(
                     f"{current_prefix}_generic",
                     target_obj_expr_str,
@@ -877,10 +895,20 @@ class WritePythonCode(WriteCode):
         L_deep_dive_res = self.addLevel(1)
         try:
             self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
+            self.write(0, f"try:")
+            L_before_repr = self.addLevel(1)
             self.write_print_to_stderr(
                 0,
                 f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
             )
+            self.restoreLevel(L_before_repr)
+            self.write(0, f"except Exception as e:")
+            L_after_repr = self.addLevel(1)
+            self.write_print_to_stderr(
+                0,
+                f"f'EXCEPTION printing CALL_RESULT: {{ e }}'",
+            )
+            self.restoreLevel(L_after_repr)
             self._dispatch_fuzz_on_instance(
                 current_prefix=f"{prefix}_res_dive",
                 target_obj_expr_str=f"res_{prefix}",  # The variable holding the result
