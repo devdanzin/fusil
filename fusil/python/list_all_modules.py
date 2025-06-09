@@ -165,7 +165,7 @@ class ListAllModules:
                 spec = finder.find_spec(name)
                 if spec:
                     filename = spec.origin
-            except (ImportError, SyntaxError) as e:
+            except (ImportError, SyntaxError):
                 filename = None
 
             module_data = self._get_module_metadata(name)
@@ -200,7 +200,7 @@ class ListAllModules:
 
     def _process_package(
         self, info: pkgutil.ModuleInfo, onerror: Callable[[str], None] | None
-    ) -> Generator[pkgutil.ModuleInfo, None, None]:
+    ) -> Generator[tuple, None, None]:
         """
         Process a package by importing it and recursively scanning submodules.
 
@@ -248,7 +248,7 @@ class ListAllModules:
             name = info[1]
             fullname = prefix + name
             if self.verbose:
-                self.logger.error(f"ADDING {fullname}: {prefix}+{info.name}")
+                self.logger.error(f"ADDING {fullname}: {prefix}+{name}")
             self.discovered_modules.add(fullname)
 
         return self.discovered_modules
