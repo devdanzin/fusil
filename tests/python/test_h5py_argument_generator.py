@@ -5,14 +5,29 @@ import ast # For ast.literal_eval and ast.parse
 from random import randint, random, sample, seed, uniform, choice as random_choice
 from unittest.mock import MagicMock, patch
 
-import numpy # For numpy placeholders and type checks
-import h5py # For h5py type checks and placeholders
+USE_NUMPY = USE_H5PY = True
+try:
+    import numpy
+except ImportError:
+    USE_NUMPY = False
+    numpy = None
+
+try:
+    import h5py
+    import fusil.python.h5py.h5py_tricky_weird
+    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
+except ImportError:
+    USE_H5PY = False
+    h5py = None
+    H5PyArgumentGenerator = None
+
 
 import fusil.python.h5py.h5py_argument_generator
 import fusil.python.argument_generator
 from fusil.config import FusilConfig
 import fusil.python.h5py.h5py_tricky_weird # For tricky names list
 import fusil.python.values # For INTERESTING values, if parent methods are involved
+
 
 class TestH5PyArgumentGenerator(unittest.TestCase):
 
@@ -61,7 +76,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
              # Placeholder for h5py_tricky_objects.get('name')
             "h5py_tricky_objects": MagicMock(get=MagicMock(return_value="mocked_h5py_object")),
             # Placeholder for runtime helpers if their calls are directly evaluated
-            "_fusil_h5_create_dynamic_slice_for_rank": MagicMock(return_value=numpy.s_[:]),
+            "_fusil_h5_create_dynamic_slice_for_rank": MagicMock(return_value=numpy.s_[:] if numpy else []),
             "_fusil_h5_get_link_target_in_file": MagicMock(return_value="mocked_link_target"),
             # Ensure basic builtins are available if complex expressions are evaluated
             "True": True, "False": False, "None": None,
@@ -134,6 +149,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except (ValueError, SyntaxError) as e:
             self.fail(f"ast.literal_eval on driver '{driver_expr}' failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genH5PySimpleDtype_expr(self):
         result_expr = self.h5_arg_gen.genH5PySimpleDtype_expr()
         self.assertIsInstance(result_expr, str, "genH5PySimpleDtype_expr should return a string.")
@@ -355,6 +371,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     else:
                         self.fail(f"eval({result_expr}) for fillvalue (dtype {dtype_expr}) failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genH5PyVlenDtype_expr(self):
         result_expr = self.h5_arg_gen.genH5PyVlenDtype_expr()
         self.assertIsInstance(result_expr, str)
@@ -372,6 +389,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except Exception as e:
             self.fail(f"eval/compile of vlen_dtype expression '{result_expr}' failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genH5PyEnumDtype_expr(self):
         result_expr = self.h5_arg_gen.genH5PyEnumDtype_expr()
         self.assertIsInstance(result_expr, str)
@@ -387,6 +405,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except Exception as e:
             self.fail(f"eval/compile of enum_dtype expression '{result_expr}' failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genH5PyCompoundDtype_expr(self):
         result_expr = self.h5_arg_gen.genH5PyCompoundDtype_expr()
         self.assertIsInstance(result_expr, str)
@@ -429,6 +448,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         self.assertTrue(len(seen_patterns) > 3,  # Expect at least a few different types
                         f"genH5PyComplexDtype_expr did not show much variety. Seen: {seen_patterns}")
 
+    @unittest.skipUnless(USE_NUMPY and USE_H5PY, "Only works with Numpy and h5py.")
     def test_genH5PyCompressionKwargs_expr(self):
         result_list = self.h5_arg_gen.genH5PyCompressionKwargs_expr()
         self.assertIsInstance(result_list, list, "Should return a list")
@@ -573,6 +593,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except (ValueError, SyntaxError) as e:
             self.fail(f"ast.literal_eval on errors expr '{result_expr}' failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genNumpyValueForComparison_expr(self):
         test_dtypes = ["'i4'", "numpy.dtype('f8')", "'bool'"]
         for dtype_expr in test_dtypes:
@@ -612,6 +633,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except (ValueError, SyntaxError) as e:
             self.fail(f"ast.literal_eval on attribute name expr '{result_expr}' failed: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genH5PyAttributeValue_expr(self):
         result_expr = self.h5_arg_gen.genH5PyAttributeValue_expr()
         if isinstance(result_expr, list):
@@ -744,6 +766,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                 except SyntaxError as e:
                     self.fail(f"Slice expression '{result_expr}' for rank {rank} is not valid Python: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genDataForFancyIndexing_expr(self):
         block_shape_expr = "(5, 2)"
         dtype_expr = "'i4'"
@@ -900,6 +923,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                 except SyntaxError as e:
                     self.fail(f"Slice expression '{result_expr}' for rank {rank} is not valid Python: {e}")
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genDataForFancyIndexing_expr_2(self):
         test_cases = [
             ("(5, 2)", "'i4'"),
@@ -958,6 +982,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     if dtype_expr.isidentifier() and dtype_expr in self.test_globals:
                         del self.test_globals[dtype_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genNumpyArrayForDirectIO_expr(self):
         test_cases = [
             ("(5,5)", "'i4'", True),
@@ -1038,6 +1063,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     if dtype_expr.isidentifier() and dtype_expr in self.test_globals:
                         del self.test_globals[dtype_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genArrayForArrayDtypeElement_expr(self):
         test_cases = [
             ("(3,)", "'i2'"),
@@ -1161,6 +1187,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         del self.test_globals[rank_expr]
         del self.test_globals[fields_keys_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genNumpyArrayForDirectIO_expr_2(self):
         # This method was already partially tested in a previous response.
         # Here's a more focused version or an enhancement.
@@ -1237,6 +1264,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     if dtype_expr.isidentifier() and dtype_expr in self.test_globals:
                         del self.test_globals[dtype_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy.")
     def test_genArrayForArrayDtypeElement_expr_2(self):
         # This method was already partially tested. Let's ensure it's robust.
         test_cases = [

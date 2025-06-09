@@ -11,8 +11,21 @@ import sys
 import uuid
 from random import choice, randint, random, uniform
 
-import h5py
-import numpy
+USE_NUMPY = USE_H5PY = True
+try:
+    import numpy
+except ImportError:
+    USE_NUMPY = False
+    numpy = None
+
+try:
+    import h5py
+    import fusil.python.h5py.h5py_tricky_weird
+    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
+except ImportError:
+    USE_H5PY = False
+    h5py = None
+    H5PyArgumentGenerator = None
 
 import fusil.python.h5py.h5py_tricky_weird
 
