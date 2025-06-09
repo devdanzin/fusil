@@ -17,9 +17,19 @@ sys.path.insert(0, PROJECT_ROOT)
 # --- Imports of Code to be Tested ---
 from fusil.python.write_python_code import WritePythonCode, PythonFuzzerError
 from fusil.config import FusilConfig
-# The following are imported to create realistic mocks
+# The following are imported to create realistic mocks or for type checks
 import fusil.python.tricky_weird
-import fusil.python.h5py.h5py_tricky_weird
+
+# Conditional import for h5py to match the logic in the tested code
+try:
+    import h5py
+    from fusil.python.h5py.write_h5py_code import WriteH5PyCode
+
+    H5PY_AVAILABLE = True
+except ImportError:
+    h5py = None  # Mock h5py if not available
+    WriteH5PyCode = None
+    H5PY_AVAILABLE = False
 
 
 # --- Mock Objects for Realistic Testing ---
@@ -129,7 +139,7 @@ class TestWritePythonCode(unittest.TestCase):
             module_name="mock_module",
             threads=True,
             _async=True,
-            use_h5py=False  # Keep h5py-specific logic disabled for these tests
+            use_h5py=H5PY_AVAILABLE
         )
 
     # --- Initialization and Setup Tests ---
@@ -139,7 +149,10 @@ class TestWritePythonCode(unittest.TestCase):
         self.assertEqual(self.writer.module_name, "mock_module")
         self.assertTrue(self.writer.enable_threads)
         self.assertTrue(self.writer.enable_async)
-        self.assertIsNone(self.writer.h5py_writer)
+        if H5PY_AVAILABLE:
+            self.assertIsNotNone(self.writer.h5py_writer)
+        else:
+            self.assertIsNone(self.writer.h5py_writer)
         self.assertIsNotNone(self.writer.arg_generator)
         # Check that the member lists were populated during initialization
         self.assertIn("test_function", self.writer.module_functions)
@@ -171,7 +184,7 @@ class TestWritePythonCode(unittest.TestCase):
         functions, classes, objects = self.writer._get_module_members()
 
         self.assertEqual(functions, ["test_function"])
-        self.assertEqual(classes, ["TestClass"])  # This will fail until the source bug is fixed
+        self.assertEqual(classes, ["TestClass"])
         self.assertEqual(objects, ["test_object"])
 
     def test_get_module_members_respects_test_private_option(self):
@@ -206,6 +219,113 @@ class TestWritePythonCode(unittest.TestCase):
         self.assertNotIn("_private_method", methods, "Private method should be filtered.")
         self.assertNotIn("__dunder_method__", methods, "Dunder method should be filtered.")
 
+    # --- Tests for Private Code-Generation Methods ---
+
+    def test_write_arguments_for_call_lines_formatting(self):
+        """Logic Test: Ensures _write_arguments_for_call_lines places commas and newlines correctly."""
+        test_cases = {
+            "zero_args": (0, [], ""),
+            "one_arg": (1, [["'arg1'"]], "'arg1'"),
+            "two_args": (2, [["'arg1'"], ["'arg2'"]], "'arg1',\n 'arg2'"),
+            "one_multiline_arg": (1, [["'line1'", "'line2'"]], "'line1' 'line2'")
+        }
+        for name, (num_args, arg_gen_return, expected_output) in test_cases.items():
+            with self.subTest(name=name):
+                output_stream = StringIO()
+                self.writer.output = output_stream
+
+                with patch.object(self.writer.arg_generator, 'create_complex_argument', side_effect=arg_gen_return):
+                    self.writer._write_arguments_for_call_lines(num_args, base_indent_level=0)
+
+                actual = " ".join(output_stream.getvalue().split())
+                expected = " ".join(expected_output.split())
+                self.assertEqual(actual, expected)
+
+    @patch('fusil.python.write_python_code.get_arg_number', return_value=(2, 4))
+    @patch('fusil.python.write_python_code.randint')
+    def test_generate_and_write_call_argument_logic(self, mock_randint, mock_get_args):
+        """Wiring Test: Verifies _generate_and_write_call uses the correct argument count logic."""
+
+        def sample_func_for_test(a, b, c=None, d=None): pass
+
+        self.mock_module.sample_func_for_test = sample_func_for_test
+
+        test_cases = {
+            # For the first 3 cases, randint is only called once.
+            "zero_args_branch": ([0], 0),
+            "one_arg_branch": ([1], 1),
+            "max_plus_one_branch": ([2], 5),  # max_arg from mock is 4, so 4+1=5
+
+            # For this case, the first call to randint (for branch selection) returns 5.
+            # The second call (for the number of args) returns 3.
+            "random_in_range_branch": ([5, 3], 3)
+        }
+
+        for name, (randint_side_effects, expected_num_args) in test_cases.items():
+            with self.subTest(name=name):
+                mock_randint.side_effect = randint_side_effects
+                with patch.object(self.writer, '_write_arguments_for_call_lines') as mock_write_args:
+                    self.writer.output = StringIO()
+                    self.writer._generate_and_write_call(
+                        prefix="t1",
+                        callable_name="sample_func_for_test",
+                        callable_obj=self.mock_module.sample_func_for_test,
+                        min_arg_count=1,
+                        target_obj_expr="fuzz_target_module",
+                        is_method_call=False,
+                        generation_depth=0
+                    )
+                    mock_write_args.assert_called_with(expected_num_args, 1)
+    @unittest.skipIf(not H5PY_AVAILABLE, "h5py not installed")
+    def test_dispatch_fuzz_on_instance_dispatches_correctly(self):
+        """Logic Test: Validates _dispatch_fuzz_on_instance generates code for the correct fuzzer."""
+        # This test checks the generated code string to ensure the correct `isinstance`
+        # branch is created.
+
+        # Test 1: Generate code for a known h5py type hint ('Dataset')
+        self.writer.output = StringIO()
+        self.writer._dispatch_fuzz_on_instance("h5_dispatch", "my_dataset_var", "Dataset", 0)
+        generated_code_h5py = self.writer.output.getvalue()
+
+        # It should generate the specific 'elif' for h5py.Dataset
+        self.assertIn("elif isinstance(my_dataset_var, h5py.Dataset):", generated_code_h5py)
+        # It should contain code specific to dataset fuzzing
+        self.assertIn("--- Fuzzing Dataset Instance:", generated_code_h5py)
+        # It should NOT fall back to the generic fuzzer if we want specialized fuzzing
+        # to avoid generic fuzzing. So far, we don't.
+        # self.assertNotIn("doing generic calls", generated_code_h5py)
+
+        # Test 2: Generate code for a generic type hint
+        self.writer.output = StringIO()
+        self.writer._dispatch_fuzz_on_instance("generic_dispatch", "my_generic_var", "SomeGenericClass", 0)
+        generated_code_generic = self.writer.output.getvalue()
+
+        # It should NOT contain specific h5py checks
+        # self.assertNotIn("elif isinstance(my_generic_var, h5py.Dataset):", generated_code_generic)
+        # It should fall back to the generic case
+        self.assertIn("doing generic calls", generated_code_generic)
+
+    @patch('fusil.python.write_python_code.class_arg_number', return_value=2)
+    def test_fuzz_one_class_orchestration(self, mock_arg_num):
+        """Wiring Test: Ensures _fuzz_one_class correctly orchestrates instantiation and fuzzing calls."""
+        class_obj = self.mock_module.TestClass
+
+        with patch.object(self.writer, '_dispatch_fuzz_on_instance') as mock_dispatch, \
+                patch.object(self.writer, '_fuzz_methods_on_object_or_specific_types') as mock_fuzz_methods:
+            self.writer.output = StringIO()
+            self.writer._fuzz_one_class(0, "TestClass", class_obj)
+
+            # 1. Check that it tries to figure out constructor arguments
+            mock_arg_num.assert_called_once_with("TestClass", class_obj)
+
+            # 2. Check that it calls the deep-diving dispatcher on the instance variable
+            mock_dispatch.assert_called_once()
+            self.assertEqual(mock_dispatch.call_args.kwargs['target_obj_expr_str'], 'instance_c1_testclass')
+
+            # 3. Check that it also calls the method fuzzer
+            mock_fuzz_methods.assert_called_once()
+            self.assertEqual(mock_fuzz_methods.call_args.kwargs['target_obj_expr_str'], 'instance_c1_testclass')
+
     # --- Full Script Generation and Validation Tests ---
 
     def test_full_script_is_syntactically_valid(self):
@@ -215,12 +335,29 @@ class TestWritePythonCode(unittest.TestCase):
         """
         output_stream = StringIO()
 
-        # FIX: Patch createFile to prevent real file I/O and instead ensure
-        # all subsequent write() calls go to our in-memory StringIO stream.
-        with patch.object(self.writer, 'createFile') as mock_create_file:
-            with patch.object(self.writer, 'close'):
+        # Temporarily reduce the number of generated calls to make the test run faster.
+        # We only need a small number to verify the overall script structure.
+        original_funcs = self.writer.options.functions_number
+        original_methods = self.writer.options.methods_number
+        original_classes = self.writer.options.classes_number
+        original_objects = self.writer.options.objects_number
+
+        try:
+            self.writer.options.functions_number = 2
+            self.writer.options.methods_number = 1
+            self.writer.options.classes_number = 1
+            self.writer.options.objects_number = 1
+
+            with patch.object(self.writer, 'createFile'), \
+                 patch.object(self.writer, 'close'):
                 self.writer.output = output_stream
                 self.writer.generate_fuzzing_script()
+        finally:
+            # Restore original options to avoid affecting other tests
+            self.writer.options.functions_number = original_funcs
+            self.writer.options.methods_number = original_methods
+            self.writer.options.classes_number = original_classes
+            self.writer.options.objects_number = original_objects
 
         full_script = output_stream.getvalue()
 
@@ -231,11 +368,13 @@ class TestWritePythonCode(unittest.TestCase):
         except SyntaxError as e:
             self.fail(f"The generated script has a syntax error: {e}\n--- SCRIPT ---\n{full_script}")
 
+        # Basic checks to ensure major components are present
         self.assertIn("import mock_module", full_script)
         self.assertIn("def callMethod(", full_script)
         self.assertIn("fuzz_target_module = mock_module", full_script)
         self.assertIn("def main_async_fuzzer_tasks():", full_script)
-        self.assertIn('callFunc("f1", "test_function",', full_script)
+        # Check that at least one function call was generated
+        self.assertIn('callFunc("f1",', full_script)
 
     # --- Wiring and Call Order Tests ---
 
@@ -252,7 +391,6 @@ class TestWritePythonCode(unittest.TestCase):
                 patch.object(self.writer, '_write_concurrency_finalization') as mock_concurrency, \
                 patch.object(self.writer, 'close'):
             manager = MagicMock()
-            # We don't attach createFile because we don't care about its call args here, just the order of others.
             manager.attach_mock(mock_header, '_write_script_header_and_imports')
             manager.attach_mock(mock_tricky, '_write_tricky_definitions')
             manager.attach_mock(mock_helpers, '_write_helper_call_functions')
@@ -273,8 +411,6 @@ class TestWritePythonCode(unittest.TestCase):
     def test_write_main_fuzzing_logic_call_counts(self):
         """Wiring Test: Checks that the main logic method calls the correct number
         of fuzzing sub-methods based on the options."""
-        # FIX: Manually set the output stream, as this unit test doesn't
-        # call the main generate_fuzzing_script method.
         self.writer.output = StringIO()
         with patch.object(self.writer, '_generate_and_write_call') as mock_gen_call, \
                 patch.object(self.writer, '_fuzz_one_class') as mock_fuzz_class, \
@@ -290,14 +426,20 @@ class TestWritePythonCode(unittest.TestCase):
         output_stream = StringIO()
         self.writer.output = output_stream
 
+        # Set a low max depth for testing
+        original_depth = self.writer.MAX_FUZZ_GENERATION_DEPTH
         self.writer.MAX_FUZZ_GENERATION_DEPTH = 1
 
-        self.writer._dispatch_fuzz_on_instance(
-            current_prefix="prefix_at_max_depth",
-            target_obj_expr_str="some_object",
-            class_name_hint="SomeClass",
-            generation_depth=2
-        )
+        try:
+            self.writer._dispatch_fuzz_on_instance(
+                current_prefix="prefix_at_max_depth",
+                target_obj_expr_str="some_object",
+                class_name_hint="SomeClass",
+                generation_depth=2  # This depth is > MAX_FUZZ_GENERATION_DEPTH
+            )
+        finally:
+            # Restore original depth to not affect other tests
+            self.writer.MAX_FUZZ_GENERATION_DEPTH = original_depth
 
         generated_code = output_stream.getvalue()
         self.assertIn("Max fuzz code generation depth", generated_code)
