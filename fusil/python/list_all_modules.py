@@ -55,6 +55,7 @@ class ListAllModules:
         path: list[str] | None,
         package: str | None,
         prefix: str = "",
+        search_path: str = "",
     ) -> bool:
         """
         Check if a module meets the filtering criteria for fuzzing.
@@ -75,14 +76,20 @@ class ListAllModules:
         package = package or ""
 
         if not self.site_package:
+            if "site-packages" in search_path:
+                return False
             if "site-packages" in filename or any("site-packages" in p for p in path):
                 return False
 
         if self.only_c:
-            if any(filename.endswith(ext) for ext in (".py", ".pyc", ".pyo")):
+            if not filename:
                 return False
-            if is_package or not self._is_c_module(name, prefix):
+
+            if is_package:
                 return False
+
+            is_c_extension = any(filename.endswith(ext) for ext in (".so", ".pyd"))
+            return is_c_extension
 
         search_targets = [name, package, pathlib.Path(filename).name, prefix]
         if any(
@@ -93,46 +100,6 @@ class ListAllModules:
             return False
 
         return True
-
-    def _is_c_module(self, name: str, prefix: str) -> bool:
-        """
-        Determine if a module is implemented in C.
-
-        Args:
-            name: Module name
-            prefix: Module prefix
-
-        Returns:
-            True if the module is a (probable) C extension, False if it's Python
-        """
-        fullname = prefix + name
-
-        if self.verbose:
-            print(f"Testing if {fullname} is C module...")
-
-        module = self._find_module(fullname, name, prefix)
-
-        if not module:
-            if self.verbose:
-                print(f"    Could not import {fullname}, assuming C module")
-            return True
-
-        if not hasattr(module, "__file__") or module.__file__ is None:
-            if self.verbose:
-                print(f"    {fullname} has no __file__, likely builtin C module")
-            return True
-
-        module_file = str(module.__file__)
-        is_python = module_file.endswith((".py", ".pyc", ".pyo", ".pyw"))
-
-        if self.verbose:
-            file_type = "Python" if is_python else "C"
-            print(f"    {fullname} is {file_type} module (file: {module_file})")
-
-        if is_python and self.verbose:
-            self.logger.error(f"SKIP PYTHON MODULE {fullname}")
-
-        return not is_python
 
     def _find_module(self, fullname: str, name: str, prefix: str) -> ModuleType | None:
         """
@@ -171,7 +138,7 @@ class ListAllModules:
         path: list[str] | None = None,
         prefix: str = "",
         onerror: Callable[[str], None] | None = None,
-    ) -> Generator[pkgutil.ModuleInfo, None, None]:
+    ) -> Generator[tuple, None, None]:
         """
         Recursively discover modules, yielding valid ones.
 
@@ -183,32 +150,41 @@ class ListAllModules:
         Yields:
             ModuleInfo objects for valid modules
         """
-        for info in pkgutil.iter_modules(path, prefix):
-            if info.name in self.blacklist:
+        if path is None:
+            path = sys.path
+
+        for finder, name, ispkg in pkgutil.walk_packages(path, prefix, onerror):
+            if name in self.blacklist:
                 continue
 
-            # Skip Debian debug modules (e.g., "_bisect_d")
-            if info.name.endswith("_d"):
+            if name.endswith("_d"):
                 continue
 
-            module_data = self._get_module_metadata(info.name)
+            filename = None
+            try:
+                spec = finder.find_spec(name)
+                if spec:
+                    filename = spec.origin
+            except (ImportError, SyntaxError) as e:
+                filename = None
+
+            module_data = self._get_module_metadata(name)
+            search_path = finder.path if hasattr(finder, 'path') else ""
 
             if not self._is_valid_module(
-                info.name,
-                info.ispkg,
-                module_data.get("filename"),
+                name,
+                ispkg,
+                filename,
                 module_data.get("path"),
                 module_data.get("package"),
                 prefix,
+                search_path=search_path
             ):
                 if self.verbose:
-                    print(f"SKIPPED {prefix + info.name}", file=sys.stderr)
+                    print(f"SKIPPED {name}", file=sys.stderr)
                 continue
 
-            yield info
-
-            if info.ispkg:
-                yield from self._process_package(info, onerror)
+            yield (finder, name, ispkg)
 
     def _get_module_metadata(self, module_name: str) -> dict[str, Any]:
         """Get metadata for a module if it's already imported."""
@@ -269,7 +245,8 @@ class ListAllModules:
             set of module names that passed all filters
         """
         for info in self.discover_modules(onerror=lambda x: None):
-            fullname = prefix + info.name
+            name = info[1]
+            fullname = prefix + name
             if self.verbose:
                 self.logger.error(f"ADDING {fullname}: {prefix}+{info.name}")
             self.discovered_modules.add(fullname)
