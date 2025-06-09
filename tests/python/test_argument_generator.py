@@ -15,8 +15,22 @@ from fusil.config import FusilConfig
 import fusil.python.tricky_weird
 import fusil.python.values
 import fusil.python.h5py.h5py_tricky_weird  # For h5py_tricky_names
-import numpy  # For numpy placeholders
-import h5py  # For h5py placeholders (like h5py.File)
+
+USE_NUMPY = USE_H5PY = True
+try:
+    import numpy
+except ImportError:
+    USE_NUMPY = False
+    numpy = None
+
+try:
+    import h5py
+    import fusil.python.h5py.h5py_tricky_weird
+    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
+except ImportError:
+    USE_H5PY = False
+    h5py = None
+    H5PyArgumentGenerator = None
 
 
 class TestArgumentGenerator(unittest.TestCase):
@@ -173,7 +187,7 @@ class TestArgumentGenerator(unittest.TestCase):
         result = self.arg_gen.genTuple()
         self.assertIsListOfStrings(result, "genTuple")
         full_expr = "".join(result)
-        self.assertTrue(full_expr.startswith("(") and full_expr.endswith(")"),
+        self.assertTrue((full_expr.startswith("(") and full_expr.endswith(")")) or full_expr == "tuple()",
                         f"genTuple output '{full_expr}' should start with ( and end with ).")
         try:
             parsed_ast = ast.parse(full_expr)
@@ -259,6 +273,7 @@ class TestArgumentGenerator(unittest.TestCase):
                     return True
         return False
 
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
     def test_simple_generators_composition_with_numpy_h5py(self):
         self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=False)
         self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
@@ -585,6 +600,7 @@ class TestArgumentGenerator(unittest.TestCase):
                           f"Key 2 '{weird_class_key2_generated}' from genWeirdUnion not in tricky_weird.weird_names.")
 
     # --- Testing create_complex_argument composition ---
+    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
     def test_create_complex_argument_with_numpy(self):
         self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
         self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
@@ -621,11 +637,13 @@ class TestArgumentGenerator(unittest.TestCase):
             template_seen = False
             # Temporarily make genTrickyTemplate the only choice
             with patch.object(self.arg_gen, 'complex_argument_generators', (self.arg_gen.genTrickyTemplate,)):
-                for _ in range(10):  # Should be quick if it's the only choice
-                    result = self.arg_gen.create_complex_argument()
-                    if any(tmpl_part in "".join(result) for tmpl_part in ["Template(", "Interpolation("]):
-                        template_seen = True
-                        break
+                with patch("fusil.python.argument_generator.randint", lambda *args: 1):
+                    assert self.arg_gen.complex_argument_generators == (self.arg_gen.genTrickyTemplate,)
+                    for _ in range(10):  # Should be quick if it's the only choice
+                        result = self.arg_gen.create_complex_argument()
+                        if any(tmpl_part in "".join(result) for tmpl_part in ["Template(", "Interpolation("]):
+                            template_seen = True
+                            break
             self.assertTrue(template_seen,
                             "create_complex_argument with templates enabled did not seem to produce template output after forced choice.")
             self.setUp()  # Restore

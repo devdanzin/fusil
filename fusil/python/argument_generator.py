@@ -17,13 +17,9 @@ from __future__ import annotations
 from random import choice, randint, sample
 from typing import Callable
 
-import numpy
-
 import fusil.python
-import fusil.python.h5py.h5py_tricky_weird
 from fusil.bytes_generator import BytesGenerator
 from fusil.config import FusilConfig
-from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 from fusil.python.unicode import escapeUnicode
 from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 from fusil.unicode_generator import (
@@ -44,6 +40,19 @@ try:
     from fusil.python.template_strings import TEMPLATES
 except ImportError:
     TEMPLATES = []
+
+try:
+    import numpy
+except ImportError:
+    numpy = None
+
+try:
+    import h5py
+    import fusil.python.h5py.h5py_tricky_weird
+    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
+except ImportError:
+    h5py = None
+    H5PyArgumentGenerator = None
 
 
 class ArgumentGenerator:
@@ -71,7 +80,7 @@ class ArgumentGenerator:
         self.filenames = filenames
         self.errback_name = ERRBACK_NAME_CONST
 
-        self.h5py_argument_generator = H5PyArgumentGenerator(self) if use_h5py else None
+        self.h5py_argument_generator = H5PyArgumentGenerator(self) if use_h5py and H5PyArgumentGenerator else None
 
         # Initialize generators for various data types
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
@@ -114,7 +123,7 @@ class ArgumentGenerator:
                 self.genTrickyObjects,
             )
         )
-        if not self.options.no_numpy and use_numpy:
+        if not self.options.no_numpy and use_numpy and H5PyArgumentGenerator:
             self.simple_argument_generators += (self.genTrickyNumpy,) * 50
             assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
             self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
@@ -132,7 +141,7 @@ class ArgumentGenerator:
         )
 
         if not self.options.no_numpy and use_numpy:
-            if use_h5py:
+            if use_h5py and H5PyArgumentGenerator:
                 assert  isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
                 self.simple_argument_generators += (
                     self.h5py_argument_generator.genH5PyObject,
