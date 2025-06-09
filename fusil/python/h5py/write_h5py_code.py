@@ -1,19 +1,3 @@
-from __future__ import annotations
-
-import uuid
-from random import choice, randint, random
-from textwrap import dedent
-
-# Import h5py here if type hinting for h5py objects is desired in this module,
-# otherwise, it's mostly used within the generated script's context.
-import h5py  # Added for isinstance checks if they are directly in this file.
-
-# For type checking if WritePythonCode is passed or its methods are called:
-# from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
-#     from .write_python_code import WritePythonCode # Assuming WriteH5PyCode's parent is WritePythonCode
-
-# Module docstring
 """
 Generates Python code specifically for fuzzing h5py library objects and features.
 
@@ -25,6 +9,16 @@ various creation parameters, operations, and edge cases. This class is
 intended to be used as a component by a more general Python code writer
 for fuzzing, allowing for modular h5py-specific fuzz logic.
 """
+
+from __future__ import annotations
+
+import uuid
+from random import choice, randint, random
+from textwrap import dedent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fusil.python.write_python_code import WritePythonCode # Assuming WriteH5PyCode's parent is WritePythonCode
 
 
 def _h5_unique_name(base="item"):
@@ -54,7 +48,7 @@ class WriteH5PyCode:
     and argument generation.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent: WritePythonCode):
         """
         Initializes the WriteH5PyCode instance.
 
