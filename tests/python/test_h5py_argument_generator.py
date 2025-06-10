@@ -680,20 +680,40 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         except (ValueError, SyntaxError) as e:
             self.fail(f"ast.literal_eval on large int expr '{result_expr}' failed: {e}")
 
-    def test_genH5PyLinkPath_expr(self):
-        test_group_paths = ["'/'", "'/foo/bar'", "some_group_var_name"]
-        for group_path_expr in test_group_paths:
-            with self.subTest(group_path_expr=group_path_expr):
-                result_expr = self.h5_arg_gen.genH5PyLinkPath_expr(group_path_expr)
-                self.assertIsInstance(result_expr, str)
-                # The result can be a simple string literal or a string concatenation
-                try:
-                    # This eval is to check if the expression is valid and produces a string
-                    val = eval(result_expr, self.test_globals)
-                    self.assertIsInstance(val, str,
-                                          f"Link path expr '{result_expr}' did not eval to a string (got {type(val)}).")
-                except Exception as e:
-                    self.fail(f"eval of link path expr '{result_expr}' failed: {e}")
+    @patch('fusil.python.h5py.h5py_argument_generator.choice')
+    @patch('fusil.python.h5py.h5py_argument_generator._h5_unique_name')
+    def test_genH5PyLinkPath_expr(self, mock_unique_name, mock_choice):
+        """
+        Tests the expression construction logic of genH5PyLinkPath_expr.
+        """
+        # --- Test Case 1: Check the child path concatenation logic ---
+        mock_unique_name.return_value = 'child123'
+        # Force choice to select the expression that joins paths
+        mock_choice.side_effect = lambda paths: f"some_group_var + '/{mock_unique_name.return_value}'"
+
+        result_expr = self.h5_arg_gen.genH5PyLinkPath_expr('some_group_var')
+
+        # Assert that the correct expression string was built
+        self.assertEqual(result_expr, "some_group_var + '/child123'")
+
+        # Now, test that the expression evaluates correctly
+        self.test_globals['some_group_var'] = '/path/to/group'
+        val = eval(result_expr, self.test_globals)
+        self.assertEqual(val, '/path/to/group/child123')
+
+        # --- Test Case 2: Check the absolute path logic ---
+        mock_unique_name.return_value = 'abs123'
+        # Force choice to select the expression that creates an absolute path
+        mock_choice.side_effect = lambda paths: f"'/{mock_unique_name.return_value}'"
+
+        result_expr = self.h5_arg_gen.genH5PyLinkPath_expr("'/'")
+
+        # Assert that the correct expression string was built
+        self.assertEqual(result_expr, "'/abs123'")
+
+        # Test that this simple expression evaluates correctly
+        val = eval(result_expr)
+        self.assertEqual(val, '/abs123')
 
     def test_genH5PyExternalLinkFilename_expr(self):
         test_target_filenames = ["'target_file.h5'", "some_filename_var"]
@@ -951,7 +971,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     self.assertIn(f"size={block_shape_expr}", result_expr)
                     self.assertIn(f"dtype={dtype_expr}", result_expr)
                 elif is_rand_form:
-                    self.assertIn(f"rand({block_shape_expr})", result_expr)
+                    self.assertIn(f"rand(*{block_shape_expr})", result_expr)
                     self.assertIn(f".astype({dtype_expr})", result_expr)
 
                 self.assertTrue(result_expr.endswith(")"))

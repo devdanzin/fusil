@@ -21,7 +21,6 @@ except ImportError:
 try:
     import h5py
     import fusil.python.h5py.h5py_tricky_weird
-    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 except ImportError:
     USE_H5PY = False
     h5py = None
@@ -662,38 +661,43 @@ class H5PyArgumentGenerator:
         return f"_fusil_h5_create_dynamic_slice_for_rank({rank_variable_name_in_script})"
 
     def genNumpyArrayForDirectIO_expr(
-        self, array_shape_expr: str, dtype_expr: str, allow_non_contiguous: bool = True
+            self, array_shape_expr: str, dtype_expr: str, allow_non_contiguous: bool = True
     ) -> str:
         """
         Generates a NumPy array expression for `read_direct` (destination) or
         `write_direct` (source).
-
-        The generated array shape is based on `array_shape_expr`.
-        Note: Ensuring perfect compatibility with a preceding slice selection
-        solely through string expressions is complex. This method generates
-        a plausible array.
-
-        Args:
-            array_shape_expr: Python expression string for the desired array shape.
-            dtype_expr: Python expression string for the array's dtype.
-            allow_non_contiguous: If True, may generate a Fortran-ordered array.
-
-        Returns:
-            A string expression for creating a NumPy array.
+        ...
         """
         order_opt = ""
         if allow_non_contiguous and random() < 0.2:
             order_opt = ", order='F'"
 
+        # This helper will safely evaluate the shape string to a tuple.
+        def get_shape_tuple(shape_str):
+            try:
+                shape = eval(shape_str)
+                return shape if isinstance(shape, tuple) else (shape,)
+            except:
+                return (10,)  # Fallback
+
         is_bool_dtype = "'bool'" in dtype_expr.lower()
         if random() < 0.5 and not is_bool_dtype:
-            return f"numpy.arange(10, dtype={dtype_expr}).reshape(2,5){order_opt}"
+            # --- Start of Fixed Logic ---
+            shape_tuple = get_shape_tuple(array_shape_expr)
+            num_elements = numpy.prod(shape_tuple).item()
+            reshape_args = str(shape_tuple).strip('()')
+            # Remove trailing comma for single-element tuples
+            if reshape_args.endswith(','):
+                reshape_args = reshape_args[:-1]
+
+            return (f"numpy.arange({num_elements}, dtype={dtype_expr})"
+                    f".reshape({reshape_args}{order_opt})")
+            # --- End of Fixed Logic ---
 
         fill_value_expr = self.genH5PyFillvalue_expr(dtype_expr)
 
-        # Avoid passing fill_value=None to numeric dtypes.
         if fill_value_expr == "None" and not ('S' in dtype_expr or 'U' in dtype_expr or 'object' in dtype_expr):
-            fill_value_expr = "0"  # Default to 0 for numeric types if fill value is None
+            fill_value_expr = "0"
 
         return (f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, "
                 f"fill_value={fill_value_expr}, dtype={dtype_expr}{order_opt})")
@@ -922,7 +926,7 @@ class H5PyArgumentGenerator:
         """
         if "f" in dtype_expr_str.lower() or "float" in dtype_expr_str.lower():
             # Use numpy.random.rand for floats and scale
-            return f"(numpy.random.rand({block_shape_expr_str}) * 255).astype({dtype_expr_str})"
+            return f"(numpy.random.rand(*{block_shape_expr_str}) * 255).astype({dtype_expr_str})"
         else:
             return f"numpy.random.randint(0, 255, size={block_shape_expr_str}, dtype={dtype_expr_str})"
 
