@@ -670,29 +670,13 @@ class H5PyArgumentGenerator:
         """
         order_opt = ""
         if allow_non_contiguous and random() < 0.2:
-            order_opt = ", order='F'"
-
-        # This helper will safely evaluate the shape string to a tuple.
-        def get_shape_tuple(shape_str):
-            try:
-                shape = eval(shape_str)
-                return shape if isinstance(shape, tuple) else (shape,)
-            except:
-                return (10,)  # Fallback
+            order_opt = f", order='F'"
 
         is_bool_dtype = "'bool'" in dtype_expr.lower()
         if random() < 0.5 and not is_bool_dtype:
-            # --- Start of Fixed Logic ---
-            shape_tuple = get_shape_tuple(array_shape_expr)
-            num_elements = numpy.prod(shape_tuple).item()
-            reshape_args = str(shape_tuple).strip('()')
-            # Remove trailing comma for single-element tuples
-            if reshape_args.endswith(','):
-                reshape_args = reshape_args[:-1]
-
-            return (f"numpy.arange({num_elements}, dtype={dtype_expr})"
-                    f".reshape({reshape_args}{order_opt})")
-            # --- End of Fixed Logic ---
+            num_elements_expr = f"int(numpy.prod({array_shape_expr}))"
+            return (f"numpy.arange({num_elements_expr}, dtype={dtype_expr})"
+                    f".reshape({array_shape_expr}{order_opt})")
 
         fill_value_expr = self.genH5PyFillvalue_expr(dtype_expr)
 
