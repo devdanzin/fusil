@@ -103,7 +103,7 @@ class WritePythonCode(WriteCode):
         self.enable_threads = threads
         self.enable_async = _async
         self.generated_filename = filename
-        self.h5py_writer = WriteH5PyCode(self) if use_h5py else None
+        self.h5py_writer = WriteH5PyCode(self) if use_h5py and _ARG_GEN_USE_H5PY else None
 
         self.arg_generator = ArgumentGenerator(
             self.options, self.filenames, _ARG_GEN_USE_NUMPY, _ARG_GEN_USE_TEMPLATES, _ARG_GEN_USE_H5PY
