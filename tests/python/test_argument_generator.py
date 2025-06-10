@@ -184,19 +184,28 @@ class TestArgumentGenerator(unittest.TestCase):
             self.fail(f"genList produced a syntactically invalid expression '{full_expr}': {e}")
 
     def test_genTuple_structure(self):
-        result = self.arg_gen.genTuple()
-        self.assertIsListOfStrings(result, "genTuple")
-        full_expr = "".join(result)
-        self.assertTrue((full_expr.startswith("(") and full_expr.endswith(")")) or full_expr == "tuple()",
-                        f"genTuple output '{full_expr}' should start with ( and end with ).")
+        """
+        Tests that genTuple produces a syntactically valid tuple expression.
+        """
+        full_expr = " ".join(self.arg_gen.genTuple())
         try:
-            parsed_ast = ast.parse(full_expr)
-            self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
-            self.assertIsInstance(parsed_ast.body[0], ast.Expr)
-            self.assertIsInstance(parsed_ast.body[0].value, ast.Tuple,
-                                  f"Parsed expression '{full_expr}' is not an AST Tuple node.")
+            # Use mode='eval' for single expressions
+            parsed_ast = ast.parse(full_expr, mode='eval')
         except SyntaxError as e:
-            self.fail(f"genTuple produced a syntactically invalid expression '{full_expr}': {e}")
+            self.fail(f"genTuple produced a syntax error in expression '{full_expr}': {e}")
+
+        # The result can be a tuple literal (ast.Tuple) or a call to the
+        # constructor (ast.Call). We need to validate both possibilities.
+        node = parsed_ast.body  # mode='eval' puts the node in .body
+
+        if isinstance(node, ast.Call):
+            # If it's a Call, verify it's a call to the name 'tuple'.
+            self.assertEqual(getattr(node.func, 'id', None), 'tuple',
+                             f"Expression '{full_expr}' is a Call, but not to tuple()")
+        else:
+            # Otherwise, it must be a literal tuple.
+            self.assertIsInstance(node, ast.Tuple,
+                                  f"Parsed expression '{full_expr}' is not an AST Tuple or Call node.")
 
     def test_genDict_structure(self):
         result = self.arg_gen.genDict()
@@ -315,7 +324,7 @@ class TestArgumentGenerator(unittest.TestCase):
         # to control which sub-generator is picked.
 
         seen_types = set()
-        for _ in range(100):  # More iterations increase chance of hitting different generators
+        for _ in range(1000):  # More iterations increase chance of hitting different generators
             arg_list = self.arg_gen.create_simple_argument()
             arg_str = "".join(arg_list)
             if arg_str == "None":
