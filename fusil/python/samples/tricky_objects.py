@@ -79,7 +79,7 @@ tricky_instance = TrickyClass()
 try:
     tricky_frame = inspect.currentframe()
     if tricky_frame: # currentframe() can be None
-        tricky_frame.f_builtins.update(tricky_dict)
+        # tricky_frame.f_builtins.update(tricky_dict)
         tricky_frame.f_globals.update(tricky_dict)
         tricky_frame.f_locals.update(tricky_dict)
 except RuntimeError:
