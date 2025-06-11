@@ -16,7 +16,7 @@ from fusil.python.blacklists import (
     METHOD_BLACKLIST,
     OBJECT_BLACKLIST,
 )
-from fusil.python.mangle import mangle_loop, mangle_obj
+from fusil.python.mangle_object import mangle_loop, mangle_obj
 from fusil.write_code import WriteCode
 
 if TYPE_CHECKING:

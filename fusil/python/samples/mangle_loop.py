@@ -18,4 +18,4 @@ if hasattr(obj.__class__, '__dict__'):
             try:
                 mangle_obj(obj, key, (1,) * args)
             except Exception as err:
-                print(err, file=stderr)
+                print(f"{err.__class__}: {err}", file=stderr)

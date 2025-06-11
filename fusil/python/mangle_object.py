@@ -9,6 +9,10 @@ are corrupted or invalid, then safely restores the original state afterward.
 
 import pathlib
 
-mangle_obj = pathlib.Path("./samples/mangle_obj.py").read_text()
-mangle_loop = pathlib.Path("./samples/mangle_loop.py").read_text()
+parent_dir = pathlib.Path(__file__).parent
+mangle_obj_file =  parent_dir / "samples/mangle_obj.py"
+mangle_obj = mangle_obj_file.read_text()
+
+mangle_loop_file =  parent_dir / "samples/mangle_loop.py"
+mangle_loop = mangle_loop_file.read_text()
 mangle_loop = mangle_loop.replace("REPLACEMENT_PLACEHOLDER", "%s")
