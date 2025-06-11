@@ -11,10 +11,12 @@ SURROGATES = (
 )
 BUFFER_OBJECTS = (
     'bytearray(b"abc\\xe9\\xff")',
+    'bytearray(b"test")',
     'memoryview(b"abc\\xe9\\xff")',
     'memoryview(bytearray(b"abc\\xe9\\xff"))',
 )
 INTERESTING = (
+    "0",
     # Large integer boundaries
     "sys.maxsize",  # Maximum integer size for current platform
     "sys.maxsize - 1",  # One below maximum integer size
