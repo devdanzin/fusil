@@ -4,6 +4,18 @@ from unittest.mock import MagicMock
 
 def mangle_obj(instance, method, *args):
     print(f'Mangling {instance} with MagicMock()s, leaving {method} intact.', file=stderr)
+
+    # If the instance doesn't have a __dict__ (e.g., uses __slots__),
+    # we can't mangle its instance attributes. Call the method directly.
+    if not hasattr(instance, '__dict__'):
+        try:
+            func = getattr(instance, method)
+            print(f'Calling {instance}.{method} on object without __dict__...', file=stderr)
+            func(*args)
+        except Exception as err:
+            print(f"[{instance}] {method} => {err.__class__.__name__}: {err}", file=stderr)
+        return
+
     real_instance_dict = instance.__dict__.copy()
     real_class_dict = instance.__class__.__dict__.copy()
 
@@ -34,7 +46,7 @@ def mangle_obj(instance, method, *args):
         except ValueError as e:
             errmsg = repr(e)
         errmsg = errmsg.encode('ASCII', 'replace')
-        print ('[%s] %s => %s: %s' % (instance, func.__name__, err.__class__.__name__, errmsg), file=stderr)
+        print (f'[{instance}] {func.__name__} => {err.__class__.__name__}: {errmsg}', file=stderr)
 
     finally:
         instance.__dict__.update(real_instance_dict)
@@ -45,4 +57,3 @@ def mangle_obj(instance, method, *args):
                 setattr(instance.__class__, key, value)
             except Exception:
                 pass
-
