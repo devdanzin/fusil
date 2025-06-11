@@ -5,10 +5,9 @@ import re  # For test_genWeirdUnion and test_genWeirdType
 from random import randint, sample, seed, choice as random_choice
 from unittest.mock import patch, MagicMock  # MagicMock for placeholders
 
-# (Your sys.path setup if needed)
-# import os
-# SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', '..'))
+import os
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', '..'))
 
 import fusil.python.argument_generator
 from fusil.config import FusilConfig
@@ -667,6 +666,120 @@ class TestArgumentGenerator(unittest.TestCase):
     def test_create_complex_argument_without_templates_init(self):
         self._setup_arg_gen(use_templates=False, no_tstrings_opt=False)
         self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+
+
+class TestArgumentGeneratorCoverage(unittest.TestCase):
+    """
+    This suite contains additional tests to increase coverage for
+    ArgumentGenerator, targeting specific branches and edge cases.
+    """
+
+    def setUp(self):
+        """
+        Set up a basic ArgumentGenerator instance for each test.
+        """
+        self.config = FusilConfig(read=False)
+        # Mock the parent PythonSource object
+        self.mock_python_source = MagicMock()
+        self.mock_python_source.options = self.config
+        self.mock_python_source.filenames = ['/tmp/dummy_file.txt']
+        self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(self.mock_python_source, [""])
+
+    @patch.dict(sys.modules, {'h5py': None})
+    def test_init_without_h5py(self):
+        """
+        Covers lines 46-47, 53-55:
+        Tests that H5PyArgumentGenerator is not created if h5py is not installed.
+        """
+        arg_gen_no_h5py = fusil.python.argument_generator.ArgumentGenerator(self.mock_python_source, [""], use_h5py=False)
+        self.assertIsNone(arg_gen_no_h5py.h5py_argument_generator,
+                          "h5py_argument_generator should be None when h5py is not available.")
+
+    @patch('fusil.python.argument_generator.choice')
+    def test_create_complex_argument_with_file_arg(self, mock_choice):
+        """
+        Covers lines 376-381:
+        Tests the branch that generates an argument from a file path.
+        """
+        self.arg_gen.options.file_arg = True
+        # Mock random.choice to return one of the filenames
+        mock_choice.return_value = lambda *args, **kwargs: ["'/tmp/dummy_file.txt'"]
+
+        result_expr = self.arg_gen.create_complex_argument()
+
+        # The result should be a list containing the filename string
+        self.assertEqual(result_expr, ["'/tmp/dummy_file.txt'"])
+
+    @patch('fusil.python.argument_generator.choice')
+    def test_genTricky_lambda_with_error(self, mock_choice):
+        """
+        Covers lines 192-193: Tests the branch that returns a lambda
+        which will raise a ZeroDivisionError.
+        """
+        # Force the choice of the lambda string
+        mock_choice.return_value = "lambda *args, **kwargs: 1/0"
+
+        # Get the expression from the generator
+        result_expr = self.arg_gen.genTricky()[0]
+        self.assertEqual(result_expr, "lambda *args, **kwargs: 1/0")
+
+        # Evaluate the string to create the function
+        func = eval(result_expr)
+
+        # Assert that calling the function raises the expected error
+        with self.assertRaises(ZeroDivisionError):
+            func()
+
+    @patch('fusil.python.argument_generator.randint', side_effect=[10] * 18 + [10, 3, 9])  # range=10, sample_size=3, if_check=9
+    @patch('random.choice')
+    def test_genRawString_with_special_chars(self, mock_choice, mock_randint):
+        """
+        Covers lines 231-232: Tests the branch in genRawString that adds
+        a special regex character.
+        """
+        # The first randint sets the loop range.
+        # The second randint sets the sample size.
+        # The third randint is for the if condition (9 > 8 is True).
+        # We then force the choice of special character.
+        mock_choice.return_value = "*"
+
+        result_expr = self.arg_gen.genRawString()[0]
+
+        # Check that the special character is present in the final raw string
+        self.assertIn("*", result_expr)
+
+        # Verify it's a valid raw string literal
+        self.assertTrue(result_expr.startswith('r"'))
+        self.assertTrue(result_expr.endswith('"'))
+
+    @patch('fusil.python.argument_generator.randint', side_effect=[2, 5])  # nb_item=5, same_type=2 (True)
+    def test_genDict_with_same_type_items(self, mock_randint):
+        """
+        Covers lines 377-384: Tests the 'if same_type' branch in
+        _gen_collection_internal by calling genDict.
+        """
+        # The first randint sets the number of items.
+        # The second randint ensures same_type is True (2 != 1).
+
+        # We need to mock the underlying generators to produce predictable output
+        self.arg_gen.create_hashable_argument = MagicMock(side_effect=["'key1'", "'key2'", "'key3'", "'key4'", "'key5'"])
+        self.arg_gen.create_simple_argument = MagicMock(return_value=["123"])
+
+        result_lines = self.arg_gen.genDict()
+        full_expr = "".join(result_lines)
+        print(f"{full_expr=}")
+
+        # Check that the correct number of items were generated
+        self.assertEqual(self.arg_gen.create_hashable_argument.call_count, 5)
+        self.assertEqual(self.arg_gen.create_simple_argument.call_count, 5)
+
+        # Verify that the resulting string is a valid dictionary literal
+        try:
+            parsed_dict = ast.literal_eval(full_expr)
+            self.assertIsInstance(parsed_dict, dict)
+            self.assertEqual(len(parsed_dict), 5)
+        except (ValueError, SyntaxError) as e:
+            self.fail(f"genDict() produced an invalid dict literal: {full_expr} | Error: {e}")
 
 
 if __name__ == '__main__':
