@@ -103,7 +103,7 @@ class FrameModifier:
             print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
             if self.var_name in frame.f_locals:
                 frame.f_locals[self.var_name] = self.new_value
-            elif self.var_name.split(".")[0] in frame.f_locals and self.var_name.count(".") == 2:  # instance_or_class.attribute
+            elif self.var_name.split(".")[0] in frame.f_locals and self.var_name.count(".") == 1:  # instance_or_class.attribute
                 instance_or_class_str, attr_str = self.var_name.split(".")
                 setattr(frame.f_locals[instance_or_class_str], attr_str, self.new_value)
             else:  # module.instance_or_class.attribute

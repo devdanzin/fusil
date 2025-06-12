@@ -431,7 +431,13 @@ class WritePythonCode(WriteCode):
             for i in range(self.options.functions_number):
                 prefix = f"f{i + 1}"
 
-                # JIT Mode Logic
+                fuzzed_func_name = choice(self.module_functions)
+                try:
+                    fuzzed_func_obj = getattr(self.module, fuzzed_func_name)
+                except AttributeError:
+                    continue
+
+                    # JIT Mode Logic
                 level = self.options.jit_fuzz_level
 
                 # At the highest level, try to generate a mixed scenario
@@ -443,7 +449,7 @@ class WritePythonCode(WriteCode):
                         self._generate_deep_call_invalidation_scenario,
                     ]
                     chosen_generator = choice(mixed_scenario_generators)
-                    chosen_generator(prefix)
+                    chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
                     continue
 
                 # At level 2, try to generate an isolated hostile scenario
@@ -458,7 +464,7 @@ class WritePythonCode(WriteCode):
                     if random() < 0.5:
                         self._generate_jit_pattern_block(prefix)
                     else:
-                        self._generate_polymorphic_call_block(prefix)
+                        self._generate_polymorphic_call_block(prefix, fuzzed_func_name, fuzzed_func_obj)
                     continue
 
                 func_name = choice(self.module_functions)
@@ -1098,12 +1104,26 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
-    def _generate_polymorphic_call_block(self, prefix: str) -> None:
+    def _generate_polymorphic_call_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """Generates a hot loop with calls to one function using args of different types."""
         if not self.module_functions:
             return
 
         func_name = choice(self.module_functions)
+        target_func_name = fuzzed_func_name
+
+        self.write(0, "fuzzed_func_is_viable = True")
+        self.write(0, "try:")
+        self.addLevel(1)
+        # Warm up with one simple call.
+        self.write(0, f"callFunc('{prefix}_warmup', '{target_func_name}', 1)")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f'"[{prefix}] Fuzzed function failed on warmup, skipping polymorphic block: {{e}}"')
+        self.write(0, "fuzzed_func_is_viable = False")
+        self.restoreLevel(self.base_level - 1)
         self.write_print_to_stderr(
             0, f'"[{prefix}] Generating polymorphic call block for: {func_name}"'
         )
@@ -1124,6 +1144,8 @@ class WritePythonCode(WriteCode):
 
         # Write the hot loop
         loop_iterations = self.options.jit_loop_iterations // num_types
+        self.write(0, "if fuzzed_func_is_viable:")
+        self.addLevel(1)
         self.write(0, f"for _ in range({loop_iterations}):")
         self.addLevel(1)
         self.write(0, f"'INDENTED BLOCK'")
@@ -1134,7 +1156,8 @@ class WritePythonCode(WriteCode):
             arg_str = " ".join(gen_func())
             self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str})")
 
-        self.restoreLevel(self.base_level - 1)
+        self.restoreLevel(self.base_level - 1)  # for
+        self.restoreLevel(self.base_level - 1)  # if
         self.emptyLine()
 
     def _generate_phase1_warmup(self, prefix: str) -> dict | None:
@@ -1228,7 +1251,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "except Exception as e:")
         self.addLevel(1)
         # Log expected exceptions, a crash is the real prize.
-        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
+        self.write_print_to_stderr(0, f'f"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
         self.write(0, "break")
 
 
@@ -1472,7 +1495,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "collect()")
         self.restoreLevel(self.base_level - 1)
 
-    def _generate_mixed_many_vars_scenario(self, prefix: str) -> None:
+    def _generate_mixed_many_vars_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
         MIXED SCENARIO 1: Combines "Many Vars", `__del__` side effects, and
         JIT-friendly math/logic patterns into one hostile function.
@@ -1526,7 +1549,7 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""')
         self.emptyLine()
 
-    def _generate_del_invalidation_scenario(self, prefix: str) -> None:
+    def _generate_del_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
         MIXED SCENARIO 2: An invalidation scenario where the invalidation
         is performed indirectly via a __del__ side effect.
@@ -1575,7 +1598,7 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
-    def _generate_mixed_deep_calls_scenario(self, prefix: str) -> None:
+    def _generate_mixed_deep_calls_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
         MIXED SCENARIO 3: Combines "Deep Calls" with JIT-friendly patterns.
         Each function in the deep call chain performs complex work, stressing
@@ -1596,6 +1619,8 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, "x = len('base_case') + p")
         self.write(0, "y = x % 5")
+        self.write_print_to_stderr(0, f'''f"[{prefix}] Calling fuzzed function '{fuzzed_func_name}' from deep inside the call chain"''')
+        self.write(0, f"callFunc('{prefix}_fuzzed', '{fuzzed_func_name}', x)")
         self.write(0, "return x - y")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
@@ -1634,7 +1659,7 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
-    def _generate_deep_call_invalidation_scenario(self, prefix: str) -> None:
+    def _generate_deep_call_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
         MIXED SCENARIO 4: Combines "Deep Calls" with an invalidation attack.
         A deep function call chain is JIT-compiled, then a function in the
@@ -1704,6 +1729,24 @@ class WritePythonCode(WriteCode):
             0, f'"""[{prefix}] <<< Finished "Deep Call Invalidation" Scenario >>>"""'
         )
         self.emptyLine()
+
+    def _generate_indirect_call_scenario(self, prefix, fuzzed_func_name: str, fuzzed_func_obj: Any):
+        harness_func_name = f"harness_{prefix}"
+        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Indirect Call Scenario ({fuzzed_func_name}) <<<"')
+
+        # 1. Define a harness function that takes a callable.
+        self.write(0, f"def {harness_func_name}(callable_arg):")
+        self.addLevel(1)
+        self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, "try: callable_arg(i)")  # Call the argument
+        self.write(0, "except: pass")
+        self.restoreLevel(self.base_level - 2)  # Exit loop and def
+
+        # 2. Call the harness, passing the fuzzed function to it.
+        self.write(0, f"# Pass the real fuzzed function to the JIT-hot harness.")
+        fuzzed_func_path = f"{self.module_name}.{fuzzed_func_name}"
+        self.write(0, f"{harness_func_name}({fuzzed_func_path})")
 
     def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
