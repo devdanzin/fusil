@@ -449,6 +449,8 @@ class WritePythonCode(WriteCode):
                         self._generate_deep_call_invalidation_scenario,
                         self._generate_fuzzed_func_invalidation_scenario,
                         self._generate_polymorphic_call_block_scenario,
+                        self._generate_type_version_scenario,
+                        self._generate_concurrency_scenario,
                     ]
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -1849,6 +1851,111 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Polymorphic Callable Set Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_type_version_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: object) -> None:
+        """
+        ADVANCED SCENARIO: Attacks the JIT's attribute caching by accessing an
+        attribute with the same name across classes where its nature differs.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Type Version Fuzzing Scenario <<<"'
+        )
+
+        # 1. Define several classes with the same attribute name ('payload')
+        #    but different kinds of attributes.
+        self.write(0, "# Define classes with conflicting 'payload' attributes.")
+        self.write(0, f"class ShapeA_{prefix}: payload = 123  # Data attribute (int)")
+        self.write(0, f"class ShapeB_{prefix}: payload = 'abc' # Data attribute (str)")
+        self.write(0, f"class ShapeC_{prefix}:")
+        self.write(1, "@property")
+        self.write(1, "def payload(self): return 3.14  # Property")
+        self.write(0, f"class ShapeD_{prefix}:")
+        self.write(1, "def payload(self): return len # Method that returns a builtin")
+        self.emptyLine()
+
+        # 2. Create a list of instances of these classes.
+        self.write(0, "# Create a list of instances to iterate over.")
+        self.write(0, f"shapes = [ShapeA_{prefix}(), ShapeB_{prefix}(), ShapeC_{prefix}(), ShapeD_{prefix}()]")
+        self.emptyLine()
+
+        # 3. In a hot loop, polymorphically access the 'payload' attribute.
+        self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, f"obj = shapes[i_{prefix} % len(shapes)]")
+        self.write(0, "try:")
+        self.addLevel(1)
+        # This access forces the JIT to constantly check the object's type
+        # and the version of its attribute cache.
+        self.write(0, "payload_val = obj.payload")
+        # If the payload is a method, call it.
+        self.write(0, "if callable(payload_val): payload_val()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception: pass")
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Type Version Fuzzing Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_concurrency_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: object) -> None:
+        """
+        ADVANCED SCENARIO: Creates a race condition between a "hammer" thread
+        running JIT'd code and an "invalidator" thread modifying its dependencies.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Concurrency (Race Condition) Scenario <<<"'
+        )
+
+        # 1. Setup shared state: a target class and a stop flag.
+        self.write(0, "# Shared state for the threads.")
+        self.write(0, f"class JITTarget_{prefix}: attr = 100")
+        self.write(0, f"stop_flag_{prefix} = False")
+        self.emptyLine()
+
+        # 2. Define Thread 1: The "JIT Hammer"
+        self.write(0, f"def hammer_thread_{prefix}():")
+        self.addLevel(1)
+        self.write(0, f"target = JITTarget_{prefix}()")
+        self.write_print_to_stderr(0, f'"[{prefix}] Hammer thread starting..."')
+        self.write(0, f"while not stop_flag_{prefix}:")
+        self.addLevel(1)
+        self.write(0, "try: _ = target.attr + 1 # This line will be JIT-compiled")
+        self.write(0, "except: pass")
+        self.restoreLevel(self.base_level - 1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Hammer thread stopping."')
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Define Thread 2: The "Invalidator"
+        self.write(0, f"def invalidator_thread_{prefix}():")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Invalidator thread starting..."')
+        self.write(0, f"while not stop_flag_{prefix}:")
+        self.addLevel(1)
+        # Repeatedly change the attribute that the hammer thread depends on.
+        self.write(0, f"JITTarget_{prefix}.attr = randint(1, 1000)")
+        self.write(0, "time.sleep(0.00001) # Sleep briefly to allow hammer to run")
+        self.restoreLevel(self.base_level - 1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Invalidator thread stopping."')
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 4. Main execution logic to run and manage the threads.
+        self.write(0, "# Create and start the competing threads.")
+        self.write(0, f"hammer = Thread(target=hammer_thread_{prefix})")
+        self.write(0, f"invalidator = Thread(target=invalidator_thread_{prefix})")
+        self.write(0, "hammer.start()")
+        self.write(0, "invalidator.start()")
+        self.write(0, "time.sleep(0.1) # Let the race condition run for a moment")
+        self.write(0, f"stop_flag_{prefix} = True # Signal threads to stop")
+        self.write(0, "hammer.join()")
+        self.write(0, "invalidator.join()")
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished JIT Concurrency Scenario >>>"'
         )
         self.emptyLine()
 
