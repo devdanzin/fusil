@@ -447,6 +447,8 @@ class WritePythonCode(WriteCode):
                         self._generate_del_invalidation_scenario,
                         self._generate_mixed_deep_calls_scenario,
                         self._generate_deep_call_invalidation_scenario,
+                        self._generate_fuzzed_func_invalidation_scenario,
+                        self._generate_polymorphic_call_block_scenario,
                     ]
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -1747,6 +1749,108 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# Pass the real fuzzed function to the JIT-hot harness.")
         fuzzed_func_path = f"{self.module_name}.{fuzzed_func_name}"
         self.write(0, f"{harness_func_name}({fuzzed_func_path})")
+
+    def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, fuzzed_func_name: str,
+                                                    fuzzed_func_obj: Any) -> None:
+        """
+        MIXED SCENARIO: A three-phase invalidation attack where the fuzzed
+        function itself is the dependency that gets invalidated.
+        """
+        wrapper_func_name = f"jit_wrapper_{prefix}"
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Fuzzed Function Invalidation Scenario ({fuzzed_func_name}) <<<"'
+        )
+        self.emptyLine()
+
+        # --- Phase 1: Define a Wrapper and Warm It Up ---
+        self.write(0, f"# Phase 1: Define a wrapper and JIT-compile it.")
+        self.write(0, f"def {wrapper_func_name}():")
+        self.addLevel(1)
+        # The wrapper simply calls our target fuzzed function.
+        self.write(0, f"try:")
+        self.addLevel(1)
+        self.write(0, f"{self.module_name}.{fuzzed_func_name}()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except: pass")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # Warm up the wrapper so the JIT compiles it and likely inlines the fuzzed function call.
+        self.write(0, f"for _ in range({self.options.jit_loop_iterations}): {wrapper_func_name}()")
+        self.emptyLine()
+
+        # --- Phase 2: Invalidate the Fuzzed Function ---
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Phase 2: Redefining {fuzzed_func_name} on the module..."'
+        )
+        self.write(0, f"# Maliciously redefine the fuzzed function on its own module.")
+        # This change must be detected by the JIT, invalidating the optimized wrapper.
+        self.write(0, f"setattr({self.module_name}, '{fuzzed_func_name}', lambda *a, **kw: 'payload')")
+        self.write(0, "collect()")
+        self.emptyLine()
+
+        # --- Phase 3: Re-execute the Wrapper ---
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Phase 3: Re-executing the wrapper to check for crashes..."'
+        )
+        self.write(0, f"try: {wrapper_func_name}()")
+        self.write(0, "except Exception as e:")
+        self.write(1, 'pass # Any exception is fine, a crash is the goal.')
+        self.emptyLine()
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Fuzzed Function Invalidation Scenario >>>"'
+        )
+
+    def _generate_polymorphic_call_block_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+        """
+        Generates a hot loop that makes calls to different KINDS of callables
+        (fuzzed function, lambda, instance method) to stress call-site caching.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Polymorphic Callable Set Scenario ({fuzzed_func_name}) <<<"'
+        )
+
+        # 1. Define the set of diverse callables.
+        lambda_name = f"lambda_{prefix}"
+        self.write(0, f"{lambda_name} = lambda x: x + 1")
+
+        class_name = f"CallableClass_{prefix}"
+        instance_name = f"instance_{prefix}"
+        self.write(0, f"class {class_name}:")
+        self.write(1, "def method(self, x): return x * 2")
+        self.write(0, f"{instance_name} = {class_name}()")
+        self.emptyLine()
+
+        # List of callables to be used in the loop.
+        # This prepares the paths for calling each one.
+        callables_to_test = [
+            f"{self.module_name}.{fuzzed_func_name}",
+            lambda_name,
+            f"{instance_name}.method",
+        ]
+
+        # 2. Create the hot loop.
+        # Divide iterations among the callables.
+        loop_iterations = self.options.jit_loop_iterations // len(callables_to_test)
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 3. Inside the loop, call each of the different callables.
+        self.write(0, "# Call different types of callables to stress the JIT's call-site caches.")
+        for i, callable_path in enumerate(callables_to_test):
+            self.write(0, "try:")
+            self.addLevel(1)
+            # Pass a simple argument that should work for most.
+            self.write(0, f"{callable_path}(i_{prefix})")
+            self.restoreLevel(self.base_level - 1)
+            self.write(0, "except: pass")
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Polymorphic Callable Set Scenario >>>"'
+        )
+        self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
