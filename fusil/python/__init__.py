@@ -212,6 +212,18 @@ class Fuzzer(Application):
             type="float",
             default=0.25,
         )
+        jit_options.add_option(
+            "--jit-hostile-invalidation",
+            help="Enable two-phase invalidation scenarios to attack the JIT cache (default: False)",
+            action="store_true",
+            default=False,
+        )
+        jit_options.add_option(
+            "--jit-hostile-prob",
+            help="Probability (0.0-1.0) of generating a hostile invalidation scenario (default: 0.1)",
+            type="float",
+            default=0.2,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

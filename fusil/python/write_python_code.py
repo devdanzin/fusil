@@ -103,6 +103,7 @@ class WritePythonCode(WriteCode):
         self.enable_threads = threads
         self.enable_async = _async
         self.generated_filename = filename
+        self.jit_warmed_targets = []
         self.h5py_writer = WriteH5PyCode(self) if use_h5py and _ARG_GEN_USE_H5PY else None
 
         self.arg_generator = ArgumentGenerator(
@@ -429,6 +430,11 @@ class WritePythonCode(WriteCode):
             )
             for i in range(self.options.functions_number):
                 prefix = f"f{i + 1}"
+
+                # If JIT hostile mode is on, sometimes choose to run an invalidation scenario
+                if self.options.jit_hostile_invalidation and random() < self.options.jit_hostile_prob:
+                    self._generate_invalidation_scenario(prefix)
+                    continue
 
                 if self.options.jit_fuzz and random() < self.options.jit_pattern_mix_prob:
                     # Decide randomly between a pattern block or a polymorphic call
@@ -891,6 +897,7 @@ class WritePythonCode(WriteCode):
         target_obj_expr: str,  # e.g., "fuzz_target_module" or "instance_var"
         is_method_call: bool,
         generation_depth: int,
+        in_jit_loop: bool = False,
     ) -> None:
         """Generates code for a single function or method call, including async/thread wrappers."""
 
@@ -927,8 +934,14 @@ class WritePythonCode(WriteCode):
         self._write_arguments_for_call_lines(num_args, 1)
         self.write(0, ")")
         self.emptyLine()
-
-        if self.options.jit_fuzz:
+        if self.options.jit_fuzz and is_method_call and in_jit_loop:
+            self.write(0, f"if res_{prefix} is SENTINEL_VALUE:")
+            self.write_print_to_stderr(
+                1,
+                f"f'Method {callable_name} raised an exception, breaking JIT loop.'",
+            )
+            self.write(1, "break")
+            self.emptyLine()
             return
 
         self.write(0, f"# Deep dive on result of {callable_name}")
@@ -1105,6 +1118,154 @@ class WritePythonCode(WriteCode):
             self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str})")
 
         self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+    def _generate_phase1_warmup(self, prefix: str) -> dict | None:
+        if not self.module_classes:
+            return None
+
+        class_name = choice(self.module_classes)
+        class_obj = getattr(self.module, class_name)
+        methods = self._get_object_methods(class_obj, class_name)
+        if not methods:
+            return None
+
+        method_name = choice(list(methods.keys()))
+        method_obj = methods[method_name]
+        instance_var = f"instance_{prefix}"
+
+        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"')
+
+        # Generate instantiation code
+        # (This reuses logic from your existing _fuzz_one_class)
+        self.write(0, f"{instance_var} = callFunc('{prefix}_init', '{class_name}')")
+
+        # Generate the hot loop
+        self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
+        self.addLevel(1)
+        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+
+        # Generate the repeated call inside the loop
+        self._generate_and_write_call(
+            prefix=f"{prefix}_warmup",
+            callable_name=method_name,
+            callable_obj=method_obj,
+            min_arg_count=0,
+            target_obj_expr=instance_var,
+            is_method_call=True,
+            generation_depth=0,
+            in_jit_loop=True,
+        )
+
+        self.restoreLevel(self.base_level - 2)  # Exit loop and if
+
+        # Store context for the next phases
+        target_info = {
+            'type': 'method_call',
+            'class_name': class_name,
+            'instance_var': instance_var,
+            'method_name': method_name,
+        }
+        self.jit_warmed_targets.append(target_info)
+        return target_info
+
+    def _generate_phase2_invalidate(self, prefix: str, target_info: dict) -> None:
+        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating dependency for {target_info["class_name"]}"')
+
+        class_name = target_info['class_name']
+        method_name = target_info['method_name']
+
+        # Invalidate by replacing the method on the class with a lambda
+        # This is inspired by test_guard_type_version_executor_invalidated from test_opt.py
+        self.write(0, "# Maliciously replacing the method on the class to invalidate JIT cache")
+        self.write(0, "try:")
+        self.write(1,
+                   f"setattr({self.module_name}.{class_name}, '{method_name}', lambda *a, **kw: 'invalidation payload')")
+        self.write(1, "collect() # Encourage cleanup")
+        self.write(0, "except Exception as e:")
+        self.write_print_to_stderr(1, f'f"[{prefix}] PHASE 2: Exception invalidating {target_info["class_name"]}: {{ e }}"')
+
+
+        self.emptyLine()
+
+    def _generate_phase3_reexecute(self, prefix: str, target_info: dict) -> None:
+        self.write_print_to_stderr(0,
+                                   f'"[{prefix}] PHASE 3: Re-executing {target_info["method_name"]} to check for crash"')
+
+        instance_var = target_info['instance_var']
+        method_name = target_info['method_name']
+
+        self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
+        self.addLevel(1)
+        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, "try:")
+        self.addLevel(1)
+
+        # Re-execute the original call. We don't need the full _generate_and_write_call,
+        # just a simple call to the now-potentially-broken method.
+        self.write(0, f"getattr({instance_var}, '{method_name}')()")
+
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        # Log expected exceptions, a crash is the real prize.
+        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
+        self.write(0, "break")
+
+
+        self.restoreLevel(self.base_level - 3)  # Exit try, loop, and if
+        self.emptyLine()
+
+    def _generate_invalidation_scenario(self, prefix: str) -> None:
+        """
+        Orchestrates the generation of a three-phase JIT invalidation scenario.
+
+        This method calls helper methods to generate code for each phase:
+        1. Warm-up: JIT-compile a target method.
+        2. Invalidate: Change a dependency of the compiled code.
+        3. Re-execute: Call the target method again to check for crashes.
+        """
+        self.write(0, f"# --- JIT Invalidation Scenario: {prefix} ---")
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Invalidation Scenario <<<"'
+        )
+        self.emptyLine()
+
+        # --- Phase 1: Warm-up and JIT Compilation ---
+        # This call generates the code to get a method JIT-compiled and returns
+        # information about that target for the subsequent phases.
+        target_info = self._generate_phase1_warmup(prefix)
+
+        # --- Check if a suitable target was found ---
+        if target_info:
+            # If warmup was successful, proceed to the next phases.
+            self.emptyLine()
+
+            # --- Phase 2: Invalidate Dependency ---
+            # This call uses the info from phase 1 to generate code that
+            # maliciously alters a dependency of the JIT-compiled code.
+            self._generate_phase2_invalidate(prefix, target_info)
+            self.emptyLine()
+
+            # --- Phase 3: Re-execute and Check for Crash ---
+            # This call generates code to run the original target again. If the
+            # JIT cache was not correctly invalidated, this is where a crash
+            # or incorrect behavior would occur.
+            self._generate_phase3_reexecute(prefix, target_info)
+
+        else:
+            # If no suitable target was found in Phase 1, log it and abort this scenario.
+            self.write_print_to_stderr(
+                0, f'"[{prefix}] Could not find a suitable target for an invalidation scenario. Skipping."'
+            )
+
+        self.emptyLine()
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished JIT Invalidation Scenario >>>"'
+        )
+        self.write(0, f"# --- End Scenario: {prefix} ---")
         self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
