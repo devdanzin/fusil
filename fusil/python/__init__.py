@@ -224,6 +224,12 @@ class Fuzzer(Application):
             type="float",
             default=0.2,
         )
+        jit_options.add_option(
+            "--jit-hostile-deleter",
+            help="Enable __del__ side effect scenarios to attack the JIT optimizer (default: False)",
+            action="store_true",
+            default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

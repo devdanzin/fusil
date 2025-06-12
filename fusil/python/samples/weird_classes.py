@@ -84,3 +84,28 @@ for cls in numbers:
 for cls in dicts:
     weird_instances[f"weird_{cls.__name__}_basic"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in range(100)})
     weird_instances[f"weird_{cls.__name__}_tricky_strs"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in tricky_strs})
+
+
+# Class with a __del__ side effect to attack the JIT optimizer
+class FrameModifier:
+    def __init__(self, var_name, new_value):
+        # Store the name of the variable to target and its new value.
+        self.var_name = var_name
+        self.new_value = new_value
+        # Announce creation for debugging the generated script
+        print(f"  [FrameModifier created to target '{self.var_name}']", file=sys.stderr)
+
+    def __del__(self):
+        try:
+            # On destruction, get the calling frame (1 level up).
+            frame = sys._getframe(1)
+            # Maliciously modify the local variable in that frame.
+            if self.var_name in frame.f_locals:
+                print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
+                frame.f_locals[self.var_name] = self.new_value
+            elif self.var_name.split()[0] in frame.f_locals:
+                print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
+                setattr(frame.f_locals[self.var_name.split()[0]], self.var_name.split()[1], self.new_value)
+        except Exception as e:
+            # Frame inspection can be tricky; don't crash in __del__.
+            print(f"  [Side Effect] Error in FrameModifier.__del__: {e}", file=sys.stderr)

@@ -431,6 +431,10 @@ class WritePythonCode(WriteCode):
             for i in range(self.options.functions_number):
                 prefix = f"f{i + 1}"
 
+                if self.options.jit_hostile_deleter and random() < self.options.jit_hostile_prob:
+                    self._generate_deleter_scenario(prefix)
+                    continue
+
                 # If JIT hostile mode is on, sometimes choose to run an invalidation scenario
                 if self.options.jit_hostile_invalidation and random() < self.options.jit_hostile_prob:
                     self._generate_invalidation_scenario(prefix)
@@ -1266,6 +1270,86 @@ class WritePythonCode(WriteCode):
             0, f'"[{prefix}] <<< Finished JIT Invalidation Scenario >>>"'
         )
         self.write(0, f"# --- End Scenario: {prefix} ---")
+        self.emptyLine()
+
+    def _generate_deleter_scenario(self, prefix: str) -> None:
+        """
+        Generates a sophisticated scenario that uses a __del__ side effect
+        to induce type confusion for local, instance, and class variables.
+        The side effect is triggered only once, near the end of the hot loop.
+        """
+        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Advanced __del__ Side Effect Scenario <<<"')
+
+        # --- 1. SETUP OUTSIDE THE LOOP ---
+        # Define unique names for all our variables using the prefix.
+        target_var = f"target_{prefix}"
+        fm_target_var = f"fm_{target_var}"
+        dummy_class_name = f"Dummy_{prefix}"
+        dummy_instance_name = f"dummy_instance_{prefix}"
+        fm_dummy_class_attr = f"fm_{dummy_instance_name}_a"
+        fm_dummy_instance_attr = f"fm_{dummy_instance_name}_b"
+        loop_iterations = self.options.jit_loop_iterations
+
+        # Create the local variable and its FrameModifier.
+        self.write(0, f"# A. Create a local variable and its FrameModifier")
+        self.write(0, f"{target_var} = 100")
+        self.write(0, f"{fm_target_var} = FrameModifier('{target_var}', 'local-string')")
+        self.emptyLine()
+
+        # Create the class, instance, and their FrameModifiers.
+        self.write(0, f"# B. Create a class with instance/class attributes and their FrameModifiers")
+        self.write(0, f"class {dummy_class_name}:")
+        self.write(1, "a = 200  # Class attribute")
+        self.write(1, "def __init__(self):")
+        self.write(2, "self.b = 300  # Instance attribute")
+        self.write(0, f"{dummy_instance_name} = {dummy_class_name}()")
+        # Note: The target strings now include the instance name, e.g., 'dummy_instance_f1.a'
+        self.write(0, f"{fm_dummy_class_attr} = FrameModifier('{dummy_instance_name}.a', 'class-attr-string')")
+        self.write(0, f"{fm_dummy_instance_attr} = FrameModifier('{dummy_instance_name}.b', 'instance-attr-string')")
+        self.emptyLine()
+
+        # --- 2. HOT LOOP ---
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # --- 2A. WARM-UP PHASE (inside loop) ---
+        self.write(0, f"# Use all variables to warm up the JIT with their initial types")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"x = {target_var} + i_{prefix}")
+        self.write(0, f"y = {dummy_instance_name}.a + i_{prefix}")
+        self.write(0, f"z = {dummy_instance_name}.b + i_{prefix}")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except TypeError: pass")
+        self.emptyLine()
+
+        # --- 2B. TRIGGER PHASE (inside loop) ---
+        # Trigger the deletion on the penultimate iteration to ensure the loop
+        # runs one more time with the corrupted state.
+        self.write(0, f"# On the penultimate loop, delete the FrameModifiers to trigger __del__")
+        self.write(0, f"if i_{prefix} == {loop_iterations - 2}:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] DELETING FRAME MODIFIERS..."')
+        self.write(0, f"del {fm_target_var}")
+        self.write(0, f"del {fm_dummy_class_attr}")
+        self.write(0, f"del {fm_dummy_instance_attr}")
+        self.write(0, "collect()")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # --- 2C. RE-EXECUTE PHASE (inside loop) ---
+        self.write(0, f"# Use the variables again, which may hit a corrupted JIT state after deletion")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"res_local = {target_var} + i_{prefix}")
+        self.write(0, f"res_cls_attr = {dummy_instance_name}.a + i_{prefix}")
+        self.write(0, f"res_inst_attr = {dummy_instance_name}.b + i_{prefix}")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except TypeError as e:")
+        self.write(1, "pass # This TypeError is expected if the side effect worked")
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+
+        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Advanced __del__ Side Effect Scenario >>>"')
         self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
