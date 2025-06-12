@@ -431,21 +431,24 @@ class WritePythonCode(WriteCode):
             for i in range(self.options.functions_number):
                 prefix = f"f{i + 1}"
 
-                if self.options.jit_hostile_resource_limits and random() < self.options.jit_hostile_prob:
-                    # Randomly choose between the two resource limit scenarios
-                    if random() < 0.5:
-                        self._generate_many_vars_scenario(prefix)
-                    else:
-                        self._generate_deep_calls_scenario(prefix)
+                # JIT Mode Logic
+                level = self.options.jit_fuzz_level
+
+                # At the highest level, try to generate a mixed scenario
+                if level >= 3 and random() < self.options.jit_hostile_prob:
+                    mixed_scenario_generators = [
+                        self._generate_mixed_many_vars_scenario,
+                        self._generate_del_invalidation_scenario,
+                    ]
+                    chosen_generator = choice(mixed_scenario_generators)
+                    chosen_generator(prefix)
                     continue
 
-                if self.options.jit_hostile_deleter and random() < self.options.jit_hostile_prob:
-                    self._generate_deleter_scenario(prefix)
-                    continue
-
-                # If JIT hostile mode is on, sometimes choose to run an invalidation scenario
-                if self.options.jit_hostile_invalidation and random() < self.options.jit_hostile_prob:
-                    self._generate_invalidation_scenario(prefix)
+                # At level 2, try to generate an isolated hostile scenario
+                if level >= 2 and random() < self.options.jit_hostile_prob:
+                    # Randomly pick one of the simple hostile scenarios
+                    # For now, we only have the deleter, but you would add others here
+                    self._generate_deleter_scenario(prefix)  # The one we made before
                     continue
 
                 if self.options.jit_fuzz and random() < self.options.jit_pattern_mix_prob:
@@ -1430,6 +1433,144 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 2)  # Exit except and for loop
 
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Deep Calls" Scenario >>>"""')
+        self.emptyLine()
+
+    def _define_frame_modifier_instances(self, prefix: str, targets_and_payloads: dict) -> list[str]:
+        """
+        Generates the 'fm_... = FrameModifier(...)' lines for a set of targets.
+
+        Args:
+            prefix: The unique prefix for this scenario.
+            targets_and_payloads: A dictionary mapping target variable paths
+                                  (e.g., 'var_250') to their malicious payload.
+
+        Returns:
+            A list of the variable names created for the FrameModifier instances.
+        """
+        fm_vars = []
+        self.write(0, "# Define FrameModifier instances to arm the __del__ side effects.")
+        for i, (target_path, payload) in enumerate(targets_and_payloads.items()):
+            fm_var_name = f"fm_{prefix}_{i}"
+            self.write(0, f"{fm_var_name} = FrameModifier('{target_path}', {payload})")
+            fm_vars.append(fm_var_name)
+        self.emptyLine()
+        return fm_vars
+
+    def _generate_del_trigger(self, loop_var: str, loop_iterations: int, fm_vars_to_del: list[str]) -> None:
+        """
+        Generates the 'if ...: del ...' block to trigger the __del__ methods
+        on the penultimate iteration of a loop.
+        """
+        self.write(0, f"# Trigger the __del__ side effect on the penultimate iteration.")
+        self.write(0, f"if {loop_var} == {loop_iterations - 2}:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[+] Deleting FrameModifiers to trigger side effects..."')
+        for fm_var in fm_vars_to_del:
+            self.write(0, f"del {fm_var}")
+        self.write(0, "collect()")
+        self.restoreLevel(self.base_level - 1)
+
+    def _generate_mixed_many_vars_scenario(self, prefix: str) -> None:
+        """
+        MIXED SCENARIO 1: Combines "Many Vars", `__del__` side effects, and
+        JIT-friendly math/logic patterns into one hostile function.
+        """
+        func_name = f"mixed_many_vars_func_{prefix}"
+        loop_var = f"i_{prefix}"
+        num_vars = 260
+        loop_iterations = self.options.jit_loop_iterations
+
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Mixed Many Vars" Hostile Scenario <<<"""')
+        self.write(0, f"def {func_name}():")
+        self.addLevel(1)
+
+        # 1. Define 260+ local variables to stress EXTENDED_ARG.
+        self.write(0, f"# Define {num_vars} local variables.")
+        for i in range(num_vars):
+            self.write(0, f"var_{i} = {i}")
+        self.emptyLine()
+
+        # 2. Arm the __del__ side effect using our new helper.
+        #    We will target a high-index variable that is used in the hot loop.
+        target_variable_path = f'var_{num_vars - 1}'
+        fm_vars = self._define_frame_modifier_instances(
+            prefix, {target_variable_path: "'corrupted-by-del'"}
+        )
+
+        # 3. Add a hot loop.
+        self.write(0, f"for {loop_var} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 4. Inside the loop, generate JIT-friendly patterns that use the variables.
+        self.write(0, "# Use variables in JIT-friendly patterns.")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"res = var_0 + {loop_var}")
+        self.write(0, f"res += var_{num_vars - 1} # This is the variable we will corrupt.")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except TypeError: pass")
+        self.emptyLine()
+
+        # 5. Inside the loop, plant the time bomb using our new helper.
+        self._generate_del_trigger(loop_var, loop_iterations, fm_vars)
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.restoreLevel(self.base_level - 1)  # Exit def
+        self.emptyLine()
+
+        # 6. Call the master function we just created.
+        self.write(0, f"# Execute the composed hostile function.")
+        self.write(0, f"{func_name}()")
+        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""')
+        self.emptyLine()
+
+    def _generate_del_invalidation_scenario(self, prefix: str) -> None:
+        """
+        MIXED SCENARIO 2: An invalidation scenario where the invalidation
+        is performed indirectly via a __del__ side effect.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting __del__ Invalidation Scenario <<<"'
+        )
+        self.emptyLine()
+
+        # --- Phase 1: Warm-up ---
+        target_info = self._generate_phase1_warmup(prefix)
+
+        if not target_info:
+            self.write_print_to_stderr(
+                0, f'"[{prefix}] Could not find a suitable target. Aborting scenario."'
+            )
+            self.emptyLine()
+            return
+
+        self.emptyLine()
+
+        # --- Phase 2: Invalidate via __del__ ---
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] PHASE 2: Arming FrameModifier to invalidate via __del__."'
+        )
+
+        # The target path is the method on the class, e.g., 'MyTargetClass.target_method'
+        target_path = f'{self.module_name}.{target_info["class_name"]}.{target_info["method_name"]}'
+
+        fm_vars = self._define_frame_modifier_instances(
+            prefix, {target_path: "lambda *a, **kw: 'invalidated by __del__'"}
+        )
+
+        # Immediately delete the instance to trigger the __del__ method.
+        self.write(0, "# Immediately delete the FrameModifier to trigger the side effect.")
+        for fm_var in fm_vars:
+            self.write(0, f"del {fm_var}")
+        self.write(0, "collect()")
+        self.emptyLine()
+
+        # --- Phase 3: Re-execute ---
+        self._generate_phase3_reexecute(prefix, target_info)
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished __del__ Invalidation Scenario >>>"'
+        )
         self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:

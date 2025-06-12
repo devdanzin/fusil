@@ -213,28 +213,18 @@ class Fuzzer(Application):
             default=0.25,
         )
         jit_options.add_option(
-            "--jit-hostile-invalidation",
-            help="Enable two-phase invalidation scenarios to attack the JIT cache (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
             "--jit-hostile-prob",
             help="Probability (0.0-1.0) of generating a hostile invalidation scenario (default: 0.1)",
             type="float",
             default=0.2,
         )
         jit_options.add_option(
-            "--jit-hostile-deleter",
-            help="Enable __del__ side effect scenarios to attack the JIT optimizer (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
-            "--jit-hostile-resource-limits",
-            help="Enable resource limit scenarios (many vars, deep calls) (default: False)",
-            action="store_true",
-            default=False,
+            "--jit-fuzz-level",
+            help="Set the intensity of JIT fuzzing. "
+                 "1=Friendly Patterns, 2=Isolated Hostile Scenarios, 3=Mixed Hostile Scenarios. "
+                 "Requires --jit-fuzz. (default: 1)",
+            type="int",
+            default=1,
         )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(

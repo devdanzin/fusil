@@ -100,12 +100,16 @@ class FrameModifier:
             # On destruction, get the calling frame (1 level up).
             frame = sys._getframe(1)
             # Maliciously modify the local variable in that frame.
+            print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
             if self.var_name in frame.f_locals:
-                print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
                 frame.f_locals[self.var_name] = self.new_value
-            elif self.var_name.split()[0] in frame.f_locals:
-                print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
-                setattr(frame.f_locals[self.var_name.split()[0]], self.var_name.split()[1], self.new_value)
+            elif self.var_name.split(".")[0] in frame.f_locals and self.var_name.count(".") == 2:  # instance_or_class.attribute
+                instance_or_class_str, attr_str = self.var_name.split(".")
+                setattr(frame.f_locals[instance_or_class_str], attr_str, self.new_value)
+            else:  # module.instance_or_class.attribute
+                module_str, instance_or_class_str, attr_str = self.var_name.split(".")
+                instance_or_class = getattr(frame.f_locals[module_str], instance_or_class_str)
+                setattr(instance_or_class, attr_str, self.new_value)
         except Exception as e:
             # Frame inspection can be tricky; don't crash in __del__.
             print(f"  [Side Effect] Error in FrameModifier.__del__: {e}", file=sys.stderr)
