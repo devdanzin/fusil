@@ -431,6 +431,14 @@ class WritePythonCode(WriteCode):
             for i in range(self.options.functions_number):
                 prefix = f"f{i + 1}"
 
+                if self.options.jit_hostile_resource_limits and random() < self.options.jit_hostile_prob:
+                    # Randomly choose between the two resource limit scenarios
+                    if random() < 0.5:
+                        self._generate_many_vars_scenario(prefix)
+                    else:
+                        self._generate_deep_calls_scenario(prefix)
+                    continue
+
                 if self.options.jit_hostile_deleter and random() < self.options.jit_hostile_prob:
                     self._generate_deleter_scenario(prefix)
                     continue
@@ -1350,6 +1358,78 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
 
         self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Advanced __del__ Side Effect Scenario >>>"')
+        self.emptyLine()
+
+    def _generate_many_vars_scenario(self, prefix: str) -> None:
+        """
+        Generates a function with >256 local variables to stress the JIT's
+        bytecode parser, specifically its handling of the EXTENDED_ARG opcode.
+        """
+        func_name = f"many_vars_func_{prefix}"
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Resource Limit Scenario <<<"""')
+        self.write(0, f"# Define a function with an unusually large number of local variables.")
+        self.write(0, f"def {func_name}():")
+        self.addLevel(1)
+
+        # 1. Generate over 256 local variable assignments.
+        num_vars = 260  # A value safely over the 256 threshold
+        for i in range(num_vars):
+            self.write(0, f"var_{i} = {i}")
+
+        # 2. Add a hot loop that uses some of these variables to make the function
+        #    a candidate for JIT compilation.
+        self.write(0, f"# Hot loop to trigger JIT compilation of this large function.")
+        self.write(0, "total = 0")
+        self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        # Use the first, middle, and last variables to ensure they aren't optimized away.
+        self.write(0, f"total += var_0 + var_{num_vars // 2} + var_{num_vars - 1}")
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write(0, "return total")
+        self.restoreLevel(self.base_level - 1)  # Exit def
+        self.emptyLine()
+
+        # 3. Call the newly defined function.
+        self.write(0, f"# Execute the function with many variables.")
+        self.write(0, f"{func_name}()")
+        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Many Vars" Scenario >>>"""')
+        self.emptyLine()
+
+    def _generate_deep_calls_scenario(self, prefix: str) -> None:
+        """
+        Generates a deep chain of function calls to stress the JIT's
+        stack analysis and trace stack limits.
+        """
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Deep Calls" Resource Limit Scenario <<<"""')
+
+        # 1. Define the base case for the call chain.
+        depth = 20  # A reasonably deep call chain
+        self.write(0, f"# Define a deep chain of {depth} nested function calls.")
+        self.write(0, f"def f_0_{prefix}(): return 1")
+
+        # 2. Generate the chain of functions, each calling the previous one.
+        for i in range(1, depth):
+            self.write(0, f"def f_{i}_{prefix}(): return 1 + f_{i - 1}_{prefix}()")
+
+        top_level_func = f"f_{depth - 1}_{prefix}"
+        self.emptyLine()
+
+        # 3. Call the top-level function inside a hot loop to trigger the JIT.
+        #    Wrap it in a try...except RecursionError since this is a possible outcome.
+        self.write(0, f"# Execute the top-level function of the chain in a hot loop.")
+        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"{top_level_func}()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except RecursionError:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected RecursionError."')
+        self.write(0, "break # Exit loop if recursion limit is hit")
+        self.restoreLevel(self.base_level - 2)  # Exit except and for loop
+
+        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Deep Calls" Scenario >>>"""')
         self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:

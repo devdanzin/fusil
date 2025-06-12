@@ -230,6 +230,12 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        jit_options.add_option(
+            "--jit-hostile-resource-limits",
+            help="Enable resource limit scenarios (many vars, deep calls) (default: False)",
+            action="store_true",
+            default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
