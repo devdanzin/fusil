@@ -187,6 +187,31 @@ class Fuzzer(Application):
             type="str",
             default=FILENAMES,
         )
+        jit_options = OptionGroupWithSections(parser, "JIT Fuzzing")
+        jit_options.add_option(
+            "--jit-fuzz",
+            help="Enable JIT-stressing code generation patterns (default: False)",
+            action="store_true",
+            default=False,
+        )
+        jit_options.add_option(
+            "--jit-loop-iterations",
+            help="Number of iterations for JIT hot loops (default: 10000)",
+            type="int",
+            default=10000,
+        )
+        jit_options.add_option(
+            "--jit-polymorphic-degree",
+            help="Number of different types to use in a polymorphic call (default: 4)",
+            type="int",
+            default=4,
+        )
+        jit_options.add_option(
+            "--jit-pattern-mix-prob",
+            help="Probability (0.0-1.0) of generating a JIT-pattern block instead of a standard call (default: 0.25)",
+            type="float",
+            default=0.25,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
@@ -208,7 +233,7 @@ class Fuzzer(Application):
             default=False,
         )
 
-        options = input_options, running_options, fuzzing_options, config_options
+        options = input_options, running_options, fuzzing_options, jit_options, config_options
         for option in options:
             parser.add_option_group(option)
 

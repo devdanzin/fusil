@@ -428,13 +428,22 @@ class WritePythonCode(WriteCode):
                 f'"--- Fuzzing {len(self.module_functions)} functions in {self.module_name} ---"',
             )
             for i in range(self.options.functions_number):
+                prefix = f"f{i + 1}"
+
+                if self.options.jit_fuzz and random() < self.options.jit_pattern_mix_prob:
+                    # Decide randomly between a pattern block or a polymorphic call
+                    if random() < 0.5:
+                        self._generate_jit_pattern_block(prefix)
+                    else:
+                        self._generate_polymorphic_call_block(prefix)
+                    continue
+
                 func_name = choice(self.module_functions)
                 try:
                     func_obj = getattr(self.module, func_name)
                 except AttributeError:
                     continue  # Should not happen if _get_module_members is correct
 
-                prefix = f"f{i + 1}"
                 self._generate_and_write_call(
                     prefix=prefix,
                     callable_name=func_name,
@@ -499,41 +508,75 @@ class WritePythonCode(WriteCode):
             f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
         )
 
-        if 1: # self.h5py_writer and not self.h5py_writer.fuzz_one_h5py_class(
-            # class_name_str, class_type, instance_var_name, prefix
-        # ):
-            num_constructor_args = class_arg_number(class_name_str, class_type)
-            self.write(0, f"{instance_var_name} = None # Initialize instance variable")
-            self.write(0, "try:")
-            self.addLevel(1)
-            self.write(
-                0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
-            )  # prefix was from original _fuzz_one_class
-            self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
-            self.write(0, "  )")  # Close callFunc
-            if USE_MANGLE_FEATURE:  # Assuming USE_MANGLE_FEATURE is defined
-                self.write(0, mangle_loop % num_constructor_args)  # Assuming mangle_loop defined
-            self.restoreLevel(self.base_level - 1)  # Exit try's indentation (level 1)
-            self.write(0, "except Exception as e_instantiate:")
-            self.addLevel(1)  # Indent for except block contents
-            self.write(0, f"{instance_var_name} = None")
+        num_constructor_args = class_arg_number(class_name_str, class_type)
+        self.write(0, f"{instance_var_name} = None # Initialize instance variable")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(
+            0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
+        )  # prefix was from original _fuzz_one_class
+        self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
+        self.write(0, "  )")  # Close callFunc
+        if USE_MANGLE_FEATURE:  # Assuming USE_MANGLE_FEATURE is defined
+            self.write(0, mangle_loop % num_constructor_args)  # Assuming mangle_loop defined
+        self.restoreLevel(self.base_level - 1)  # Exit try's indentation (level 1)
+        self.write(0, "except Exception as e_instantiate:")
+        self.addLevel(1)  # Indent for except block contents
+        self.write(0, f"{instance_var_name} = None")
+        self.write_print_to_stderr(
+            0,  # This 0 is relative to current base_level (which is parent's level + 1)
+            f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
+        )
+        # instance_var_name remains None if already set, or if callFunc returned None
+        # If callFunc might not set instance_var_name on error, set it explicitly:
+        self.write(0, f"{instance_var_name} = None")
+        self.restoreLevel(self.base_level - 1)  # Exit except's indentation
+        self.emptyLine()
+
+        if self.options.jit_fuzz:
+            # --- JIT MODE: Fuzz one stateful object in a loop ---
             self.write_print_to_stderr(
-                0,  # This 0 is relative to current base_level (which is parent's level + 1)
-                f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
+                0, f'"[{prefix}] JIT MODE: Stateful fuzzing for class: {class_name_str}"'
             )
-            # instance_var_name remains None if already set, or if callFunc returned None
-            # If callFunc might not set instance_var_name on error, set it explicitly:
-            self.write(0, f"{instance_var_name} = None")
-            self.restoreLevel(self.base_level - 1)  # Exit except's indentation
+
+            self.write(
+                0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:"
+            )
+            self.addLevel(1)
+            self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+            self.addLevel(1)
+            self.write(0, f"'INDENTED BLOCK'")
+
+
+            # Get a list of methods once
+            methods_dict = self._get_object_methods(class_type, class_name_str)
+            if methods_dict:
+                # Inside the loop, pick a random method and call it
+                chosen_method_name = choice(list(methods_dict.keys()))
+                chosen_method_obj = methods_dict[chosen_method_name]
+                self._generate_and_write_call(  # This is the original call generator
+                    prefix=f"{prefix}_{chosen_method_name}",
+                    callable_name=chosen_method_name,
+                    callable_obj=chosen_method_obj,
+                    min_arg_count=0,
+                    target_obj_expr=instance_var_name,
+                    is_method_call=True,
+                    generation_depth=0,
+                )
+            self.restoreLevel(self.base_level - 2)  # Exit both for loop and if
+            # self.write(0, f"del {instance_var_name} # Cleanup instance")
             self.emptyLine()
 
-        # Now, dispatch fuzzing on the created instance_var_name
-        self._dispatch_fuzz_on_instance(
-            current_prefix=f"{prefix}_{class_name_str.lower()}_ops",  # e.g., "c0_file_ops", "c1_dataset_ops"
-            target_obj_expr_str=instance_var_name,
-            class_name_hint=class_name_str,
-            generation_depth=0,
-        )
+        else: # self.h5py_writer and not self.h5py_writer.fuzz_one_h5py_class(
+            # class_name_str, class_type, instance_var_name, prefix
+        # ):
+            # Now, dispatch fuzzing on the created instance_var_name
+            self._dispatch_fuzz_on_instance(
+                current_prefix=f"{prefix}_{class_name_str.lower()}_ops",  # e.g., "c0_file_ops", "c1_dataset_ops"
+                target_obj_expr_str=instance_var_name,
+                class_name_hint=class_name_str,
+                generation_depth=0,
+            )
 
         # Cleanup for the instance variable created in this scope (if it wasn't None already)
         # Note: _dispatch_fuzz_on_instance does not delete the object it's passed.
@@ -885,6 +928,9 @@ class WritePythonCode(WriteCode):
         self.write(0, ")")
         self.emptyLine()
 
+        if self.options.jit_fuzz:
+            return
+
         self.write(0, f"# Deep dive on result of {callable_name}")
         self.write(
             0,
@@ -985,6 +1031,81 @@ class WritePythonCode(WriteCode):
             self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
             self.addLevel(-1)
             self.emptyLine()
+
+    def _generate_jit_pattern_block(self, prefix: str) -> None:
+        """Generates a block of code with patterns designed to stress the JIT."""
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Generating JIT-optimized pattern block."'
+        )
+
+        # 1. Initialize some variables for the block to use
+        self.write(0, f"var_int_a = {self.arg_generator.genInt()[0]}")
+        self.write(0, f"var_int_b = {self.arg_generator.genSmallUint()[0]}")
+        self.write(0, f'var_str_c = "fusil_jit_fuzzing_string"')
+        self.write(0, f"var_list_d = [10, 20, 30, 40, 50]")
+        self.write(0, f"var_tuple_e = (100, 200, 300)")
+        self.write(0, f"temp_val = 0")
+        self.emptyLine()
+
+        # 2. Create the hot loop
+        loop_iterations = self.options.jit_loop_iterations
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 3. Weave in the JIT-friendly patterns inside the loop
+        # Math, Truth Tests, Subscripts, and Calls
+        self.write(0, f"if i_{prefix} > var_int_b:")
+        self.write(1, f"temp_val = var_int_a + i_{prefix}")
+        self.write(1, f"char = var_str_c[i_{prefix} % len(var_str_c)]")
+
+        # Containment check and Unpacking
+        self.write(0, "if 20 in var_list_d:")
+        self.write(1, f"x_{prefix}, y_{prefix} = (i_{prefix}, temp_val)")
+
+        # Attribute loading on a common object
+        self.write(0, f"var_list_d.append(i_{prefix})")
+
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+    def _generate_polymorphic_call_block(self, prefix: str) -> None:
+        """Generates a hot loop with calls to one function using args of different types."""
+        if not self.module_functions:
+            return
+
+        func_name = choice(self.module_functions)
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Generating polymorphic call block for: {func_name}"'
+        )
+
+        # Select a few argument generators to cycle through
+        poly_gens = [
+            self.arg_generator.genInt,
+            self.arg_generator.genString,
+            self.arg_generator.genList,
+            self.arg_generator.genBytes,
+            self.arg_generator.genBool,
+            self.arg_generator.genFloat,
+        ]
+
+        # Get N diverse generators
+        num_types = self.options.jit_polymorphic_degree
+        gens_to_use = [choice(poly_gens) for _ in range(num_types)]
+
+        # Write the hot loop
+        loop_iterations = self.options.jit_loop_iterations // num_types
+        self.write(0, f"for _ in range({loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, f"'INDENTED BLOCK'")
+
+
+        # Inside the loop, call the same function with different typed args
+        for gen_func in gens_to_use:
+            arg_str = " ".join(gen_func())
+            self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str})")
+
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
