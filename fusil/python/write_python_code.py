@@ -578,6 +578,11 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
             self.addLevel(1)
+            if self.options.jit_aggressive_gc:
+                self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+                self.addLevel(1)
+                self.write(0, "collect()")
+                self.restoreLevel(self.base_level - 1)
             self.write(0, f"'INDENTED BLOCK'")
 
 
@@ -1091,6 +1096,11 @@ class WritePythonCode(WriteCode):
         loop_iterations = self.options.jit_loop_iterations
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
 
         # 3. Weave in the JIT-friendly patterns inside the loop
         # Math, Truth Tests, Subscripts, and Calls
@@ -1152,6 +1162,11 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, f"for _ in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, f"'INDENTED BLOCK'")
 
 
@@ -1189,6 +1204,11 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
 
         # Generate the repeated call inside the loop
         self._generate_and_write_call(
@@ -1244,6 +1264,11 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, "try:")
         self.addLevel(1)
 
@@ -1351,6 +1376,11 @@ class WritePythonCode(WriteCode):
         # --- 2. HOT LOOP ---
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
 
         # --- 2A. WARM-UP PHASE (inside loop) ---
         self.write(0, f"# Use all variables to warm up the JIT with their initial types")
@@ -1414,6 +1444,11 @@ class WritePythonCode(WriteCode):
         self.write(0, "total = 0")
         self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         # Use the first, middle, and last variables to ensure they aren't optimized away.
         self.write(0, f"total += var_0 + var_{num_vars // 2} + var_{num_vars - 1}")
         self.restoreLevel(self.base_level - 1)  # Exit for loop
@@ -1451,6 +1486,11 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# Execute the top-level function of the chain in a hot loop.")
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, "try:")
         self.addLevel(1)
         self.write(0, f"{top_level_func}()")
@@ -1529,6 +1569,11 @@ class WritePythonCode(WriteCode):
         # 3. Add a hot loop.
         self.write(0, f"for {loop_var} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if {loop_var} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
 
         # 4. Inside the loop, generate JIT-friendly patterns that use the variables.
         self.write(0, "# Use variables in JIT-friendly patterns.")
@@ -1648,6 +1693,11 @@ class WritePythonCode(WriteCode):
         self.write(0, "# Execute the top-level function of the complex chain in a hot loop.")
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, "try:")
         self.addLevel(1)
         self.write(0, f"{top_level_func}(i_{prefix})")
@@ -1693,6 +1743,11 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."')
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, f"{top_level_func}(i_{prefix})")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
@@ -1743,6 +1798,11 @@ class WritePythonCode(WriteCode):
         self.addLevel(1)
         self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, "try: callable_arg(i)")  # Call the argument
         self.write(0, "except: pass")
         self.restoreLevel(self.base_level - 2)  # Exit loop and def
@@ -1778,7 +1838,15 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         # Warm up the wrapper so the JIT compiles it and likely inlines the fuzzed function call.
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}): {wrapper_func_name}()")
+        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        self.write(0, f"{wrapper_func_name}()")
+        self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
         # --- Phase 2: Invalidate the Fuzzed Function ---
@@ -1837,6 +1905,11 @@ class WritePythonCode(WriteCode):
         loop_iterations = self.options.jit_loop_iterations // len(callables_to_test)
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
 
         # 3. Inside the loop, call each of the different callables.
         self.write(0, "# Call different types of callables to stress the JIT's call-site caches.")
@@ -1883,6 +1956,11 @@ class WritePythonCode(WriteCode):
         # 3. In a hot loop, polymorphically access the 'payload' attribute.
         self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, f"obj = shapes[i_{prefix} % len(shapes)]")
         self.write(0, "try:")
         self.addLevel(1)

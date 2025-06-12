@@ -226,6 +226,18 @@ class Fuzzer(Application):
             type="int",
             default=1,
         )
+        jit_options.add_option(
+            "--jit-aggressive-gc",
+            help="Interleave frequent gc.collect() calls inside JIT hot loops (default: False)",
+            action="store_true",
+            default=False,
+        )
+        jit_options.add_option(
+            "--jit-gc-frequency",
+            help="Run gc.collect() every N iterations in a JIT hot loop (default: 100)",
+            type="int",
+            default=100,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
