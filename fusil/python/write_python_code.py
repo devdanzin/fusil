@@ -439,6 +439,7 @@ class WritePythonCode(WriteCode):
                     mixed_scenario_generators = [
                         self._generate_mixed_many_vars_scenario,
                         self._generate_del_invalidation_scenario,
+                        self._generate_mixed_deep_calls_scenario,
                     ]
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix)
@@ -1570,6 +1571,65 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished __del__ Invalidation Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_mixed_deep_calls_scenario(self, prefix: str) -> None:
+        """
+        MIXED SCENARIO 3: Combines "Deep Calls" with JIT-friendly patterns.
+        Each function in the deep call chain performs complex work, stressing
+        the JIT's ability to optimize across many active stack frames.
+        """
+        self.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Mixed Deep Calls" Hostile Scenario <<<"""'
+        )
+
+        depth = 15  # A moderately deep chain is sufficient when each frame does work.
+        loop_iterations = self.options.jit_loop_iterations // 100  # A smaller loop is fine for this test
+
+        self.write(0, f"# Define a deep chain of {depth} functions, each with internal JIT-friendly patterns.")
+
+        # 1. Define the base case (the final function in the chain).
+        #    It performs some work instead of just returning a value.
+        self.write(0, f"def f_0_{prefix}(p):")
+        self.addLevel(1)
+        self.write(0, "x = len('base_case') + p")
+        self.write(0, "y = x % 5")
+        self.write(0, "return x - y")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Generate the intermediate functions in the chain.
+        for i in range(1, depth):
+            self.write(0, f"def f_{i}_{prefix}(p):")
+            self.addLevel(1)
+            # Each function performs its own JIT-friendly work.
+            self.write(0, f"local_val = p * {i}")
+            self.write(0, "s = 'abcdef'")
+            self.write(0, f"if local_val > 10 and (s[{i} % len(s)]):")
+            self.write(1, f"local_val += f_{i - 1}_{prefix}(p)")
+            self.write(0, "return local_val")
+            self.restoreLevel(self.base_level - 1)
+            self.emptyLine()
+
+        top_level_func = f"f_{depth - 1}_{prefix}"
+
+        # 3. Call the top-level function inside a hot loop to trigger the JIT.
+        self.write(0, "# Execute the top-level function of the complex chain in a hot loop.")
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"{top_level_func}(i_{prefix})")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except RecursionError:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected RecursionError."')
+        self.write(0, "break")
+        self.restoreLevel(self.base_level - 2)  # Exit except and for loop
+
+        self.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""'
         )
         self.emptyLine()
 
