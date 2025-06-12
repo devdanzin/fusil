@@ -238,6 +238,12 @@ class Fuzzer(Application):
             type="int",
             default=100,
         )
+        jit_options.add_option(
+            "--jit-hostile-side-exits",
+            help="Enable scenarios that force frequent JIT deoptimization (default: False)",
+            action="store_true",
+            default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

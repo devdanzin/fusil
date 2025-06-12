@@ -452,6 +452,9 @@ class WritePythonCode(WriteCode):
                         self._generate_type_version_scenario,
                         self._generate_concurrency_scenario,
                     ]
+                    if self.options.jit_hostile_side_exits:
+                        mixed_scenario_generators.append(self._generate_side_exit_scenario)
+
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
                     continue
@@ -2034,6 +2037,58 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished JIT Concurrency Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_side_exit_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: object) -> None:
+        """
+        ADVANCED SCENARIO: Stresses the JIT's deoptimization mechanism by
+        creating a hot loop with a guard that fails unpredictably, forcing
+        frequent "side exits" from the optimized trace.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Frequent Side Exit Scenario <<<"'
+        )
+
+        target_var = f"side_exit_var_{prefix}"
+
+        # 1. Initialize a variable with a known, stable type.
+        self.write(0, f"{target_var} = 0  # Start with a known type (int)")
+        self.emptyLine()
+
+        # 2. Start a hot loop.
+        self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
+        self.addLevel(1)
+
+        # 3. Create an unpredictable guard condition. The JIT will optimize
+        #    the 'else' path but must correctly handle when this guard fails.
+        self.write(0, "# This guard is designed to fail unpredictably (10% chance).")
+        self.write(0, "if random() < 0.1:")
+        self.addLevel(1)
+        # Inside the failing guard, change the variable's type.
+        self.write_print_to_stderr(0, f'"[{prefix}] Side exit triggered! Changing variable type."')
+        self.write(0, f"{target_var} = 'corrupted-by-side-exit'")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 4. Perform an operation on the variable. This will be JIT-optimized
+        #    assuming the variable is an integer.
+        self.write(0, "# This operation is optimized assuming the variable is an int.")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"_ = {target_var} + 1")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except TypeError:")
+        self.addLevel(1)
+        # 5. CRITICAL: After a side exit causes a TypeError, we must reset
+        #    the variable's type so the loop can become hot again.
+        self.write(0, f"# Reset the variable's type to allow re-optimization.")
+        self.write(0, f"{target_var} = i_{prefix}")
+        self.restoreLevel(self.base_level - 1)
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Frequent Side Exit Scenario >>>"'
         )
         self.emptyLine()
 
