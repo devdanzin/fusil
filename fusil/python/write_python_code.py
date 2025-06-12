@@ -440,6 +440,7 @@ class WritePythonCode(WriteCode):
                         self._generate_mixed_many_vars_scenario,
                         self._generate_del_invalidation_scenario,
                         self._generate_mixed_deep_calls_scenario,
+                        self._generate_deep_call_invalidation_scenario,
                     ]
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix)
@@ -1630,6 +1631,77 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""'
+        )
+        self.emptyLine()
+
+    def _generate_deep_call_invalidation_scenario(self, prefix: str) -> None:
+        """
+        MIXED SCENARIO 4: Combines "Deep Calls" with an invalidation attack.
+        A deep function call chain is JIT-compiled, then a function in the
+        middle of the chain is redefined, testing the JIT's ability to
+        invalidate the entire dependent trace.
+        """
+        self.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Deep Call Invalidation" Hostile Scenario <<<"""'
+        )
+
+        depth = 20  # A deep chain to create a long dependency graph.
+        loop_iterations = self.options.jit_loop_iterations // 100
+
+        # --- Phase 1: Define and Warm-up the Call Chain ---
+        self.write(0, f"# Phase 1: Define a deep chain of {depth} functions.")
+
+        # Define the base case.
+        self.write(0, f"def f_0_{prefix}(p): return p + 1")
+
+        # Define the recursive chain.
+        for i in range(1, depth):
+            self.write(0, f"def f_{i}_{prefix}(p): return f_{i - 1}_{prefix}(p) + 1")
+
+        top_level_func = f"f_{depth - 1}_{prefix}"
+        self.emptyLine()
+
+        self.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."')
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+        self.write(0, f"{top_level_func}(i_{prefix})")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # --- Phase 2: Invalidate a Middle Link ---
+        # We will redefine a function right in the middle of the chain.
+        invalidation_index = depth // 2
+        invalidation_func_name = f"f_{invalidation_index}_{prefix}"
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Phase 2: Invalidating the middle of the call chain ({invalidation_func_name})..."'
+        )
+        self.write(0, "# Redefine the middle function to return a completely different type.")
+        self.write(0, f"def {invalidation_func_name}(p):")
+        self.addLevel(1)
+        self.write(0, "return '<< JIT-INVALIDATED >>'")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "collect()")
+        self.emptyLine()
+
+        # --- Phase 3: Re-execute the Chain ---
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] Phase 3: Re-executing the chain to check for crashes..."'
+        )
+        self.write(0, "# The function now called by f_{invalidation_index+1} has changed.")
+        self.write(0, "# This should raise a TypeError if the JIT de-optimizes correctly.")
+        self.write(0, "# A segfault indicates a successful fuzzing attack.")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"{top_level_func}(1)")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except TypeError:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected TypeError after invalidation."')
+        self.restoreLevel(self.base_level - 1)
+
+        self.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Deep Call Invalidation" Scenario >>>"""'
         )
         self.emptyLine()
 
