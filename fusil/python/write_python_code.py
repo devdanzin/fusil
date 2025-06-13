@@ -482,7 +482,7 @@ class WritePythonCode(WriteCode):
                     # JIT Mode Logic
                 level = self.options.jit_fuzz_level
 
-                if self.options.jit_correctness_testing:
+                if self.options.jit_correctness_testing and random() < self.options.jit_hostile_prob / 5:
                     # --- Correctness Testing Path ---
                     correctness_generators = [
                         self._generate_jit_pattern_block_with_check,
