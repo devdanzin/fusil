@@ -404,14 +404,15 @@ class WritePythonCode(WriteCode):
 
         self.write(0, "SENTINEL_VALUE = object()")
         self.emptyLine()
-        self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
+        self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments, verbose=True):")
         current_level = self.addLevel(1)
         self.write(
             0,
             f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
         )
         self.write(0, 'message = f"[{prefix}] {func_display_name}"')
-        self.write_print_to_stderr(0, "message")
+        self.write(0, 'if verbose:')
+        self.write_print_to_stderr(1, "message")
         self.write(0, "result = SENTINEL_VALUE")
         self.write(0, "try:")
         self.addLevel(1)
@@ -426,14 +427,16 @@ class WritePythonCode(WriteCode):
         self.write(0, "except Exception as e_repr:")
         self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
         self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
+        self.write(0, 'if verbose:')
         self.write_print_to_stderr(
-            0,
+            1,
             'f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}"',
         )
         self.write(0, "result = SENTINEL_VALUE")
         self.restoreLevel(current_level + 1)
 
-        self.write_print_to_stderr(0, 'f"[{prefix}] -explicit garbage collection-"')
+        self.write(0, 'if verbose:')
+        self.write_print_to_stderr(1, 'f"[{prefix}] -explicit garbage collection-"')
         self.write(0, "collect()")
 
         if self.enable_threads:
@@ -446,10 +449,10 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(current_level)
         self.emptyLine()
 
-        self.write(0, "def callFunc(prefix, func_name_str, *arguments):")
+        self.write(0, "def callFunc(prefix, func_name_str, *arguments, verbose=True):")
         self.write(
             1,
-            f"return callMethod(prefix, {self.module_name}, func_name_str, *arguments)",
+            f"return callMethod(prefix, {self.module_name}, func_name_str, *arguments, verbose=verbose)",
         )
         self.emptyLine()
 
@@ -870,7 +873,7 @@ class WritePythonCode(WriteCode):
         """Generates and writes argument lines for a function/method call."""
         for i in range(num_args):
             arg_lines = self.arg_generator.create_complex_argument()
-            last_char = "," if i < num_args - 1 else ""
+            last_char = ","
 
             if not arg_lines:
                 self.write(base_indent_level, f"None{last_char} # Empty arg generated")
@@ -897,6 +900,7 @@ class WritePythonCode(WriteCode):
         is_method_call: bool,
         generation_depth: int,
         in_jit_loop: bool = False,
+        verbose: bool = True,
     ) -> None:
         """Generates code for a single function or method call, including async/thread wrappers."""
 
@@ -931,7 +935,7 @@ class WritePythonCode(WriteCode):
 
         self.write(0, f"res_{prefix} = {call_prefix},")
         self._write_arguments_for_call_lines(num_args, 1)
-        self.write(0, ")")
+        self.write(0, f"verbose={verbose})")
         self.emptyLine()
         if self.options.jit_fuzz and is_method_call and in_jit_loop:
             self.write(0, f"if res_{prefix} is SENTINEL_VALUE:")

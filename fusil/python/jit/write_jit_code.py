@@ -70,6 +70,7 @@ class WriteJITCode:
             self._generate_deep_calls_scenario_with_check,
             self._generate_evil_deep_calls_scenario_with_check,
             self._generate_inplace_add_attack_scenario_with_check,
+            self._generate_global_invalidation_scenario_with_check,
         ]
         chosen = choice(generators)
         chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -268,7 +269,7 @@ class WriteJITCode:
         # Inside the loop, call the same function with different typed args
         for gen_func in gens_to_use:
             arg_str = " ".join(gen_func())
-            self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str})")
+            self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str}, verbose=False)")
 
         self.restoreLevel(self.parent.base_level - 1)  # for
         if self.options.jit_raise_exceptions:
@@ -336,6 +337,7 @@ class WriteJITCode:
             is_method_call=True,
             generation_depth=0,
             in_jit_loop=True,
+            verbose=False,
         )
 
         self.restoreLevel(self.parent.base_level - 1)  # Exit for
@@ -2183,3 +2185,82 @@ class WriteJITCode:
         # 5. Return the final state of the string for comparison.
         self.write(0, f"return {target_var}")
         self.restoreLevel(self.parent.base_level - 1)
+
+    def _generate_global_invalidation_logic_body(self, prefix: str) -> None:
+        """
+        Generates the body of a function that performs the global dictionary
+        invalidation attack. Returns the accumulated result for checking.
+        """
+        global_func_name = f"my_global_func_{prefix}"
+        loop_iterations = self.options.jit_loop_iterations // 10
+
+        # 1. Define a simple global function that will be our JIT target.
+        self.write(1, f"# Define a global function to be targeted.")
+        self.write(1, f"def {global_func_name}(): return 1")
+        self.emptyLine()
+
+        # 2. Phase 1 (Warm-up): Run a hot loop calling the global function.
+        #    This will cause the JIT to specialize the LOAD_GLOBAL and cache the dk_version.
+        self.write(1, f"accumulator = 0")
+        self.write(1, f"for _ in range({loop_iterations}):")
+        self.addLevel(1)
+        self.write(1, f"accumulator += {global_func_name}()")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 3. Phase 2 (Invalidate): Modify the globals() dictionary.
+        #    This action changes the dk_version, which should trigger the guard.
+        self.write(1, "# Invalidate the dictionary key version by adding a new global.")
+        self.write(1, f"globals()['new_global_{prefix}'] = 123")
+        self.emptyLine()
+
+        # 4. Phase 3 (Re-execute): Call the function one more time.
+        #    This call will hit the DEOPT_IF guard.
+        self.write(1, f"accumulator += {global_func_name}()")
+        self.emptyLine()
+
+        # 5. Return the final accumulated value for correctness checking.
+        self.write(1, "return accumulator")
+
+    def _generate_global_invalidation_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                          fuzzed_func_obj: Any) -> None:
+        """
+        GREY-BOX CORRECTNESS SCENARIO 2: Attacks the dk_version guard
+        for LOAD_GLOBAL by invalidating the globals() dictionary.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Global Invalidation) <<<"'
+        )
+
+        jit_func_name = f"jit_target_global_{prefix}"
+        control_func_name = f"control_global_{prefix}"
+
+        # 1. Define the JIT Target function.
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        self._generate_global_invalidation_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function.
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        self._generate_global_invalidation_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"jit_result = {jit_func_name}()")
+        self.write(0, f"control_result = no_jit_harness({control_func_name})")
+
+        self.write(0,
+                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (Global Invalidation)! JIT: {{jit_result}}, Control: {{control_result}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (Global Invalidation) Passed >>>"'
+        )
+        self.emptyLine()
+
+
+
