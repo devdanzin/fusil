@@ -69,6 +69,7 @@ class WriteJITCode:
             self._generate_deleter_scenario_with_check,
             self._generate_deep_calls_scenario_with_check,
             self._generate_evil_deep_calls_scenario_with_check,
+            self._generate_inplace_add_attack_scenario_with_check,
         ]
         chosen = choice(generators)
         chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -430,6 +431,7 @@ class WriteJITCode:
             self.restoreLevel(self.parent.base_level - 1)  # if
             self.write(0, "else: raise")
             self.restoreLevel(self.parent.base_level - 1)  # except
+        self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
     def _generate_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
@@ -2106,3 +2108,78 @@ class WriteJITCode:
         )
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
+
+    def _generate_inplace_add_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                         fuzzed_func_obj: Any) -> None:
+        """
+        GREY-BOX CORRECTNESS SCENARIO 1: Attacks the guard on the
+        _BINARY_OP_INPLACE_ADD_UNICODE specialization.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (In-Place Add Attack) <<<"'
+        )
+
+        jit_func_name = f"jit_target_inplace_{prefix}"
+        control_func_name = f"control_inplace_{prefix}"
+
+        # 1. Define the JIT Target function.
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        self._generate_inplace_add_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function.
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        self._generate_inplace_add_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"jit_result = {jit_func_name}()")
+        self.write(0, f"control_result = no_jit_harness({control_func_name})")
+
+        self.write(0,
+                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (In-Place Add)! JIT: {{jit_result}}, Control: {{control_result}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (In-Place Add Attack) Passed >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_inplace_add_logic_body(self, prefix: str) -> None:
+        """
+        Generates the body of a function that performs the in-place add attack.
+        """
+        target_var = f"s_{prefix}"
+        loop_iterations = self.options.jit_loop_iterations // 10
+        trigger_iteration = loop_iterations - 2
+
+        # 1. Initialize the target string variable and the FrameModifier payload.
+        self.addLevel(1)
+        self.write(0, f"{target_var} = 'start_'")
+        self.write(0, f"fm_payload = {target_var} + 'a' # Create a new, different string object")
+        fm_vars = self._define_frame_modifier_instances(
+            prefix, {target_var: "fm_payload"}  # Pass the variable name containing the payload
+        )
+        self.emptyLine()
+
+        # 2. Hot loop to warm up the s += operation.
+        self.write(0, f"for i in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 3. On the penultimate iteration, trigger the __del__ to corrupt 's'.
+        self._generate_del_trigger('i', loop_iterations, fm_vars)
+
+        # 4. Perform the in-place add.
+        # Before the trigger, this is normal. After, the DEOPT_IF guard should fail.
+        self.write(0, f"try: {target_var} += str(i)")
+        self.write(0, "except Exception: pass")
+
+        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
+
+        # 5. Return the final state of the string for comparison.
+        self.write(0, f"return {target_var}")
+        self.restoreLevel(self.parent.base_level - 1)
