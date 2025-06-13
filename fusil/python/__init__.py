@@ -244,6 +244,18 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        jit_options.add_option(
+            "--jit-raise-exceptions",
+            help="Deliberately raise exceptions inside JIT-hot loops (default: False)",
+            action="store_true",
+            default=False,
+        )
+        jit_options.add_option(
+            "--jit-exception-prob",
+            help="The probability (0.0 to 1.0) of raising an exception per loop (default: 0.001)",
+            type="float",
+            default=0.001,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

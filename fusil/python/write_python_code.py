@@ -1097,6 +1097,9 @@ class WritePythonCode(WriteCode):
 
         # 2. Create the hot loop
         loop_iterations = self.options.jit_loop_iterations
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
@@ -1104,7 +1107,13 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
-
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
         # 3. Weave in the JIT-friendly patterns inside the loop
         # Math, Truth Tests, Subscripts, and Calls
         self.write(0, f"if i_{prefix} > var_int_b:")
@@ -1120,6 +1129,17 @@ class WritePythonCode(WriteCode):
 
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
     def _generate_polymorphic_call_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """Generates a hot loop with calls to one function using args of different types."""
@@ -1163,12 +1183,22 @@ class WritePythonCode(WriteCode):
         loop_iterations = self.options.jit_loop_iterations // num_types
         self.write(0, "if fuzzed_func_is_viable:")
         self.addLevel(1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for _ in range({loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
         self.write(0, f"'INDENTED BLOCK'")
 
@@ -1179,6 +1209,17 @@ class WritePythonCode(WriteCode):
             self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str})")
 
         self.restoreLevel(self.base_level - 1)  # for
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
         self.restoreLevel(self.base_level - 1)  # if
         self.emptyLine()
 
@@ -1205,12 +1246,22 @@ class WritePythonCode(WriteCode):
         # Generate the hot loop
         self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
         self.addLevel(1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
 
         # Generate the repeated call inside the loop
@@ -1225,7 +1276,19 @@ class WritePythonCode(WriteCode):
             in_jit_loop=True,
         )
 
-        self.restoreLevel(self.base_level - 2)  # Exit loop and if
+        self.restoreLevel(self.base_level - 1)  # Exit for
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
+        self.restoreLevel(self.base_level - 1)  # Exit if
 
         # Store context for the next phases
         target_info = {
@@ -1265,12 +1328,22 @@ class WritePythonCode(WriteCode):
 
         self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
         self.addLevel(1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
         self.write(0, "try:")
         self.addLevel(1)
@@ -1286,8 +1359,16 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0, f'f"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
         self.write(0, "break")
 
-
-        self.restoreLevel(self.base_level - 3)  # Exit try, loop, and if
+        self.restoreLevel(self.base_level - 3) # Exit try, loop, if
+        if self.options.jit_raise_exceptions:
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
         self.emptyLine()
 
     def _generate_invalidation_scenario(self, prefix: str) -> None:
@@ -1377,12 +1458,22 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         # --- 2. HOT LOOP ---
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
 
         # --- 2A. WARM-UP PHASE (inside loop) ---
@@ -1421,6 +1512,17 @@ class WritePythonCode(WriteCode):
         self.write(0, "except TypeError as e:")
         self.write(1, "pass # This TypeError is expected if the side effect worked")
         self.restoreLevel(self.base_level - 1)  # Exit for loop
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Advanced __del__ Side Effect Scenario >>>"')
         self.emptyLine()
@@ -1445,12 +1547,22 @@ class WritePythonCode(WriteCode):
         #    a candidate for JIT compilation.
         self.write(0, f"# Hot loop to trigger JIT compilation of this large function.")
         self.write(0, "total = 0")
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if i % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
         # Use the first, middle, and last variables to ensure they aren't optimized away.
         self.write(0, f"total += var_0 + var_{num_vars // 2} + var_{num_vars - 1}")
@@ -1464,6 +1576,17 @@ class WritePythonCode(WriteCode):
         self.write(0, f"{func_name}()")
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Many Vars" Scenario >>>"""')
         self.emptyLine()
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
     def _generate_deep_calls_scenario(self, prefix: str) -> None:
         """
@@ -1486,6 +1609,9 @@ class WritePythonCode(WriteCode):
 
         # 3. Call the top-level function inside a hot loop to trigger the JIT.
         #    Wrap it in a try...except RecursionError since this is a possible outcome.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"# Execute the top-level function of the chain in a hot loop.")
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
@@ -1494,6 +1620,14 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
+
         self.write(0, "try:")
         self.addLevel(1)
         self.write(0, f"{top_level_func}()")
@@ -1504,6 +1638,17 @@ class WritePythonCode(WriteCode):
         self.write(0, "break # Exit loop if recursion limit is hit")
         self.restoreLevel(self.base_level - 2)  # Exit except and for loop
 
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Deep Calls" Scenario >>>"""')
         self.emptyLine()
 
@@ -1570,12 +1715,22 @@ class WritePythonCode(WriteCode):
         )
 
         # 3. Add a hot loop.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for {loop_var} in range({loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if {loop_var} % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
 
         # 4. Inside the loop, generate JIT-friendly patterns that use the variables.
@@ -1592,12 +1747,25 @@ class WritePythonCode(WriteCode):
         self._generate_del_trigger(loop_var, loop_iterations, fm_vars)
 
         self.restoreLevel(self.base_level - 1)  # Exit for loop
-        self.restoreLevel(self.base_level - 1)  # Exit def
         self.emptyLine()
 
         # 6. Call the master function we just created.
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
+        self.restoreLevel(self.base_level - 1)  # Exit def
+
         self.write(0, f"# Execute the composed hostile function.")
         self.write(0, f"{func_name}()")
+
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""')
         self.emptyLine()
 
@@ -1693,6 +1861,9 @@ class WritePythonCode(WriteCode):
         top_level_func = f"f_{depth - 1}_{prefix}"
 
         # 3. Call the top-level function inside a hot loop to trigger the JIT.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, "# Execute the top-level function of the complex chain in a hot loop.")
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
@@ -1701,6 +1872,14 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
+
         self.write(0, "try:")
         self.addLevel(1)
         self.write(0, f"{top_level_func}(i_{prefix})")
@@ -1710,6 +1889,17 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(0, f'"[{prefix}] Caught expected RecursionError."')
         self.write(0, "break")
         self.restoreLevel(self.base_level - 2)  # Exit except and for loop
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         self.write_print_to_stderr(
             0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""'
@@ -1743,6 +1933,9 @@ class WritePythonCode(WriteCode):
         top_level_func = f"f_{depth - 1}_{prefix}"
         self.emptyLine()
 
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."')
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
@@ -1751,9 +1944,27 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, f"{top_level_func}(i_{prefix})")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         # --- Phase 2: Invalidate a Middle Link ---
         # We will redefine a function right in the middle of the chain.
@@ -1799,6 +2010,9 @@ class WritePythonCode(WriteCode):
         # 1. Define a harness function that takes a callable.
         self.write(0, f"def {harness_func_name}(callable_arg):")
         self.addLevel(1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
@@ -1806,9 +2020,26 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
         self.write(0, "try: callable_arg(i)")  # Call the argument
-        self.write(0, "except: pass")
         self.restoreLevel(self.base_level - 2)  # Exit loop and def
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         # 2. Call the harness, passing the fuzzed function to it.
         self.write(0, f"# Pass the real fuzzed function to the JIT-hot harness.")
@@ -1841,6 +2072,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         # Warm up the wrapper so the JIT compiles it and likely inlines the fuzzed function call.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
@@ -1848,9 +2082,28 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
+
         self.write(0, f"{wrapper_func_name}()")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         # --- Phase 2: Invalidate the Fuzzed Function ---
         self.write_print_to_stderr(
@@ -1906,12 +2159,22 @@ class WritePythonCode(WriteCode):
         # 2. Create the hot loop.
         # Divide iterations among the callables.
         loop_iterations = self.options.jit_loop_iterations // len(callables_to_test)
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i_{prefix} in range({loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
             self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
             self.addLevel(1)
             self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.base_level - 1)
 
         # 3. Inside the loop, call each of the different callables.
@@ -1925,6 +2188,18 @@ class WritePythonCode(WriteCode):
             self.write(0, "except: pass")
 
         self.restoreLevel(self.base_level - 1)  # Exit for loop
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
+
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Polymorphic Callable Set Scenario >>>"'
         )
@@ -1957,6 +2232,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         # 3. In a hot loop, polymorphically access the 'payload' attribute.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
         if self.options.jit_aggressive_gc:
@@ -1964,6 +2242,14 @@ class WritePythonCode(WriteCode):
             self.addLevel(1)
             self.write(0, "collect()")
             self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
+
         self.write(0, f"obj = shapes[i_{prefix} % len(shapes)]")
         self.write(0, "try:")
         self.addLevel(1)
@@ -1975,6 +2261,17 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)
         self.write(0, "except Exception: pass")
         self.restoreLevel(self.base_level - 1)  # Exit for loop
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Type Version Fuzzing Scenario >>>"'
@@ -2057,8 +2354,23 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         # 2. Start a hot loop.
+        if self.options.jit_raise_exceptions:
+            self.write(0, "try:")
+            self.addLevel(1)
         self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
         self.addLevel(1)
+        if self.options.jit_aggressive_gc:
+            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(0, "collect()")
+            self.restoreLevel(self.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            self.write(0, f"# Check if we should raise an exception on this iteration.")
+            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.base_level - 1)
 
         # 3. Create an unpredictable guard condition. The JIT will optimize
         #    the 'else' path but must correctly handle when this guard fails.
@@ -2085,8 +2397,19 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# Reset the variable's type to allow re-optimization.")
         self.write(0, f"{target_var} = i_{prefix}")
         self.restoreLevel(self.base_level - 1)
-
         self.restoreLevel(self.base_level - 1)  # Exit for loop
+        if self.options.jit_raise_exceptions:
+            self.restoreLevel(self.base_level - 1)  # try
+            self.write(0, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.base_level - 1)  # if
+            self.write(0, "else: raise")
+            self.restoreLevel(self.base_level - 1)  # except
+            self.emptyLine()
+
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Frequent Side Exit Scenario >>>"'
         )
