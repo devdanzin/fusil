@@ -454,6 +454,8 @@ class WritePythonCode(WriteCode):
                     ]
                     if self.options.jit_hostile_side_exits:
                         mixed_scenario_generators.append(self._generate_side_exit_scenario)
+                    if self.options.jit_hostile_isinstance:
+                        mixed_scenario_generators.append(self._generate_isinstance_attack_scenario)
 
                     chosen_generator = choice(mixed_scenario_generators)
                     chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -2412,6 +2414,119 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Frequent Side Exit Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_isinstance_attack_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: object) -> None:
+        """
+        ADVANCED SCENARIO (UPGRADED): Attacks the JIT's `isinstance` elimination
+        by using a class with a deep, randomized inheritance hierarchy and a
+        polymorphic target object.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Upgraded `isinstance` JIT Attack Scenario <<<"'
+        )
+        loop_iterations = self.options.jit_loop_iterations
+        trigger_iteration = loop_iterations // 2
+        inheritance_depth = randint(100, 500)  # Randomize the depth
+
+        # 1. SETUP - Define all the components for the attack.
+        self.write(0, "# 1. Define the components for the attack.")
+        self.write(0, "from abc import ABCMeta")
+        self.emptyLine()
+
+        # Define the metaclass that we will later modify.
+        meta_name = f"EditableMeta_{prefix}"
+        self.write(0, f"class {meta_name}(ABCMeta):")
+        self.write(1, "instance_counter = 0")
+        self.emptyLine()
+
+        # --- UPGRADE: Deep Inheritance Tree ---
+        self.write(0, f"# Create a deep inheritance tree of depth {inheritance_depth}.")
+        self.write(0, f"class Base_{prefix}(metaclass={meta_name}): pass")
+        self.write(0, f"last_class_{prefix} = Base_{prefix}")
+        self.write(0, f"for _ in range({inheritance_depth}):")
+        self.addLevel(1)
+        # We create a uniquely named class each time to avoid name clashes.
+        self.write(0, f"class ClassStepDeeper(last_class_{prefix}): pass")
+        self.write(0, f"last_class_{prefix} = ClassStepDeeper")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # The final class inherits from the end of our long chain.
+        class_name = f"EditableClass_{prefix}"
+        self.write(0, f"class {class_name}(last_class_{prefix}): pass")
+        self.emptyLine()
+
+        # --- UPGRADE: Injected Fuzzed Function Call ---
+        # Define the __instancecheck__ method that we will inject later.
+        # It now calls a real fuzzed function.
+        check_func_name = f"new__instancecheck_{prefix}"
+        self.write(0, f"def {check_func_name}(self, other):")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, '"  [+] Patched __instancecheck__ called!"')
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f"'    -> Calling fuzzed function: {fuzzed_func_name}'")
+        # Call the real fuzzed function!
+        self.write(0, f"{self.module_name}.{fuzzed_func_name}()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except: pass")
+        self.write(0, f"return True # Always return True after being patched")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # Define the Deletable class with the __del__ payload.
+        deletable_name = f"Deletable_{prefix}"
+        # ... (The Deletable class definition remains the same as before) ...
+        self.write(0, f"class {deletable_name}:")
+        self.addLevel(1)
+        self.write(0, "def __del__(self):")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, '"  [+] __del__ triggered! Patching __instancecheck__ onto metaclass."')
+        self.write(0, f"{meta_name}.__instancecheck__ = {check_func_name}")
+        self.restoreLevel(self.base_level - 2)
+        self.emptyLine()
+
+        # Arm the trigger.
+        self.write(0, f"trigger_obj = {deletable_name}()")
+        self.emptyLine()
+
+        # --- UPGRADE: Polymorphic Target Object ---
+        self.write(0, "# Create a list of diverse objects to check against.")
+        self.write(0, f"fuzzed_obj_instance = {self.module_name}.{fuzzed_func_name}")
+        self.write(0, f"objects_to_check = [1, 'a_string', 3.14, fuzzed_obj_instance]")
+        self.emptyLine()
+
+        # 2. HOT LOOP - The Bait, Trigger, and Trap
+        self.write(0, "# 2. Run the hot loop to bait, trigger, and trap the JIT.")
+        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # Pick a different object to check on each iteration.
+        self.write(0, f"target_obj = objects_to_check[i_{prefix} % len(objects_to_check)]")
+
+        # The Bait: This check now has a polymorphic target.
+        self.write(0, f"is_instance_result = isinstance(target_obj, {class_name})")
+
+        # The Trigger
+        self.write(0, f"if i_{prefix} == {trigger_iteration}:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Deleting trigger object..."')
+        self.write(0, f"del trigger_obj")
+        self.write(0, "collect()")
+        self.restoreLevel(self.base_level - 1)
+
+        # The Trap (logging)
+        self.write(0, f"if i_{prefix} % 100 == 0:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f'f"[{prefix}][Iter {{ i_{prefix} }} ] `isinstance({{target_obj!r}}, {class_name})` is now: {{is_instance_result}}"')
+        self.restoreLevel(self.base_level - 1)
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Upgraded `isinstance` JIT Attack Scenario >>>"'
         )
         self.emptyLine()
 
