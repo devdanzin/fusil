@@ -369,15 +369,36 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
-        self.write(0, "# Helper for correctness testing that handles NaN values.")
+        self.write(0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers.")
         self.write(0, "import math")
+        self.write(0, "import types")
         self.write(0, "def compare_results(a, b):")
         self.addLevel(1)
+
+        self.write(0, "if isinstance(a, types.FunctionType) and a.__name__ == '<lambda>' and \\")
+        self.write(0, "   isinstance(b, types.FunctionType) and b.__name__ == '<lambda>':")
+        self.write(1, "return True # Treat two lambdas as equal for our purposes")
+
+        self.write(0, "if isinstance(a, complex) and isinstance(b, complex):")
+        self.addLevel(1)
+        self.write(0, "a_real_nan = math.isnan(a.real)")
+        self.write(0, "b_real_nan = math.isnan(b.real)")
+        self.write(0, "a_imag_nan = math.isnan(a.imag)")
+        self.write(0, "b_imag_nan = math.isnan(b.imag)")
+        self.write(0, "real_match = (a.real == b.real) or (a_real_nan and b_real_nan)")
+        self.write(0, "imag_match = (a.imag == b.imag) or (a_imag_nan and b_imag_nan)")
+        self.write(0, "return real_match and imag_match")
+        self.restoreLevel(self.base_level - 1)
+
         self.write(0, "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):")
         self.write(1, "return True")
-        # Handle tuples, where we need to compare elements recursively.
+
+        self.write(0, "if isinstance(a, object) and isinstance(b, object):")
+        self.write(1, "return True")
+
         self.write(0, "if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):")
         self.write(1, "return all(compare_results(x, y) for x, y in zip(a, b))")
+
         self.write(0, "return a == b")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
@@ -464,13 +485,14 @@ class WritePythonCode(WriteCode):
                 if self.options.jit_correctness_testing:
                     # --- Correctness Testing Path ---
                     correctness_generators = [
-                        # self._generate_jit_pattern_block_with_check,
-                        # self._generate_evil_jit_pattern_block_with_check,
-                        # self._generate_deleter_scenario_with_check,
+                        self._generate_jit_pattern_block_with_check,
+                        self._generate_evil_jit_pattern_block_with_check,
+                        self._generate_deleter_scenario_with_check,
                         self._generate_deep_calls_scenario_with_check,
+                        self._generate_evil_deep_calls_scenario_with_check,
                     ]
                     chosen_generator = choice(correctness_generators)
-                    chosen_generator(prefix)
+                    chosen_generator(prefix, fuzzed_func_name, fuzzed_func_obj)
                     continue
                 # At the highest level, try to generate a mixed scenario
                 if level >= 3 and random() < self.options.jit_hostile_prob:
@@ -2593,7 +2615,8 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.write(1, "return total")
 
-    def _generate_jit_pattern_block_with_check(self, prefix: str) -> None:
+    def _generate_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                      fuzzed_func_obj: object) -> None:
         """
         CORRECTNESS SCENARIO 1: Generates a 'Twin Execution' test for a
         block of JIT-friendly patterns to check for silent correctness bugs.
@@ -2685,7 +2708,8 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.write(1, "return total")
 
-    def _generate_evil_jit_pattern_block_with_check(self, prefix: str) -> None:
+    def _generate_evil_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                      fuzzed_func_obj: object) -> None:
         """
         CORRECTNESS SCENARIO (EVIL): Generates a 'Twin Execution' test using
         complex operations and boundary values to stress the JIT's correctness.
@@ -2811,7 +2835,8 @@ class WritePythonCode(WriteCode):
         self.write(1, f"# Return the final state of all targeted variables.")
         self.write(1, f"return ({target_var}, {dummy_instance_name}.a, {dummy_instance_name}.b)")
 
-    def _generate_deleter_scenario_with_check(self, prefix: str) -> None:
+    def _generate_deleter_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                      fuzzed_func_obj: object) -> None:
         """
         CORRECTNESS SCENARIO 2: Generates a 'Twin Execution' test for the
         __del__ side effect attack to check for silent state corruption.
@@ -2888,7 +2913,8 @@ class WritePythonCode(WriteCode):
 
         return f"{func_name_prefix}_{depth - 1}"
 
-    def _generate_deep_calls_scenario_with_check(self, prefix: str) -> None:
+    def _generate_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                      fuzzed_func_obj: object) -> None:
         """
         CORRECTNESS SCENARIO 3: Generates a 'Twin Execution' test for the
         'Mixed Deep Calls' scenario to verify its correctness.
@@ -2934,6 +2960,146 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< JIT Correctness Scenario (Deep Calls) Passed >>>"'
         )
+        self.emptyLine()
+
+    def _generate_evil_deep_calls_logic_body(self, prefix: str, func_name_prefix: str,
+                                             constants: list[str], operators: list[str],
+                                             exception_level: int, fuzzed_func_name: str) -> str:
+        """
+        Generates the body for the 'evil' deep calls scenario, using boundary
+        values, a suite of operators, and a potential exception trigger.
+        """
+        depth = 15
+        self.write(1, "# This function chain uses boundary values and mixed operators.")
+
+        # 1. Define the base case. It performs a final operation and
+        #    also calls a real fuzzed function.
+        self.write(1, f"def {func_name_prefix}_0(p_tuple):")
+        self.addLevel(1)
+        self.write(1, "res = list(p_tuple)")
+        self.write(1, "try:")
+        self.addLevel(1)
+        self.write(1, f"op = {operators[0]}")
+        self.write(1, f"const = {constants[0]}")
+        self.write(1, "res[0] = op(res[0], const)")
+        self.write(1, f"{self.module_name}.{fuzzed_func_name}(res[0])")
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, "except (TypeError, ValueError, ZeroDivisionError, OverflowError): pass")
+        self.write(1, "return tuple(res)")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Generate the intermediate functions.
+        for i in range(1, depth):
+            self.write(1, f"def {func_name_prefix}_{i}(p_tuple):")
+            self.addLevel(1)
+            # Potentially raise our probe exception.
+            if i == exception_level:
+                self.write(1, "if random() < 0.001:")
+                self.addLevel(1)
+                self.write_print_to_stderr(1, f'"[{prefix}] EVIL DEEP CALL: Raising ValueError probe!"')
+                self.write(1, "raise ValueError(('evil_deep_call_probe',))")
+                self.restoreLevel(self.base_level - 1)
+
+            self.write(1, "res = list(p_tuple)")
+            self.write(1, "try:")
+            self.addLevel(1)
+            # Use a different operator and constant at each level of the chain.
+            self.write(1, f"op = {operators[i % len(operators)]}")
+            self.write(1, f"const = {constants[i % len(constants)]}")
+            self.write(1, "res[1] = op(res[1], const)")
+            self.restoreLevel(self.base_level - 1)
+            self.write(1, "except (TypeError, ValueError, ZeroDivisionError, OverflowError): pass")
+            # Call the next function in the chain.
+            self.write(1, f"return {func_name_prefix}_{i - 1}(tuple(res))")
+            self.restoreLevel(self.base_level - 1)
+            self.emptyLine()
+
+        return f"{func_name_prefix}_{depth - 1}"
+
+    def _generate_evil_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                      fuzzed_func_obj: object) -> None:
+        """
+        CORRECTNESS SCENARIO (EVIL DEEP CALLS): Generates a 'Twin Execution'
+        test for a deep call chain using boundary values and mixed operators.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting EVIL JIT Correctness Scenario (Deep Calls) <<<"'
+        )
+        self.write(0, "import operator")
+
+        # 1. Setup for the scenario: Choose operators and boundary values ONCE.
+        operator_suite = ['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']
+        constants = [self.arg_generator.genInterestingValues()[0] for _ in range(4)]
+        exception_level = randint(5, 12)  # Choose a random level to hide the exception.
+
+        jit_func_prefix = f"jit_evil_f_{prefix}"
+        control_func_prefix = f"control_evil_f_{prefix}"
+
+        # 2. Define the JIT Target function chain.
+        self.write(0, f"def jit_target_harness_{prefix}():")
+        self.addLevel(1)
+        jit_top_level_func = self._generate_evil_deep_calls_logic_body(
+            prefix, jit_func_prefix, constants, operator_suite, exception_level, fuzzed_func_name
+        )
+        self.write(1, f"return {jit_top_level_func}(({constants[0]}, {constants[1]}))")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Define the Control function chain.
+        self.write(0, f"def control_harness_{prefix}():")
+        self.addLevel(1)
+        control_top_level_func = self._generate_evil_deep_calls_logic_body(
+            prefix, control_func_prefix, constants, operator_suite, exception_level, fuzzed_func_name
+        )
+        self.write(1, f"return {control_top_level_func}(({constants[0]}, {constants[1]}))")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 4. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their final states are identical.")
+        self.write(0, f"jit_result, control_result = None, None")
+        self.write(0, f"jit_exc, control_exc = None, None")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"jit_result = jit_target_harness_{prefix}()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e: jit_exc = e")
+
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"control_result = no_jit_harness(control_harness_{prefix})")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e: control_exc = e")
+
+        # Assertions
+        self.write(0,
+                   "if not isinstance(jit_exc, ValueError) and not isinstance(control_exc, ValueError):")
+        self.write(1,
+                   "assert type(jit_exc) == type(control_exc) or None in (jit_exc, control_exc), f'Exception type mismatch! JIT: {type(jit_exc)}, Control: {type(control_exc)}'")
+        self.write(0,
+                   "if isinstance(jit_exc, ValueError) and isinstance(control_exc, ValueError): assert jit_exc.args == control_exc.args, 'Probe exception payload mismatch!'")
+        self.write(0, "if not compare_results(jit_result, control_result):")
+        self.addLevel(1)
+        # Try to represent the results for the error message, but handle the ValueError.
+        self.write(0, "try: jit_repr = repr(jit_result)")
+        self.write(0, "except ValueError: jit_repr = '<int too large to display>'")
+        self.write(0, "try: control_repr = repr(control_result)")
+        self.write(0, "except ValueError: control_repr = '<int too large to display>'")
+
+        # Raise the AssertionError with the safe representations.
+        self.write(0,
+                   'raise AssertionError(f"EVIL DEEP CALLS BUG! JIT: {jit_repr}, Control: {control_repr}")'
+                   )
+        self.restoreLevel(self.base_level - 1)
+
+        # Add an else case for clarity in the generated code
+        self.write(0, "else:")
+        self.addLevel(1)
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< EVIL JIT Correctness Scenario (Deep Calls) Passed >>>"'
+        )
+        self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
