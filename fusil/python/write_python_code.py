@@ -464,9 +464,10 @@ class WritePythonCode(WriteCode):
                 if self.options.jit_correctness_testing:
                     # --- Correctness Testing Path ---
                     correctness_generators = [
-                        self._generate_jit_pattern_block_with_check,
-                        self._generate_evil_jit_pattern_block_with_check,
-                        self._generate_deleter_scenario_with_check,
+                        # self._generate_jit_pattern_block_with_check,
+                        # self._generate_evil_jit_pattern_block_with_check,
+                        # self._generate_deleter_scenario_with_check,
+                        self._generate_deep_calls_scenario_with_check,
                     ]
                     chosen_generator = choice(correctness_generators)
                     chosen_generator(prefix)
@@ -2847,6 +2848,91 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< JIT Correctness Scenario (__del__ Attack) Passed >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_deep_calls_logic_body(self, prefix: str, func_name_prefix: str) -> str:
+        """
+        Generates the definitions for a deep chain of functions, where each
+        function in the chain performs complex work.
+
+        Returns:
+            The name of the top-level function to be called.
+        """
+        depth = 15
+        self.write(1, f"# Define a deep chain of {depth} functions.")
+
+        # 1. Define the base case (the final function in the chain).
+        self.write(1, f"def {func_name_prefix}_0(p):")
+        self.addLevel(1)
+        self.write(1, "x = len('base_case') + p")
+        self.write(1, "y = x % 5")
+        self.write(1, "return x - y")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Generate the intermediate functions in the chain.
+        for i in range(1, depth):
+            self.write(1, f"def {func_name_prefix}_{i}(p):")
+            self.addLevel(1)
+            self.write(1, f"local_val = p * {i}")
+            self.write(1, "s = 'abcdef'")
+            self.write(1, f"if local_val > 10 and (s[{i} % len(s)]):")
+            self.addLevel(1)
+            # Recursively call the next function in the chain.
+            self.write(1, f"local_val += {func_name_prefix}_{i - 1}(p)")
+            self.restoreLevel(self.base_level - 1)
+            self.write(1, "return local_val")
+            self.restoreLevel(self.base_level - 1)
+            self.emptyLine()
+
+        return f"{func_name_prefix}_{depth - 1}"
+
+    def _generate_deep_calls_scenario_with_check(self, prefix: str) -> None:
+        """
+        CORRECTNESS SCENARIO 3: Generates a 'Twin Execution' test for the
+        'Mixed Deep Calls' scenario to verify its correctness.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Deep Calls) <<<"'
+        )
+
+        jit_func_prefix = f"jit_f_{prefix}"
+        control_func_prefix = f"control_f_{prefix}"
+
+        # 1. Define the JIT Target function chain.
+        self.write(0, "# This function chain will be run on a 'hot' path.")
+        self.write(0, f"def jit_target_harness_{prefix}():")
+        self.addLevel(1)
+        jit_top_level_func = self._generate_deep_calls_logic_body(prefix, jit_func_prefix)
+        # Call the top-level function inside a loop.
+        self.write(1, f"total = 0")
+        self.write(1, f"for i in range(10): total += {jit_top_level_func}(i)")
+        self.write(1, f"return total")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function chain with identical logic.
+        self.write(0, "# This function chain has identical logic but will be run only once.")
+        self.write(0, f"def control_harness_{prefix}():")
+        self.addLevel(1)
+        control_top_level_func = self._generate_deep_calls_logic_body(prefix, control_func_prefix)
+        self.write(1, f"total = 0")
+        self.write(1, f"for i in range(10): total += {control_top_level_func}(i)")
+        self.write(1, f"return total")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"jit_result = jit_target_harness_{prefix}()")
+        self.write(0, f"control_result = no_jit_harness(control_harness_{prefix})")
+
+        self.write(0,
+                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (Deep Calls)! JIT: {{jit_result}}, Control: {{control_result}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (Deep Calls) Passed >>>"'
         )
         self.emptyLine()
 
