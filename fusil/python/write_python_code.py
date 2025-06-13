@@ -368,6 +368,20 @@ class WritePythonCode(WriteCode):
         self.write(0, "return func(*args, **kwargs)")
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
+
+        self.write(0, "# Helper for correctness testing that handles NaN values.")
+        self.write(0, "import math")
+        self.write(0, "def compare_results(a, b):")
+        self.addLevel(1)
+        self.write(0, "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):")
+        self.write(1, "return True")
+        # Handle tuples, where we need to compare elements recursively.
+        self.write(0, "if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):")
+        self.write(1, "return all(compare_results(x, y) for x, y in zip(a, b))")
+        self.write(0, "return a == b")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
         self.write(0, "SENTINEL_VALUE = object()")
         self.emptyLine()
         self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
@@ -452,6 +466,7 @@ class WritePythonCode(WriteCode):
                     correctness_generators = [
                         self._generate_jit_pattern_block_with_check,
                         self._generate_evil_jit_pattern_block_with_check,
+                        self._generate_deleter_scenario_with_check,
                     ]
                     chosen_generator = choice(correctness_generators)
                     chosen_generator(prefix)
@@ -2734,6 +2749,104 @@ class WritePythonCode(WriteCode):
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< EVIL JIT Correctness Scenario Passed >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_deleter_logic_body(self, prefix: str) -> None:
+        """
+        Generates the body of a function that performs the __del__ side effect
+        attack. It returns the final state of the targeted variables for correctness checking.
+        """
+        # Define unique names for all our variables using the prefix.
+        target_var = f"target_{prefix}"
+        fm_target_var = f"fm_{target_var}"
+        dummy_class_name = f"Dummy_{prefix}"
+        dummy_instance_name = f"dummy_instance_{prefix}"
+        fm_dummy_class_attr = f"fm_{dummy_instance_name}_a"
+        fm_dummy_instance_attr = f"fm_{dummy_instance_name}_b"
+        loop_iterations = self.options.jit_loop_iterations
+        trigger_iteration = loop_iterations - 2  # Trigger on the penultimate iteration
+
+        # 1. SETUP - This logic is now inside the function body.
+        self.write(1, f"# A. Create a local variable and its FrameModifier")
+        self.write(1, f"{target_var} = 100")
+        self.write(1, f"{fm_target_var} = FrameModifier('{target_var}', 'local-string')")
+        self.emptyLine()
+
+        self.write(1, f"# B. Create a class with instance/class attributes and their FrameModifiers")
+        self.write(1, f"class {dummy_class_name}:")
+        self.addLevel(1)
+        self.write(1, "a = 200  # Class attribute")
+        self.write(1, "def __init__(self): self.b = 300  # Instance attribute")
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, f"{dummy_instance_name} = {dummy_class_name}()")
+        self.write(1, f"{fm_dummy_class_attr} = FrameModifier('{dummy_instance_name}.a', 'class-attr-string')")
+        self.write(1, f"{fm_dummy_instance_attr} = FrameModifier('{dummy_instance_name}.b', 'instance-attr-string')")
+        self.emptyLine()
+
+        # 2. HOT LOOP
+        self.write(1, f"for i_{prefix} in range({loop_iterations}):")
+        self.addLevel(1)
+        self.write(1, "try:")
+        self.addLevel(1)
+        # Warm-up phase
+        self.write(1, f"x = {target_var} + i_{prefix}")
+        self.write(1, f"y = {dummy_instance_name}.a + i_{prefix}")
+        self.write(1, f"z = {dummy_instance_name}.b + i_{prefix}")
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, "except TypeError: pass")
+
+        # Trigger phase
+        self.write(1, f"if i_{prefix} == {trigger_iteration}:")
+        self.addLevel(1)
+        self.write(1, f"del {fm_target_var}")
+        self.write(1, f"del {fm_dummy_class_attr}")
+        self.write(1, f"del {fm_dummy_instance_attr}")
+        self.write(1, "collect()")
+        self.restoreLevel(self.base_level - 1)
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+
+        # 3. RETURN FINAL STATE for comparison.
+        self.write(1, f"# Return the final state of all targeted variables.")
+        self.write(1, f"return ({target_var}, {dummy_instance_name}.a, {dummy_instance_name}.b)")
+
+    def _generate_deleter_scenario_with_check(self, prefix: str) -> None:
+        """
+        CORRECTNESS SCENARIO 2: Generates a 'Twin Execution' test for the
+        __del__ side effect attack to check for silent state corruption.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (__del__ Attack) <<<"'
+        )
+
+        jit_func_name = f"jit_target_deleter_{prefix}"
+        control_func_name = f"control_deleter_{prefix}"
+
+        # 1. Define the JIT Target function.
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        self._generate_deleter_logic_body(prefix)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function with identical logic.
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        self._generate_deleter_logic_body(prefix)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their final states are identical.")
+        self.write(0, f"jit_final_state = {jit_func_name}()")
+        self.write(0, f"control_final_state = no_jit_harness({control_func_name})")
+
+        # Use our NaN-aware comparison for the assertion.
+        self.write(0,
+                   f'assert compare_results(jit_final_state, control_final_state), f"JIT STATE MISMATCH after __del__ attack! JIT: {{jit_final_state}}, Control: {{control_final_state}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (__del__ Attack) Passed >>>"'
         )
         self.emptyLine()
 
