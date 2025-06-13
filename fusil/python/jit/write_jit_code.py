@@ -71,6 +71,7 @@ class WriteJITCode:
             self._generate_evil_deep_calls_scenario_with_check,
             self._generate_inplace_add_attack_scenario_with_check,
             self._generate_global_invalidation_scenario_with_check,
+            self._generate_managed_dict_attack_scenario_with_check,
         ]
         chosen = choice(generators)
         chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -2261,6 +2262,103 @@ class WriteJITCode:
             0, f'"[{prefix}] <<< JIT Correctness Scenario (Global Invalidation) Passed >>>"'
         )
         self.emptyLine()
+
+    def _generate_managed_dict_logic_body(self, prefix: str) -> None:
+        """
+        Generates the body of a function that attacks the managed dictionary guard.
+        Returns the final list of objects for state comparison.
+        """
+        loop_iterations = self.options.jit_loop_iterations
+
+        # 1. Define two classes: one with a __dict__, one with __slots__.
+        self.write(1, f"# Define a standard class and a class with __slots__.")
+        self.write(1, f"class ClassWithDict_{prefix}: pass")
+        self.write(1, f"class ClassWithSlots_{prefix}:")
+        self.addLevel(1)
+        self.write(1, "__slots__ = ['x']")  # This class has no __dict__
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 2. Create a list of instances to use polymorphically.
+        self.write(1, f"objects_to_set = [ClassWithDict_{prefix}(), ClassWithSlots_{prefix}()]")
+        self.emptyLine()
+
+        # 3. Hot loop to warm up the STORE_ATTR operation.
+        self.write(1, f"for i in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 4. Polymorphically select an object and set an attribute.
+        #    This will alternate between the fast path (dict) and the
+        #    slow path (slots), forcing the DEOPT_IF guard to be hit frequently.
+        self.write(1, "obj = objects_to_set[i % 2]")
+        self.write(1, "try:")
+        self.addLevel(1)
+        self.write(1, "obj.x = i")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(1, "except AttributeError:")
+        self.addLevel(1)
+        # We expect this for the slotted class if 'x' isn't in __slots__,
+        # which is part of the test.
+        self.write(1, "pass")
+        self.restoreLevel(self.parent.base_level - 1)
+
+        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
+
+        # 5. Return the final list of objects to check their state.
+        self.write(1, "return objects_to_set")
+
+    def _generate_managed_dict_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
+                                                          fuzzed_func_obj: object) -> None:
+        """
+        GREY-BOX CORRECTNESS SCENARIO 3: Attacks the managed dictionary
+        guard for STORE_ATTR.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Managed Dict Attack) <<<"'
+        )
+
+        jit_func_name = f"jit_target_managed_dict_{prefix}"
+        control_func_name = f"control_managed_dict_{prefix}"
+
+        # 1. Define the JIT Target function.
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        self._generate_managed_dict_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function.
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        self._generate_managed_dict_logic_body(prefix)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and comparison code.
+        self.write(0, "# Run both versions and assert their final states are identical.")
+        self.write(0, f"jit_results = {jit_func_name}()")
+        self.write(0, f"control_results = no_jit_harness({control_func_name})")
+        self.emptyLine()
+
+        # Compare the final 'x' attribute of the objects from both runs.
+        self.write(0, "jit_dict_obj_x = getattr(jit_results[0], 'x', 'NOT_SET')")
+        self.write(0, "control_dict_obj_x = getattr(control_results[0], 'x', 'NOT_SET')")
+        self.write(0, "jit_slots_obj_x = getattr(jit_results[1], 'x', 'NOT_SET')")
+        self.write(0, "control_slots_obj_x = getattr(control_results[1], 'x', 'NOT_SET')")
+        self.emptyLine()
+
+        self.write(0,
+                   f'assert jit_dict_obj_x == control_dict_obj_x, f"JIT MISMATCH (Dict Object)! JIT: {{jit_dict_obj_x}}, Control: {{control_dict_obj_x}}"'
+                   )
+        self.write(0,
+                   f'assert jit_slots_obj_x == control_slots_obj_x, f"JIT MISMATCH (Slots Object)! JIT: {{jit_slots_obj_x}}, Control: {{control_slots_obj_x}}"'
+                   )
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (Managed Dict Attack) Passed >>>"'
+        )
+        self.emptyLine()
+
 
 
 
