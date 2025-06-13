@@ -270,6 +270,7 @@ class WritePythonCode(WriteCode):
                 import ast
                 import inspect
                 import io
+                import math
                 import time
                 import sys
                 from threading import Thread
@@ -361,6 +362,12 @@ class WritePythonCode(WriteCode):
 
     def _write_helper_call_functions(self) -> None:
         """Writes the callMethod and callFunc helper functions into the script."""
+        self.write(0, "# This function is called only once, so it will not be JIT-compiled.")
+        self.write(0, "def no_jit_harness(func, *args, **kwargs):")
+        self.addLevel(1)
+        self.write(0, "return func(*args, **kwargs)")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
         self.write(0, "SENTINEL_VALUE = object()")
         self.emptyLine()
         self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments):")
@@ -440,6 +447,15 @@ class WritePythonCode(WriteCode):
                     # JIT Mode Logic
                 level = self.options.jit_fuzz_level
 
+                if self.options.jit_correctness_testing:
+                    # --- Correctness Testing Path ---
+                    correctness_generators = [
+                        self._generate_jit_pattern_block_with_check,
+                        self._generate_evil_jit_pattern_block_with_check,
+                    ]
+                    chosen_generator = choice(correctness_generators)
+                    chosen_generator(prefix)
+                    continue
                 # At the highest level, try to generate a mixed scenario
                 if level >= 3 and random() < self.options.jit_hostile_prob:
                     mixed_scenario_generators = [
@@ -2527,6 +2543,197 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Upgraded `isinstance` JIT Attack Scenario >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_math_logic_body(self, prefix: str, const_a_str: str, const_b_str: str) -> None:
+        """
+        Generates the body of a function containing a hot loop filled with
+        JIT-friendly math and logic patterns. It uses pre-generated constant values.
+        """
+        # 1. Initialize variables for the block to use, using the passed-in constants.
+        self.write(1, f"var_int_a = {const_a_str}")
+        self.write(1, f"var_int_b = {const_b_str}")
+        self.write(1, "total = 0")
+        self.emptyLine()
+
+        # 2. Create the hot loop.
+        loop_iterations = self.options.jit_loop_iterations // 10
+        loop_var = f"i_{prefix}"
+        self.write(1, f"for {loop_var} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 3. Weave in the JIT-friendly patterns inside the loop.
+        self.write(1, f"if {loop_var} > var_int_b:")
+        self.addLevel(1)
+        self.write(1, f"temp_val = (var_int_a + {loop_var}) % 1000")
+        self.write(1, f"total += temp_val")
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, "else:")
+        self.addLevel(1)
+        self.write(1, "total -= 1")
+        self.restoreLevel(self.base_level - 1)
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write(1, "return total")
+
+    def _generate_jit_pattern_block_with_check(self, prefix: str) -> None:
+        """
+        CORRECTNESS SCENARIO 1: Generates a 'Twin Execution' test for a
+        block of JIT-friendly patterns to check for silent correctness bugs.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Math Patterns) <<<"'
+        )
+
+        const_a_str = self.arg_generator.genInt()[0]
+        const_b_str = self.arg_generator.genSmallUint()[0]
+
+        jit_func_name = f"jit_target_math_{prefix}"
+        control_func_name = f"control_math_{prefix}"
+
+        # 1. Define the JIT Target function.
+        self.write(0, "# This function will be run on a 'hot' path to engage the JIT.")
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        # Pass the pre-generated constants to the body generator.
+        self._generate_math_logic_body(prefix, const_a_str, const_b_str)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 2. Define the Control function with identical logic.
+        self.write(0, "# This function has identical logic but will be run only once.")
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        # Pass the SAME pre-generated constants to this body generator as well.
+        self._generate_math_logic_body(prefix, const_a_str, const_b_str)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Generate the execution and assertion code. (This part remains the same)
+        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"jit_result = {jit_func_name}()")
+        self.write(0, f"control_result = no_jit_harness({control_func_name})")
+        self.write(0,
+                   f'assert jit_result == control_result, f"JIT CORRECTNESS BUG! JIT Result: {{jit_result}}, Control Result: {{control_result}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario (Math Patterns) Passed >>>"'
+        )
+        self.emptyLine()
+
+    def _generate_evil_math_logic_body(self, prefix: str, constants: dict) -> None:
+        """
+        Generates the body of a function with complex, "evil" JIT-friendly
+        patterns, using boundary values from the INTERESTING list.
+        """
+        # 1. Initialize variables using the pre-generated constants.
+        self.write(1, f"# Initialize variables with potentially problematic boundary values.")
+        self.write(1, f"var_a = {constants['val_a']}")
+        self.write(1, f"var_b = {constants['val_b']}")
+        self.write(1, f"var_c = {constants['val_c']}")
+        self.write(1, f"str_d = {constants['str_d']}")
+        self.write(1, "total = 0.0 # Use a float accumulator for broader compatibility")
+        self.emptyLine()
+
+        # 2. Create the hot loop.
+        loop_iterations = self.options.jit_loop_iterations // 20
+        loop_var = f"i_{prefix}"
+        self.write(1, f"for {loop_var} in range(1, {loop_iterations}): # Start from 1 to avoid division by zero")
+        self.addLevel(1)
+
+        # 3. Weave in more complex and "evil" patterns inside the loop.
+        self.write(1, "try:")
+        self.addLevel(1)
+        # Mix float, int, and boundary values. Use operators the JIT optimizes.
+        self.write(1, f"temp_val = (var_a + var_b) / {loop_var}")
+        self.write(1, f"temp_val_2 = var_c * {loop_var}")
+        # Perform a comparison that will change throughout the loop.
+        self.write(1, f"if temp_val > temp_val_2:")
+        self.addLevel(1)
+        # Use string operations as well.
+        self.write(1, f"total += len(str_d) + len(str(temp_val))")
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, "else:")
+        self.addLevel(1)
+        self.write(1, f"total -= temp_val_2")
+        self.restoreLevel(self.base_level - 1)
+        self.restoreLevel(self.base_level - 1)
+        self.write(1, "except (ValueError, TypeError, ZeroDivisionError, OverflowError):")
+        self.addLevel(1)
+        # It's expected that operations on boundary values might raise exceptions.
+        # We just need to handle them so the loop can continue.
+        self.write(1, "total -= 1")
+        self.restoreLevel(self.base_level - 1)
+
+        self.restoreLevel(self.base_level - 1)  # Exit for loop
+        self.write(1, "return total")
+
+    def _generate_evil_jit_pattern_block_with_check(self, prefix: str) -> None:
+        """
+        CORRECTNESS SCENARIO (EVIL): Generates a 'Twin Execution' test using
+        complex operations and boundary values to stress the JIT's correctness.
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting EVIL JIT Correctness Scenario (Boundary Values) <<<"'
+        )
+
+        # 1. Generate the problematic constants ONCE.
+        #    We pull directly from the `INTERESTING` list for maximum effect.
+        constants = {
+            'val_a': self.arg_generator.genInterestingValues()[0],
+            'val_b': self.arg_generator.genInterestingValues()[0],
+            'val_c': self.arg_generator.genInterestingValues()[0],
+            'str_d': self.arg_generator.genString()[0],
+        }
+
+        jit_func_name = f"jit_target_evil_{prefix}"
+        control_func_name = f"control_evil_{prefix}"
+
+        # 2. Define the JIT Target function.
+        self.write(0, f"def {jit_func_name}():")
+        self.addLevel(1)
+        self._generate_evil_math_logic_body(prefix, constants)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 3. Define the Control function with identical logic.
+        self.write(0, f"def {control_func_name}():")
+        self.addLevel(1)
+        self._generate_evil_math_logic_body(prefix, constants)
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        # 4. Generate the execution and assertion code.
+        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"jit_result, control_result = None, None")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"jit_result = {jit_func_name}()")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] JIT version raised unexpected exception: {{e}}"')
+        self.restoreLevel(self.base_level - 1)
+
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"control_result = no_jit_harness({control_func_name})")
+        self.restoreLevel(self.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[{prefix}] Control version raised unexpected exception: {{e}}"')
+        self.restoreLevel(self.base_level - 1)
+
+        # We can only assert if both completed without error.
+        # A discrepancy in which one raises an error is itself a bug.
+        self.write(0,
+                   f'are_nan = math.isnan(jit_result) and math.isnan(control_result)')
+        self.write(0,
+                   f'assert jit_result == control_result or are_nan, f"EVIL JIT CORRECTNESS DEFECT! JIT Result: {{jit_result}}, Control Result: {{control_result}}"')
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< EVIL JIT Correctness Scenario Passed >>>"'
         )
         self.emptyLine()
 
