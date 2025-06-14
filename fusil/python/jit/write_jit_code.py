@@ -509,6 +509,7 @@ class WriteJITCode:
         self.write(0, f"# A. Create a local variable and its FrameModifier")
         self.write(0, f"{target_var} = 100")
         self.write(0, f"{fm_target_var} = FrameModifier('{target_var}', 'local-string')")
+        self.write(0, f"fm_target_i_{prefix} = FrameModifier('i_{prefix}', 'local-string')")
         self.emptyLine()
 
         # Create the class, instance, and their FrameModifiers.
@@ -1659,10 +1660,14 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-        # 3. Generate the execution and assertion code. (This part remains the same)
-        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
+        self.emptyLine()
+
+        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
         self.write(0, f"jit_result = {jit_func_name}()")
         self.write(0, f"control_result = no_jit_harness({control_func_name})")
+        self.emptyLine()
         self.write(0,
                    f'assert jit_result == control_result, f"JIT CORRECTNESS BUG! JIT Result: {{jit_result}}, Control Result: {{control_result}}"')
 
@@ -1759,6 +1764,7 @@ class WriteJITCode:
         self.write(0, f"jit_result, control_result = None, None")
         self.write(0, "try:")
         self.addLevel(1)
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
         self.write(0, f"jit_result = {jit_func_name}()")
         self.restoreLevel(self.parent.base_level - 1)
         self.write(0, "except Exception as e:")
@@ -1960,7 +1966,11 @@ class WriteJITCode:
         self.emptyLine()
 
         # 3. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness(jit_target_harness_{prefix}, {self.options.jit_loop_iterations})")
+        self.emptyLine()
+
+        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
         self.write(0, f"jit_result = jit_target_harness_{prefix}()")
         self.write(0, f"control_result = no_jit_harness(control_harness_{prefix})")
 
@@ -2072,6 +2082,8 @@ class WriteJITCode:
         self.write(0, f"jit_exc, control_exc = None, None")
         self.write(0, "try:")
         self.addLevel(1)
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness(jit_target_harness_{prefix}, {self.options.jit_loop_iterations})")
         self.write(0, f"jit_result = jit_target_harness_{prefix}()")
         self.restoreLevel(self.parent.base_level - 1)
         self.write(0, "except Exception as e: jit_exc = e")
@@ -2140,9 +2152,14 @@ class WriteJITCode:
         self.emptyLine()
 
         # 3. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
+        self.emptyLine()
+
+        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
         self.write(0, f"jit_result = {jit_func_name}()")
         self.write(0, f"control_result = no_jit_harness({control_func_name})")
+        self.emptyLine()
 
         self.write(0,
                    f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (In-Place Add)! JIT: {{jit_result}}, Control: {{control_result}}"')
@@ -2157,7 +2174,7 @@ class WriteJITCode:
         Generates the body of a function that performs the in-place add attack.
         """
         target_var = f"s_{prefix}"
-        loop_iterations = self.options.jit_loop_iterations // 10
+        loop_iterations = self.options.jit_loop_iterations // 2
         trigger_iteration = loop_iterations - 2
 
         # 1. Initialize the target string variable and the FrameModifier payload.
@@ -2251,9 +2268,14 @@ class WriteJITCode:
         self.emptyLine()
 
         # 3. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their results are identical.")
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
+        self.emptyLine()
+
+        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
         self.write(0, f"jit_result = {jit_func_name}()")
         self.write(0, f"control_result = no_jit_harness({control_func_name})")
+        self.emptyLine()
 
         self.write(0,
                    f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (Global Invalidation)! JIT: {{jit_result}}, Control: {{control_result}}"')
@@ -2335,16 +2357,20 @@ class WriteJITCode:
         self.emptyLine()
 
         # 3. Generate the execution and comparison code.
-        self.write(0, "# Run both versions and assert their final states are identical.")
-        self.write(0, f"jit_results = {jit_func_name}()")
-        self.write(0, f"control_results = no_jit_harness({control_func_name})")
+        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
+        self.emptyLine()
+
+        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
+        self.write(0, f"jit_result = {jit_func_name}()")
+        self.write(0, f"control_result = no_jit_harness({control_func_name})")
         self.emptyLine()
 
         # Compare the final 'x' attribute of the objects from both runs.
-        self.write(0, "jit_dict_obj_x = getattr(jit_results[0], 'x', 'NOT_SET')")
-        self.write(0, "control_dict_obj_x = getattr(control_results[0], 'x', 'NOT_SET')")
-        self.write(0, "jit_slots_obj_x = getattr(jit_results[1], 'x', 'NOT_SET')")
-        self.write(0, "control_slots_obj_x = getattr(control_results[1], 'x', 'NOT_SET')")
+        self.write(0, "jit_dict_obj_x = getattr(jit_result[0], 'x', 'NOT_SET')")
+        self.write(0, "control_dict_obj_x = getattr(control_result[0], 'x', 'NOT_SET')")
+        self.write(0, "jit_slots_obj_x = getattr(jit_result[1], 'x', 'NOT_SET')")
+        self.write(0, "control_slots_obj_x = getattr(control_result[1], 'x', 'NOT_SET')")
         self.emptyLine()
 
         self.write(0,

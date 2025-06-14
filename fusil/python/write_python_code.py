@@ -368,6 +368,18 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
+        self.write(0, "# This function calls its target in a loop to make it 'hot' for the JIT.")
+        self.write(0, "def jit_harness(func, iterations, *args, **kwargs):")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'f"[+] Warming up {{func.__name__}} for {{iterations}} iterations..."')
+        self.write(0, "for _ in range(iterations):")
+        self.addLevel(1)
+        self.write(0, "func(*args, **kwargs)")
+        self.restoreLevel(self.base_level - 1)
+        self.write_print_to_stderr(0, f'"[+] Warm-up complete."')
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
         self.write(0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers.")
         self.write(0, "import math")
         self.write(0, "import types")
