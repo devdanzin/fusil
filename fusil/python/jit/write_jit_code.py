@@ -46,6 +46,10 @@ class WriteJITCode:
         except AttributeError:
             return
 
+        if self.options.rediscover_decref_crash:
+            self._generate_decref_escapes_scenario(prefix)
+            return
+
         # Correctness testing takes precedence if enabled.
         if self.options.jit_correctness_testing and random() < self.options.jit_hostile_prob / 5:
             self._generate_correctness_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
@@ -547,7 +551,9 @@ class WriteJITCode:
         self.write(0, f"# Use all variables to warm up the JIT with their initial types")
         self.write(0, "try:")
         self.addLevel(1)
-        self.write(0, f"x = {target_var} + i_{prefix}")
+        self.write(0, f"{target_var} + {target_var}")
+        self.write(0, f"i_{prefix} + i_{prefix}")
+        # self.write(0, f"x = {target_var} + i_{prefix}")
         self.write(0, f"y = {dummy_instance_name}.a + i_{prefix}")
         self.write(0, f"z = {dummy_instance_name}.b + i_{prefix}")
         self.restoreLevel(self.parent.base_level - 1)
@@ -564,6 +570,7 @@ class WriteJITCode:
         self.write(0, f"del {fm_target_var}")
         self.write(0, f"del {fm_dummy_class_attr}")
         self.write(0, f"del {fm_dummy_instance_attr}")
+        self.write(0, f"del fm_target_i_{prefix}")
         self.write(0, "collect()")
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
@@ -572,6 +579,8 @@ class WriteJITCode:
         self.write(0, f"# Use the variables again, which may hit a corrupted JIT state after deletion")
         self.write(0, "try:")
         self.addLevel(1)
+        self.write(0, f"i_{prefix} + i_{prefix}")
+        self.write(0, f"{target_var} + {target_var}")
         self.write(0, f"res_local = {target_var} + i_{prefix}")
         self.write(0, f"res_cls_attr = {dummy_instance_name}.a + i_{prefix}")
         self.write(0, f"res_inst_attr = {dummy_instance_name}.b + i_{prefix}")
@@ -2385,6 +2394,68 @@ class WriteJITCode:
         )
         self.emptyLine()
 
+    def _generate_decref_escapes_scenario(self, prefix: str) -> None:
+        """
+        RE-DISCOVERY SCENARIO: A highly targeted attack designed specifically
+        to reproduce the crash from GH-124483 (test_decref_escapes).
+        """
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting `test_decref_escapes` Re-discovery Scenario <<<"'
+        )
 
+        loop_var = f"i_{prefix}"
+        loop_iterations = 500  # Use a smaller, specific number of iterations
+        trigger_iteration = loop_iterations - 2  # The value to check for in __del__
+
+        # 1. Define a minimal FrameModifier with NO __init__
+        fm_class_name = f"FrameModifier_{prefix}"
+        self.write(0, f"class {fm_class_name}:")
+        self.addLevel(1)
+        self.write(0, "def __del__(self):")
+        self.addLevel(1)
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, "frame = sys._getframe(1)")
+        # 2. Hardcode the check inside __del__ as you discovered
+        self.write(0, f"if frame.f_locals.get('{loop_var}') == {trigger_iteration}:")
+        self.addLevel(1)
+        self.write_print_to_stderr(1, f'"  [Side Effect] Triggered! Modifying `{loop_var}` to None"')
+        self.write(1, f"frame.f_locals['{loop_var}'] = None")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except Exception: pass")
+        self.restoreLevel(self.parent.base_level - 2)
+        self.emptyLine()
+
+        # 3. Define the main function harness. All logic is INSIDE this function.
+        harness_func_name = f"harness_{prefix}"
+        self.write(0, f"def {harness_func_name}():")
+        self.addLevel(1)
+
+        # 4. The hot loop
+        self.write(1, f"try:")
+        self.addLevel(1)
+        self.write(1, f"for {loop_var} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        # 5. Instantiate and destroy the FrameModifier on EACH iteration.
+        self.write(1, f"{fm_class_name}()")
+
+        # 6. Perform the operation that gets optimized.
+        self.write(1, f"{loop_var} + {loop_var}")
+
+        self.restoreLevel(self.parent.base_level - 1)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(1, "except Exception: pass # Catch potential TypeErrors")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 7. Call the harness function.
+        self.write(0, f"# Execute the test harness.")
+        self.write(0, f"{harness_func_name}()")
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished `test_decref_escapes` Re-discovery Scenario >>>"'
+        )
+        self.emptyLine()
 
 

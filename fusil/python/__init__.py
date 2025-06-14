@@ -268,6 +268,12 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        jit_options.add_option(
+            "--rediscover-decref-crash",
+            help="Run ONLY the specific scenario to rediscover the GH-124483 crash.",
+            action="store_true",
+            default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
