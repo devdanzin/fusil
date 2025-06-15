@@ -42,40 +42,44 @@ class WriteJITCode:
     def generate_scenario(self, prefix: str) -> None:
         """
         Main entry point for generating a JIT-specific scenario.
-        This method decides which type of scenario (correctness, hostile, friendly)
-        to generate based on the fuzzer's configuration.
+        This method decides which type of scenario to generate based on a
+        clear hierarchy of command-line options.
         """
         if not self.parent.module_functions:
             return
-
         fuzzed_func_name = choice(self.parent.module_functions)
         try:
             fuzzed_func_obj = getattr(self.parent.module, fuzzed_func_name)
         except AttributeError:
             return
 
+        # --- High-Priority Modes ---
         if self.options.rediscover_decref_crash:
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Re-discovery of GH-124483"')
             self._generate_decref_escapes_scenario(prefix)
             return
 
         if self.options.jit_fuzz_patterns:
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
             self._generate_variational_scenario(prefix, self.options.jit_fuzz_patterns)
             return
 
-        # Correctness testing takes precedence if enabled.
-        if self.options.jit_correctness_testing and random() < self.options.jit_hostile_prob / 5:
+        # --- Main Scenario Selection ---
+        if self.options.jit_correctness_testing and random() < self.options.jit_correctness_prob:
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: JIT Correctness Testing"')
             self._generate_correctness_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
             return
 
-        # Fallback to crash/hang testing scenarios.
         level = self.options.jit_fuzz_level
+        if level >= 2 and random() < self.options.jit_hostile_prob:
+            is_mixed = (level >= 3)
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Hostile Scenario (Mixed: {is_mixed})"')
+            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj, is_mixed=is_mixed)
+            return
 
-        if level >= 3 and random() < self.options.jit_hostile_prob:
-            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj, is_mixed=True)
-        elif level >= 2 and random() < self.options.jit_hostile_prob:
-            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj, is_mixed=False)
-        else:  # Level 1 or failed probability rolls
-            self._generate_friendly_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+        # --- Fallback Scenario ---
+        self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Friendly Scenario"')
+        self._generate_friendly_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
     def _generate_correctness_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """Chooses and generates one of the self-checking correctness scenarios."""

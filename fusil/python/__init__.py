@@ -298,6 +298,12 @@ class Fuzzer(Application):
            action="store_true",
            default=False,
         )
+        jit_options.add_option(
+            "--jit-correctness-prob",
+            help="Probability (0.0-1.0) of running a correctness test when enabled.",
+            type="float",
+            default=0.2,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
