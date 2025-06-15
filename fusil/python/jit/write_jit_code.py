@@ -5,6 +5,7 @@ from typing import Any
 from random import choice, randint, random
 from typing import TYPE_CHECKING
 
+import fusil.python.values
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 if TYPE_CHECKING:
@@ -2467,8 +2468,12 @@ class WriteJITCode:
 
     def _generate_variational_scenario(self, prefix: str, pattern_names: str) -> None:
         """
-        Takes a bug pattern template, applies a series of random mutations,
-        and generates the resulting test case.
+        Takes a bug pattern template and generates test cases.
+        Can operate in two modes:
+        1. Systematic Mode (--jit-fuzz-systematic-values): Iterates through all
+           known "interesting" values for the payload, but only if the pattern
+           supports it. Otherwise, it falls back to random mode.
+        2. Random Mode (default): Applies a single set of random mutations.
         """
         if pattern_names == "ALL":
             pattern_names = ",".join(BUG_PATTERNS.keys())
@@ -2478,18 +2483,48 @@ class WriteJITCode:
             self.write_print_to_stderr(0, f'"[!] Unknown bug pattern name: {pattern_name}"')
             return
 
-        self.write_print_to_stderr(0,
-                                   f'"[{prefix}] >>> Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
+        # Check if the pattern can even accept a payload.
+        has_payload_placeholder = (
+                '{corruption_payload}' in pattern['setup_code'] or
+                '{corruption_payload}' in pattern['body_code']
+        )
 
-        # 1. Prepare a dictionary of values for the template placeholders.
-        mutations = self._get_mutated_values_for_pattern(prefix)
+        # --- MODIFIED LOGIC BRANCH ---
+        if self.options.jit_fuzz_systematic_values and has_payload_placeholder:
+            # SYSTEMATIC MODE
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] >>> SYSTEMATIC Fuzzing Pattern: {pattern_name} <<<"')
+            interesting_values = fusil.python.values.INTERESTING
+            for i, payload_str in enumerate(interesting_values):
+                iter_prefix = f"{prefix}_{i}"
 
-        # 2. Apply mutations to the setup and body code templates.
-        setup_code = pattern['setup_code'].format(**mutations)
-        body_code = pattern['body_code'].format(**mutations)
+                self.write_print_to_stderr(0, f'"""--- Iteration {i}: Payload = {payload_str} ---"""')
 
-        # 3. Apply Environment Mutation: Wrap the code in a random function context.
-        self._write_mutated_code_in_environment(prefix, setup_code, body_code)
+                mutations = self._get_mutated_values_for_pattern(iter_prefix)
+                mutations['corruption_payload'] = payload_str
+
+                setup_code = pattern['setup_code'].format(**mutations)
+                body_code = pattern['body_code'].format(**mutations)
+
+                self.write_pattern(setup_code, body_code)
+                self.emptyLine()
+        else:
+            # RANDOM MODE (Used for all non-payload patterns, or if systematic flag is off)
+            if self.options.jit_fuzz_systematic_values and not has_payload_placeholder:
+                self.write_print_to_stderr(0,
+                                           f'"[{prefix}] Pattern {pattern_name} does not use a payload. Generating one random variant instead."')
+
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] >>> RANDOM Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
+            mutations = self._get_mutated_values_for_pattern(prefix)
+
+            # Ensure a placeholder doesn't cause a crash if it exists but we're in random mode
+            if '{corruption_payload}' not in mutations:
+                mutations['corruption_payload'] = "None"
+
+            setup_code = pattern['setup_code'].format(**mutations)
+            body_code = pattern['body_code'].format(**mutations)
+            self._write_mutated_code_in_environment(prefix, setup_code, body_code)
 
         self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"')
         self.emptyLine()

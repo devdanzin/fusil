@@ -280,6 +280,12 @@ class Fuzzer(Application):
             type="str",
             default=None,
         )
+        jit_options.add_option(
+            "--jit-fuzz-systematic-values",
+             help="When fuzzing a pattern, systematically iterate through all INTERESTING values as the payload. Disables random payload generation.",
+             action="store_true",
+             default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

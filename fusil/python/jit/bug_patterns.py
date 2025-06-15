@@ -8,7 +8,8 @@ BUG_PATTERNS = {
             try:
                 frame = sys._getframe(1)
                 if frame.f_locals.get('{loop_var}') == {trigger_iteration}:
-                    frame.f_locals['{loop_var}'] = None
+                    # Use the templated payload instead of a hardcoded value
+                    frame.f_locals['{loop_var}'] = {corruption_payload}
             except Exception: pass
     """,
         'body_code': """
