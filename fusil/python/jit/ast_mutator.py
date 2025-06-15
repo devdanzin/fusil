@@ -7,17 +7,29 @@ import copy
 # --- Step 3: A Library of Initial Mutation Strategies ---
 
 class OperatorSwapper(ast.NodeTransformer):
-    """Swaps binary operators like + with *."""
+    """Swaps binary operators like + with *, avoiding ast.Pow."""
+
+    # A rich suite of plausible substitutions for arithmetic and bitwise operators.
     OP_MAP = {
+        # Arithmetic Operators
         ast.Add: [ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod],
-        ast.Sub: [ast.Add, ast.Mult],
-        ast.Mult: [ast.Add, ast.Sub, ast.Pow],
-        # Add more mappings as needed...
+        ast.Sub: [ast.Add, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod],
+        ast.Mult: [ast.Add, ast.Sub, ast.Div, ast.FloorDiv],
+        ast.Div: [ast.Mult, ast.Add, ast.Sub, ast.FloorDiv],
+        ast.FloorDiv: [ast.Div, ast.Mult, ast.Add, ast.Sub, ast.Mod],
+        ast.Mod: [ast.FloorDiv, ast.Add, ast.Sub],
+
+        # Bitwise Operators
+        ast.LShift: [ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor],
+        ast.RShift: [ast.LShift, ast.BitAnd, ast.BitOr, ast.BitXor],
+        ast.BitAnd: [ast.BitOr, ast.BitXor, ast.LShift, ast.RShift],
+        ast.BitOr: [ast.BitAnd, ast.BitXor, ast.LShift, ast.RShift],
+        ast.BitXor: [ast.BitAnd, ast.BitOr, ast.LShift, ast.RShift],
     }
 
     def visit_BinOp(self, node):
         op_type = type(node.op)
-        if op_type in self.OP_MAP and random.random() < 0.5:
+        if op_type in self.OP_MAP and random.random() < 0.3:
             new_op_class = random.choice(self.OP_MAP[op_type])
             node.op = new_op_class()
         return node
@@ -91,7 +103,7 @@ class VariableSwapper(ast.NodeTransformer):
 
     _static_protected_names = frozenset({
         'print', 'random', 'next', 'isinstance', 'sys', 'operator',
-        'range', 'len', 'object', 'Exception', 'BaseException'
+        'range', 'len', 'object', 'Exception', 'BaseException', 'collect'
     })
 
     _exception_names = {

@@ -2791,8 +2791,8 @@ class WriteJITCode:
         # Define our suite of AST operator nodes
         ast_ops = [
             ast.Add(), ast.Sub(), ast.Mult(), ast.Div(), ast.FloorDiv(), ast.Mod(),
-            ast.Pow(), ast.LShift(), ast.RShift(), ast.BitAnd(), ast.BitOr(), ast.BitXor()
-        ]
+            ast.RShift(), ast.BitAnd(), ast.BitOr(), ast.BitXor()
+        ]  # Remove ast.Pow() and ast.LShift() as they frequently lead to OverflowErrors
         chosen_op = choice(ast_ops)
 
         # Generate the left and right operands by calling ourselves recursively.
