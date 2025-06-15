@@ -2611,9 +2611,9 @@ class WriteJITCode:
             # --- Strategy 1: Simple Infix Operator (40% probability) ---
             self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: Infix Operator"')
             operator_list = [
-                '+', '-', '*', '/', '//', '%', '**', '<<', '>>', '&', '|', '^',
+                '+', '-', '*', '/', '//', '%', '>>', '&', '|', '^',
                 '<', '<=', '==', '!=', '>', '>='
-            ]
+            ]  # Remove  '**' and '<<' as they often result in OverflowErrors
             chosen_op = choice(operator_list)
             expression_str = f"{loop_var} {chosen_op} {loop_var}"
 
@@ -2759,6 +2759,11 @@ class WriteJITCode:
         for line in dedent(body_code).splitlines():
             self.write(level, line)
 
+        self.restoreLevel(self.parent.base_level - 1)
+        # Raise AssertionErrors so we know the control and JITted code results don't match.
+        self.write(level, "except AssertionError:")
+        self.addLevel(1)
+        self.write(level, "raise")
         self.restoreLevel(self.parent.base_level - 1)
         # Catch any exception to prevent the fuzzer from stopping on
         # benign errors, allowing it to continue hunting for crashes.

@@ -2,7 +2,7 @@ import ast
 import builtins
 import random
 import copy
-
+from textwrap import dedent
 
 # --- Step 3: A Library of Initial Mutation Strategies ---
 
@@ -167,9 +167,9 @@ class ASTMutator:
         and unparses it back to a string.
         """
         try:
-            tree = ast.parse(code_string)
+            tree = ast.parse(dedent(code_string))
         except SyntaxError:
-            return f"# Original code failed to parse:\n# {code_string}"
+            return f"# Original code failed to parse:\n# {'#'.join(code_string.splitlines())}"
 
         # Randomly select 1 to 3 transformers to apply
         num_mutations = random.randint(1, 3)
