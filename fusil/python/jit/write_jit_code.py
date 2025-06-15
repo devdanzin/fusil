@@ -2633,20 +2633,23 @@ class WriteJITCode:
     def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str) -> None:
         """
         Takes the mutated code and writes it into the script, wrapped in
-        a randomly chosen execution environment.
+        a randomly chosen execution environment from an expanded suite.
         """
         # --- Environment Mutation ---
-        env_choice = random()
+        env_choice = randint(0, 5)
 
-        if env_choice < 0.5:
-            # Environment 1: Simple top-level function
+        # --- Environment 1: Simple top-level function (existing) ---
+        if env_choice == 0:
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Top-Level Function"')
             self.write(0, f"def harness_{prefix}():")
             self.addLevel(1)
             self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"harness_{prefix}()")
-        elif env_choice < 0.8:
-            # Environment 2: Nested function
+
+        # --- Environment 2: Nested function (existing) ---
+        elif env_choice == 1:
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Nested Function"')
             self.write(0, f"def outer_{prefix}():")
             self.addLevel(1)
             self.write(0, f"def harness_{prefix}():")
@@ -2656,17 +2659,48 @@ class WriteJITCode:
             self.write(0, f"harness_{prefix}()")
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"outer_{prefix}()")
-        else:
-            # Environment 3: Class method
+
+        # --- Environment 3: Class method (existing) ---
+        elif env_choice == 2:
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Class Method"')
             self.write(0, f"class Runner_{prefix}:")
             self.addLevel(1)
             self.write(0, f"def harness(self):")
             self.addLevel(1)
-            # Add 'self' to setup/body if needed, or just define it.
-            self.write(0, "prefix = 'm_prefix'")
             self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 2)
             self.write(0, f"Runner_{prefix}().harness()")
+
+        # --- Environment 4: Asynchronous Function (NEW) ---
+        elif env_choice == 3:
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Async Function"')
+            self.write(0, "import asyncio")
+            self.write(0, f"async def harness_{prefix}():")
+            self.addLevel(1)
+            self.write_pattern(setup_code, body_code)
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, f"asyncio.run(harness_{prefix}())")
+
+        # --- Environment 5: Generator Function (NEW) ---
+        elif env_choice == 4:
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Generator Function"')
+            self.write(0, f"def harness_{prefix}():")
+            self.addLevel(1)
+            self.write_pattern(setup_code, body_code)
+            self.write(0, "yield # Make this a generator")
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, "# We must consume the generator for its code to execute.")
+            self.write(0, f"for _ in harness_{prefix}(): pass")
+
+        # --- Environment 6: Lambda-called Function (NEW) ---
+        else:  # env_choice == 5
+            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Lambda-called Function"')
+            self.write(0, f"def harness_{prefix}():")
+            self.addLevel(1)
+            self.write_pattern(setup_code, body_code)
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, f"caller = lambda: harness_{prefix}()")
+            self.write(0, "caller()")
 
     def write_pattern(self, setup_code: str, body_code: str, level=0):
         for line in dedent(setup_code).splitlines():
