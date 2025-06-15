@@ -161,11 +161,16 @@ class ASTMutator:
             StatementDuplicator,
         ]
 
-    def mutate(self, code_string: str) -> str:
+    def mutate(self, code_string: str, seed: int = None) -> str:
         """
         Parses code, applies a random pipeline of AST mutations,
         and unparses it back to a string.
+        If a seed is provided, the mutations will be deterministic.
         """
+        # +++ NEW +++
+        if seed is not None:
+            random.seed(seed)
+
         try:
             tree = ast.parse(dedent(code_string))
         except SyntaxError:
