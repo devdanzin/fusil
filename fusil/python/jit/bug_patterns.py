@@ -4,6 +4,8 @@ BUG_PATTERNS = {
         'target_mechanism': 'DEOPT_IF on variable type change',
         'payload_variable_type': 'int',  # The variable being replaced is an integer from a range().
         'setup_code': """
+    import operator
+
     class FrameModifier_{prefix}:
         def __del__(self):
             try:
@@ -14,11 +16,12 @@ BUG_PATTERNS = {
             except Exception: pass
     """,
         'body_code': """
-    for {loop_var} in range({loop_iterations}):
+    for {loop_var} in range(1, {loop_iterations}): # Start from 1 to avoid division by zero
         FrameModifier_{prefix}()
         try:
-            {loop_var} + {loop_var}
-        except TypeError:
+            # This expression will be dynamically generated as either infix or functional
+            _ = {expression}
+        except (TypeError, ZeroDivisionError, ValueError): # Added ValueError for comparison ops
             pass
     """,
     },

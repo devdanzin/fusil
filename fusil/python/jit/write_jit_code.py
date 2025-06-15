@@ -2572,32 +2572,39 @@ class WriteJITCode:
 
     def _get_mutated_values_for_pattern(self, prefix: str) -> dict:
         """
-        Creates a dictionary of randomized values to be injected into
-        a bug pattern template.
+        Creates a dictionary of randomized values, now including a
+        dynamically generated expression string.
         """
-
         # --- Value & Type Mutation ---
-        # Choose a random "evil" value to corrupt variables with.
-        # This mutates the *type* of the corruption itself.
         corruption_payload = self.arg_generator.genInterestingValues()[0]
+        loop_var = f"i_{prefix}"
 
-        # --- Operator Mutation ---
-        # Choose a random suite of operators for this run.
-        op_choices = ['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']
-        chosen_operator = choice(op_choices)
+        # --- Hybrid Operator/Expression Mutation ---
+        # Define pairs of (infix_string, function_string)
+        operator_pairs = [
+            ('+', 'operator.add'), ('-', 'operator.sub'), ('*', 'operator.mul'),
+            ('/', 'operator.truediv'), ('//', 'operator.floordiv'), ('%', 'operator.mod'),
+            ('**', 'operator.pow'), ('<<', 'operator.lshift'), ('>>', 'operator.rshift'),
+            ('&', 'operator.and_'), ('|', 'operator.or_'), ('^', 'operator.xor'),
+            ('<', 'operator.lt'), ('<=', 'operator.le'), ('==', 'operator.eq'),
+            ('!=', 'operator.ne'), ('>', 'operator.gt'), ('>=', 'operator.ge'),
+        ]
+
+        chosen_infix, chosen_func = choice(operator_pairs)
+
+        # Randomly choose between infix and functional style (80% chance for infix)
+        if random() < 0.8:
+            expression_str = f"{loop_var} {chosen_infix} {loop_var}"
+        else:
+            expression_str = f"{chosen_func}({loop_var}, {loop_var})"
 
         return {
-            # Placeholders for simple variables
             'prefix': prefix,
-            'loop_var': f"i_{prefix}",
-
-            # Mutated values
+            'loop_var': loop_var,
             'loop_iterations': randint(500, self.options.jit_loop_iterations),
-            'trigger_iteration': randint(400, 498),  # A specific range for precision
+            'trigger_iteration': randint(400, 498),
             'corruption_payload': corruption_payload,
-            'operator': chosen_operator,
-
-            # Add more as needed by patterns...
+            'expression': expression_str,  # The new key for our pattern
             'inheritance_depth': randint(50, 500),
             'warmup_calls': self.options.jit_loop_iterations // 10,
         }
