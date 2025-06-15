@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from textwrap import dedent
 from typing import Any
 from random import choice, randint, random
@@ -2572,30 +2573,50 @@ class WriteJITCode:
 
     def _get_mutated_values_for_pattern(self, prefix: str) -> dict:
         """
-        Creates a dictionary of randomized values, now including a
-        dynamically generated expression string.
+        Creates a dictionary of randomized values. Chooses one of three strategies
+        for the 'expression' value:
+        1. Simple Infix Operator (40% chance)
+        2. AST-Generated Complex Expression (40% chance)
+        3. Operator Module Function Call (20% chance)
         """
-        # --- Value & Type Mutation ---
+        # --- Value & Type Mutation (Setup) ---
         corruption_payload = self.arg_generator.genInterestingValues()[0]
         loop_var = f"i_{prefix}"
+        expression_str = ""
 
-        # --- Hybrid Operator/Expression Mutation ---
-        # Define pairs of (infix_string, function_string)
-        operator_pairs = [
-            ('+', 'operator.add'), ('-', 'operator.sub'), ('*', 'operator.mul'),
-            ('/', 'operator.truediv'), ('//', 'operator.floordiv'), ('%', 'operator.mod'),
-            ('**', 'operator.pow'), ('<<', 'operator.lshift'), ('>>', 'operator.rshift'),
-            ('&', 'operator.and_'), ('|', 'operator.or_'), ('^', 'operator.xor'),
-            ('<', 'operator.lt'), ('<=', 'operator.le'), ('==', 'operator.eq'),
-            ('!=', 'operator.ne'), ('>', 'operator.gt'), ('>=', 'operator.ge'),
-        ]
+        # --- Super-Hybrid Expression Mutation ---
+        strategy_roll = random()
 
-        chosen_infix, chosen_func = choice(operator_pairs)
+        if strategy_roll < 0.4:
+            # --- Strategy 1: Simple Infix Operator (40% probability) ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: Infix Operator"')
+            operator_list = [
+                '+', '-', '*', '/', '//', '%', '**', '<<', '>>', '&', '|', '^',
+                '<', '<=', '==', '!=', '>', '>='
+            ]
+            chosen_op = choice(operator_list)
+            expression_str = f"{loop_var} {chosen_op} {loop_var}"
 
-        # Randomly choose between infix and functional style (80% chance for infix)
-        if random() < 0.8:
-            expression_str = f"{loop_var} {chosen_infix} {loop_var}"
+        elif strategy_roll < 0.8:
+            # --- Strategy 2: AST-Generated Complex Expression (40% probability) ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: AST-Generated"')
+            expression_ast = self._generate_expression_ast(available_vars=[loop_var])
+            try:
+                expression_str = ast.unparse(expression_ast)
+            except AttributeError:
+                expression_str = f"{loop_var} # AST unparsing failed"
+
         else:
+            # --- Strategy 3: Operator Module Function Call (20% probability) ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: Functional Call"')
+            func_list = [
+                'operator.add', 'operator.sub', 'operator.mul', 'operator.truediv',
+                'operator.floordiv', 'operator.mod', 'operator.pow', 'operator.lshift',
+                'operator.rshift', 'operator.and_', 'operator.or_', 'operator.xor',
+                'operator.lt', 'operator.le', 'operator.eq', 'operator.ne',
+                'operator.gt', 'operator.ge'
+            ]
+            chosen_func = choice(func_list)
             expression_str = f"{chosen_func}({loop_var}, {loop_var})"
 
         return {
@@ -2604,7 +2625,7 @@ class WriteJITCode:
             'loop_iterations': randint(500, self.options.jit_loop_iterations),
             'trigger_iteration': randint(400, 498),
             'corruption_payload': corruption_payload,
-            'expression': expression_str,  # The new key for our pattern
+            'expression': expression_str,
             'inheritance_depth': randint(50, 500),
             'warmup_calls': self.options.jit_loop_iterations // 10,
         }
@@ -2652,5 +2673,40 @@ class WriteJITCode:
             self.write(level, line)
         for line in dedent(body_code).splitlines():
             self.write(level, line)
+
+    def _generate_expression_ast(self, available_vars: list[str], depth: int = 0) -> ast.expr:
+        """
+        Recursively builds an Abstract Syntax Tree for a complex, random expression.
+
+        Args:
+            available_vars: A list of variable names (as strings) to use as operands.
+            depth: The current recursion depth, to prevent infinite recursion.
+
+        Returns:
+            An ast.expr node representing the generated expression.
+        """
+        # Max recursion depth to ensure termination
+        if depth > randint(2, 3):
+            # Base Case: Return a variable or a constant.
+            if random() < 0.7:
+                return ast.Name(id=choice(available_vars), ctx=ast.Load())
+            else:
+                # Use a small, simple constant for this proof-of-concept
+                return ast.Constant(value=randint(1, 100))
+
+        # Recursive Step: Choose an operator and generate sub-expressions.
+        # Define our suite of AST operator nodes
+        ast_ops = [
+            ast.Add(), ast.Sub(), ast.Mult(), ast.Div(), ast.FloorDiv(), ast.Mod(),
+            ast.Pow(), ast.LShift(), ast.RShift(), ast.BitAnd(), ast.BitOr(), ast.BitXor()
+        ]
+        chosen_op = choice(ast_ops)
+
+        # Generate the left and right operands by calling ourselves recursively.
+        left_operand = self._generate_expression_ast(available_vars, depth + 1)
+        right_operand = self._generate_expression_ast(available_vars, depth + 1)
+
+        return ast.BinOp(left=left_operand, op=chosen_op, right=right_operand)
+
 
 
