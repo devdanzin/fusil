@@ -1,4 +1,5 @@
 import ast
+import builtins
 import random
 import copy
 
@@ -88,16 +89,33 @@ class ContainerChanger(ast.NodeTransformer):
 class VariableSwapper(ast.NodeTransformer):
     """Swaps occurrences of two variable names in a scope."""
 
+    _static_protected_names = frozenset({
+        'print', 'random', 'next', 'isinstance', 'sys', 'operator',
+        'range', 'len', 'object', 'Exception', 'BaseException'
+    })
+
+    _exception_names = {
+        name for name, obj in builtins.__dict__.items()
+        if isinstance(obj, type) and issubclass(obj, BaseException)
+    }
+
+    PROTECTED_NAMES = _static_protected_names.union(_exception_names)
+
     def __init__(self):
         self.var_map = {}
 
     def visit_Module(self, node):
-        # This is a simplistic implementation. A full one would need scope analysis.
-        # It finds all variable names and picks two to swap.
-        names = sorted({n.id for n in ast.walk(node) if isinstance(n, ast.Name)})
-        if len(names) >= 2:
-            a, b = random.sample(names, 2)
+        # Scan for all names used in the module
+        all_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+        # Filter out the protected names to get our list of swappable candidates
+        swappable_names = sorted(list(all_names - self.PROTECTED_NAMES))
+
+        if len(swappable_names) >= 2:
+            # Only choose from the safe, swappable names
+            a, b = random.sample(swappable_names, 2)
             self.var_map = {a: b, b: a}
+
         self.generic_visit(node)
         return node
 
