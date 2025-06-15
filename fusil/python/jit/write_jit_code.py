@@ -165,147 +165,56 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 2)  # exit for and if
 
     def _generate_jit_pattern_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
-        """Generates a block of code with patterns designed to stress the JIT."""
+        """
+        Generates a friendly block of code by feeding a general-purpose
+        pattern into our advanced variational/AST mutation engine.
+        """
         self.write_print_to_stderr(
-            0, f'"[{prefix}] Generating JIT-optimized pattern block."'
+            0, f'"[{prefix}] Generating friendly JIT patterns via variational engine."'
         )
-
-        # 1. Initialize some variables for the block to use
-        self.write(0, f"var_int_a = {self.arg_generator.genInt()[0]}")
-        self.write(0, f"var_int_b = {self.arg_generator.genSmallUint()[0]}")
-        self.write(0, f'var_str_c = "fusil_jit_fuzzing_string"')
-        self.write(0, f"var_list_d = [10, 20, 30, 40, 50]")
-        self.write(0, f"var_tuple_e = (100, 200, 300)")
-        self.write(0, f"temp_val = 0")
-        self.emptyLine()
-
-        # 2. Create the hot loop
-        loop_iterations = self.options.jit_loop_iterations
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        # 3. Weave in the JIT-friendly patterns inside the loop
-        # Math, Truth Tests, Subscripts, and Calls
-        self.write(0, f"if i_{prefix} > var_int_b:")
-        self.write(1, f"temp_val = var_int_a + i_{prefix}")
-        self.write(1, f"char = var_str_c[i_{prefix} % len(var_str_c)]")
-
-        # Containment check and Unpacking
-        self.write(0, "if 20 in var_list_d:")
-        self.write(1, f"x_{prefix}, y_{prefix} = (i_{prefix}, temp_val)")
-
-        # Attribute loading on a common object
-        self.write(0, f"var_list_d.append(i_{prefix})")
-
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+        # We now treat the "friendly" scenario as just another variational pattern.
+        # This ensures even our simplest mode is powerful and diverse.
+        # (This assumes a 'friendly_base' pattern is added to bug_patterns.py)
+        self._generate_variational_scenario(prefix, 'friendly_base')
 
     def _generate_polymorphic_call_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
-        """Generates a hot loop with calls to one function using args of different types."""
-        if not self.parent.module_functions:
-            return
-
-        func_name = choice(self.parent.module_functions)
-        target_func_name = fuzzed_func_name
-
-        self.write(0, "fuzzed_func_is_viable = True")
-        self.write(0, "try:")
-        self.addLevel(1)
-        # Warm up with one simple call.
-        self.write(0, f"callFunc('{prefix}_warmup', '{target_func_name}', 1)")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f'"[{prefix}] Fuzzed function failed on warmup, skipping polymorphic block: {{e}}"')
-        self.write(0, "fuzzed_func_is_viable = False")
-        self.restoreLevel(self.parent.base_level - 1)
+        """
+        Generates a hot loop with calls to one function using args of different types.
+        This is now simplified using the hot loop helper.
+        """
         self.write_print_to_stderr(
-            0, f'"[{prefix}] Generating polymorphic call block for: {func_name}"'
+            0, f'"[{prefix}] Generating polymorphic call block for: {fuzzed_func_name}"'
         )
 
-        # Select a few argument generators to cycle through
         poly_gens = [
-            self.arg_generator.genInt,
-            self.arg_generator.genString,
-            self.arg_generator.genList,
-            self.arg_generator.genBytes,
-            self.arg_generator.genBool,
-            self.arg_generator.genFloat,
+            self.arg_generator.genInt, self.arg_generator.genString,
+            self.arg_generator.genList, self.arg_generator.genBytes,
         ]
+        gens_to_use = [choice(poly_gens) for _ in range(self.options.jit_polymorphic_degree)]
 
-        # Get N diverse generators
-        num_types = self.options.jit_polymorphic_degree
-        gens_to_use = [choice(poly_gens) for _ in range(num_types)]
-
-        # Write the hot loop
-        loop_iterations = self.options.jit_loop_iterations // num_types
-        self.write(0, "if fuzzed_func_is_viable:")
-        self.addLevel(1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for _ in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, f"'INDENTED BLOCK'")
-
+        base_level = self.parent.base_level
+        # Use the new helper to create the loop structure
+        self._begin_hot_loop(prefix)
+        # self.addLevel(1)  # We are already inside the loop created by the helper
 
         # Inside the loop, call the same function with different typed args
         for gen_func in gens_to_use:
             arg_str = " ".join(gen_func())
-            self.write(0, f"callFunc('{prefix}', '{func_name}', {arg_str}, verbose=False)")
+            self.write(1, f"try: callFunc('{prefix}', '{fuzzed_func_name}', {arg_str}, verbose=False)")
+            self.write(1, "except: pass")
 
-        self.restoreLevel(self.parent.base_level - 1)  # for
+        # Cleanly exit all levels opened by the helper
+        self.restoreLevel(base_level)
         if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
+            # Add the matching 'except' block for the 'try' in the helper
             self.write(0, "except ValueError as e_val_err:")
             self.addLevel(1)
             self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
             self.addLevel(1)
             self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
+            self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-        self.restoreLevel(self.parent.base_level - 1)  # if
-        self.emptyLine()
+            self.restoreLevel(self.parent.base_level - 1)
 
     def _generate_phase1_warmup(self, prefix: str) -> dict | None:
         if not self.parent.module_classes:
@@ -2932,4 +2841,33 @@ class WriteJITCode:
             print(f"{code=}")
             return None
         return None
+
+    def _begin_hot_loop(self, prefix: str, level: int = 0) -> None:
+        """
+        Writes the standard boilerplate for a JIT-warming hot loop, including
+        optional aggressive GC and exception raising.
+        """
+        loop_var = f"i_{prefix}"
+        loop_iterations = self.options.jit_loop_iterations
+
+        if self.options.jit_raise_exceptions:
+            self.write(level, "try:")
+            self.addLevel(1)
+
+        self.write(level, f"for {loop_var} in range({loop_iterations}):")
+        self.addLevel(1)
+
+        if self.options.jit_aggressive_gc:
+            self.write(level, f"if {loop_var} % {self.options.jit_gc_frequency} == 0:")
+            self.addLevel(1)
+            self.write(level, "collect()")
+            self.restoreLevel(self.parent.base_level - 1)
+
+        if self.options.jit_raise_exceptions:
+            self.write(level, f"if random() < {self.options.jit_exception_prob}:")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write(level, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.parent.base_level - 1)
+
 

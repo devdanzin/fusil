@@ -319,5 +319,34 @@ for {loop_var} in range({loop_iterations}):
         pass
 """
     },
+    'friendly_base': {
+        'description': 'A general-purpose base pattern for friendly, AST-driven mutation. Contains a mix of common operations.',
+        'target_mechanism': 'General JIT optimization paths',
+        'setup_code': """
+# Setup some basic variables for the pattern to use.
+var_a_{prefix} = 100
+var_b_{prefix} = 200
+var_list_{prefix} = [1, 2, 3, 4]
+var_str = "abcdefg"
+var_tuple = (var_str, 2, 3)
+""",
+        'body_code': """
+# This simple loop structure is the entry point for the AST mutator.
+for {loop_var} in range(1, 2000):
+    # The mutator can swap these operators, perturb constants, etc.
+    temp_val = var_a_{prefix} + {loop_var}
 
+    # The mutator can swap the comparison and duplicate statements.
+    if temp_val > var_b_{prefix}:
+        var_a_{prefix} = temp_val - 10
+
+    # The mutator can change the method call or arguments.
+    var_list_{prefix}.append({loop_var})
+
+    if 20 in var_list_{prefix}:
+        x_{prefix}, y_{prefix} = (temp_val, {loop_var})
+
+    char = var_str[{loop_var} % len(var_str)]
+"""
+    },
 }
