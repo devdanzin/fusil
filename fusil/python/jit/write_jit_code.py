@@ -2496,22 +2496,23 @@ class WriteJITCode:
             self.write_print_to_stderr(0,
                                        f'"[{prefix}] >>> AST MUTATION Fuzzing Pattern: {pattern_name} <<<"')
 
-            body_code_template = dedent(pattern['body_code'])
+            mutations = self._get_mutated_values_for_pattern(prefix, [])
+            body_code = dedent(pattern['body_code']).format(**mutations)
 
             # Check if this is a correctness pattern
             is_correctness_pattern = (
-                    "def jit_target" in body_code_template and
-                    "def control_" in body_code_template
+                    "def jit_target" in body_code and
+                    "def control_" in body_code
             )
 
             if is_correctness_pattern:
                 # --- PAIRED MUTATION FOR CORRECTNESS ---
-                jit_body = self._get_function_body(body_code_template, "jit_target")
-                control_body = self._get_function_body(body_code_template, "control_")
+                jit_body = self._get_function_body(body_code, "jit_target")
+                control_body = self._get_function_body(body_code, "control_")
 
                 # Find the assertion line to append after mutation
                 assertion_line = [
-                    line for line in body_code_template.splitlines()
+                    line for line in body_code.splitlines()
                     if line.strip().startswith("assert")
                 ]
 
@@ -2921,7 +2922,10 @@ class WriteJITCode:
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef) and node.name.startswith(func_name_prefix):
                     return ast.unparse(node)
-        except (SyntaxError, AttributeError):
+            raise ValueError(f"Function named {func_name_prefix}... not found in {code=}.")
+        except (SyntaxError, AttributeError) as e:
+            print(f"{e.__class__.__name__}: {e}")
+            print(f"{code=}")
             return None
         return None
 
