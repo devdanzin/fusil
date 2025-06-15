@@ -2,6 +2,7 @@ BUG_PATTERNS = {
     'decref_escapes': {
         'description': 'Attacks JIT assumptions about local variable stability using a __del__ side effect. Based on GH-124483.',
         'target_mechanism': 'DEOPT_IF on variable type change',
+        'payload_variable_type': 'int',  # The variable being replaced is an integer from a range().
         'setup_code': """
     class FrameModifier_{prefix}:
         def __del__(self):

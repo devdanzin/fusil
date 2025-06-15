@@ -2469,11 +2469,10 @@ class WriteJITCode:
     def _generate_variational_scenario(self, prefix: str, pattern_names: str) -> None:
         """
         Takes a bug pattern template and generates test cases.
-        Can operate in two modes:
-        1. Systematic Mode (--jit-fuzz-systematic-values): Iterates through all
-           known "interesting" values for the payload, but only if the pattern
-           supports it. Otherwise, it falls back to random mode.
-        2. Random Mode (default): Applies a single set of random mutations.
+        Can operate in three modes:
+        1. Systematic Values: Iterates through all known "interesting" values.
+        2. Type-Aware: Iterates through a set of contrasting types.
+        3. Random (default): Applies a single set of random mutations.
         """
         if pattern_names == "ALL":
             pattern_names = ",".join(BUG_PATTERNS.keys())
@@ -2483,15 +2482,14 @@ class WriteJITCode:
             self.write_print_to_stderr(0, f'"[!] Unknown bug pattern name: {pattern_name}"')
             return
 
-        # Check if the pattern can even accept a payload.
         has_payload_placeholder = (
                 '{corruption_payload}' in pattern['setup_code'] or
                 '{corruption_payload}' in pattern['body_code']
         )
 
-        # --- MODIFIED LOGIC BRANCH ---
+        # --- MODIFIED LOGIC ---
         if self.options.jit_fuzz_systematic_values and has_payload_placeholder:
-            # SYSTEMATIC MODE
+            # Logic from previous step remains here...
             self.write_print_to_stderr(0,
                                        f'"[{prefix}] >>> SYSTEMATIC Fuzzing Pattern: {pattern_name} <<<"')
             interesting_values = fusil.python.values.INTERESTING
@@ -2508,8 +2506,52 @@ class WriteJITCode:
 
                 self.write_pattern(setup_code, body_code)
                 self.emptyLine()
+
+        elif self.options.jit_fuzz_type_aware and has_payload_placeholder:
+            # TYPE-AWARE MODE
+            self.write_print_to_stderr(
+                0,
+                f'"[{prefix}] >>> TYPE-AWARE Fuzzing Pattern: {pattern_name} <<<"'
+            )
+
+            original_type = pattern.get('payload_variable_type')
+            if not original_type:
+                self.write_print_to_stderr(
+                    0,
+                    f'"[!] Pattern {pattern_name} is missing "payload_variable_type" metadata. Skipping type-aware fuzzing."'
+                )
+            else:
+                # Define a suite of generators for our contrasting types
+                type_generators = {
+                    'str': self.arg_generator.genString,
+                    'bytes': self.arg_generator.genBytes,
+                    'float': self.arg_generator.genFloat,
+                    'list': self.arg_generator.genList,
+                    'NoneType': lambda: ['None'],
+                    'tricky': self.arg_generator.genTrickyObjects,
+                }
+
+                # Remove the original type to ensure we only use contrasting types
+                if original_type in type_generators:
+                    del type_generators[original_type]
+
+                for type_name, generator_func in type_generators.items():
+                    iter_prefix = f"{prefix}_{type_name}"
+                    # Generate a value string for the chosen type
+                    payload_str = " ".join(generator_func())
+
+                    self.write_print_to_stderr(0,
+                                           f'"""--- Corrupting with type {type_name}: Payload = {payload_str} ---"""')
+
+                    mutations = self._get_mutated_values_for_pattern(iter_prefix)
+                    mutations['corruption_payload'] = payload_str
+
+                    setup_code = pattern['setup_code'].format(**mutations)
+                    body_code = pattern['body_code'].format(**mutations)
+
+                    self.write_pattern(setup_code, body_code)
+                    self.emptyLine()
         else:
-            # RANDOM MODE (Used for all non-payload patterns, or if systematic flag is off)
             if self.options.jit_fuzz_systematic_values and not has_payload_placeholder:
                 self.write_print_to_stderr(0,
                                            f'"[{prefix}] Pattern {pattern_name} does not use a payload. Generating one random variant instead."')
@@ -2518,7 +2560,6 @@ class WriteJITCode:
                                        f'"[{prefix}] >>> RANDOM Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
             mutations = self._get_mutated_values_for_pattern(prefix)
 
-            # Ensure a placeholder doesn't cause a crash if it exists but we're in random mode
             if '{corruption_payload}' not in mutations:
                 mutations['corruption_payload'] = "None"
 

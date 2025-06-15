@@ -286,6 +286,12 @@ class Fuzzer(Application):
              action="store_true",
              default=False,
         )
+        jit_options.add_option(
+            "--jit-fuzz-type-aware",
+            help="When fuzzing a pattern, systematically iterate through a set of contrasting types for the payload.",
+            action="store_true",
+            default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
