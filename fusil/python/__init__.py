@@ -292,6 +292,12 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        jit_options.add_option(
+            "--jit-fuzz-ast-mutation",
+           help="Enable the experimental generative AST-based mutation engine.",
+           action="store_true",
+           default=False,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

@@ -7,6 +7,7 @@ from random import choice, randint, random
 from typing import TYPE_CHECKING
 
 import fusil.python.values
+from fusil.python.jit.ast_mutator import ASTMutator
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 if TYPE_CHECKING:
@@ -26,6 +27,8 @@ class WriteJITCode:
         self.options = parent.options
         self.arg_generator = parent.arg_generator
         self.module_name = parent.module_name
+
+        self.ast_mutator = ASTMutator()
 
         # Bind the writing methods directly for convenience
         self.write = parent.write
@@ -2488,8 +2491,25 @@ class WriteJITCode:
                 '{corruption_payload}' in pattern['body_code']
         )
 
-        # --- MODIFIED LOGIC ---
-        if self.options.jit_fuzz_systematic_values and has_payload_placeholder:
+        if self.options.jit_fuzz_ast_mutation:
+            # AST MUTATION MODE
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] >>> AST MUTATION Fuzzing Pattern: {pattern_name} <<<"')
+
+            # Use a simple mutation dict for placeholders like {prefix}
+            mutations = self._get_mutated_values_for_pattern(prefix, [])
+
+            # Format the template with basic values first
+            initial_setup_code = pattern['setup_code'].format(**mutations)
+            initial_body_code = pattern['body_code'].format(**mutations)
+
+            # Pass the formatted code to the AST mutator
+            mutated_body_code = self.ast_mutator.mutate(initial_body_code)
+
+            self.write_pattern(initial_setup_code, mutated_body_code)
+            self.emptyLine()
+
+        elif self.options.jit_fuzz_systematic_values and has_payload_placeholder:
             # Logic from previous step remains here...
             self.write_print_to_stderr(0,
                                        f'"[{prefix}] >>> SYSTEMATIC Fuzzing Pattern: {pattern_name} <<<"')
@@ -2725,10 +2745,27 @@ class WriteJITCode:
             self.write(0, "caller()")
 
     def write_pattern(self, setup_code: str, body_code: str, level=0):
+        """
+        Writes the setup and body code for a pattern, wrapped in a
+        try...except block to handle benign exceptions from mutated code.
+        """
+        self.write(level, "try:")
+        self.addLevel(1)
+
+        # Write the actual pattern code inside the try block
         for line in dedent(setup_code).splitlines():
             self.write(level, line)
+        self.emptyLine()
         for line in dedent(body_code).splitlines():
             self.write(level, line)
+
+        self.restoreLevel(self.parent.base_level - 1)
+        # Catch any exception to prevent the fuzzer from stopping on
+        # benign errors, allowing it to continue hunting for crashes.
+        self.write(level, "except Exception:")
+        self.addLevel(1)
+        self.write(level, "pass")
+        self.restoreLevel(self.parent.base_level - 1)
 
     def _generate_expression_ast(self, available_vars: list[str], depth: int = 0) -> ast.expr:
         """
