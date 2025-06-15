@@ -288,7 +288,7 @@ items_list_{prefix} = {loop_iterations} * [hashable_item_{prefix}] + [unhashable
 # The hot loop will run many times successfully before hitting the unhashable type.
 try:
     # A set comprehension is a concise way to trigger this.
-    _ = {{item for item in items_list_{prefix}}}
+    _ = set((item for item in items_list_{prefix}))
 except TypeError:
     # We expect a TypeError. A crash indicates the bug is present.
     print(f"[{prefix}] Successfully caught expected TypeError.", file=sys.stderr)

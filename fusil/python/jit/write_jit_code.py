@@ -2499,7 +2499,7 @@ class WriteJITCode:
 
                 self.write_print_to_stderr(0, f'"""--- Iteration {i}: Payload = {payload_str} ---"""')
 
-                mutations = self._get_mutated_values_for_pattern(iter_prefix)
+                mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
                 mutations['corruption_payload'] = payload_str
 
                 setup_code = pattern['setup_code'].format(**mutations)
@@ -2544,7 +2544,7 @@ class WriteJITCode:
                     self.write_print_to_stderr(0,
                                            f'"""--- Corrupting with type {type_name}: Payload = {payload_str} ---"""')
 
-                    mutations = self._get_mutated_values_for_pattern(iter_prefix)
+                    mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
                     mutations['corruption_payload'] = payload_str
 
                     setup_code = pattern['setup_code'].format(**mutations)
@@ -2559,7 +2559,7 @@ class WriteJITCode:
 
             self.write_print_to_stderr(0,
                                        f'"[{prefix}] >>> RANDOM Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
-            mutations = self._get_mutated_values_for_pattern(prefix)
+            mutations = self._get_mutated_values_for_pattern(prefix, [])
 
             if '{corruption_payload}' not in mutations:
                 mutations['corruption_payload'] = "None"
@@ -2571,7 +2571,7 @@ class WriteJITCode:
         self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"')
         self.emptyLine()
 
-    def _get_mutated_values_for_pattern(self, prefix: str) -> dict:
+    def _get_mutated_values_for_pattern(self, prefix: str, param_names: list[str]) -> dict:
         """
         Creates a dictionary of randomized values. Chooses one of three strategies
         for the 'expression' value:
@@ -2600,7 +2600,8 @@ class WriteJITCode:
         elif strategy_roll < 0.8:
             # --- Strategy 2: AST-Generated Complex Expression (40% probability) ---
             self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: AST-Generated"')
-            expression_ast = self._generate_expression_ast(available_vars=[loop_var])
+            available_vars = [f"i_{prefix}"] + param_names
+            expression_ast = self._generate_expression_ast(available_vars=available_vars)
             try:
                 expression_str = ast.unparse(expression_ast)
             except AttributeError:
@@ -2635,71 +2636,92 @@ class WriteJITCode:
         Takes the mutated code and writes it into the script, wrapped in
         a randomly chosen execution environment from an expanded suite.
         """
+        # 1. Generate the mutated parameter and argument set FIRST.
+        params = self._generate_mutated_parameters(prefix)
+        param_def = params['def_str']
+        param_call = params['call_str']
+        param_setup = params['setup_code']
+        param_names = params['param_names']
+
+        # Inject parameter setup code before the rest of the logic
+        if param_setup:
+            self.write(0, param_setup)
+
+        # 2. Generate the rest of the mutations, PASSING IN the param_names
+        # This is a key change: the expression now knows about the parameters
+        # (The logic of _get_mutated_values_for_pattern is now conceptually here)
+        mutations = self._get_mutated_values_for_pattern(prefix, param_names)
+
+        # 3. Format the core setup and body with these mutations
+        final_setup = setup_code.format(**mutations)
+        final_body = body_code.format(**mutations)
+
         # --- Environment Mutation ---
         env_choice = randint(0, 5)
 
         # --- Environment 1: Simple top-level function (existing) ---
         if env_choice == 0:
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Top-Level Function"')
-            self.write(0, f"def harness_{prefix}():")
+            self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"harness_{prefix}()")
+            self.write(0, f"harness_{prefix}({param_call})")
+
 
         # --- Environment 2: Nested function (existing) ---
         elif env_choice == 1:
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Nested Function"')
-            self.write(0, f"def outer_{prefix}():")
+            self.write(0, f"def outer_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write(0, f"def harness_{prefix}():")
+            self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"harness_{prefix}()")
+            self.write(0, f"harness_{prefix}({param_call})")
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"outer_{prefix}()")
+            self.write(0, f"outer_{prefix}({param_call})")
 
         # --- Environment 3: Class method (existing) ---
         elif env_choice == 2:
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Class Method"')
             self.write(0, f"class Runner_{prefix}:")
             self.addLevel(1)
-            self.write(0, f"def harness(self):")
+            self.write(0, f"def harness(self, {param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.restoreLevel(self.parent.base_level - 2)
-            self.write(0, f"Runner_{prefix}().harness()")
+            self.write(0, f"Runner_{prefix}().harness({param_call})")
 
         # --- Environment 4: Asynchronous Function (NEW) ---
         elif env_choice == 3:
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Async Function"')
             self.write(0, "import asyncio")
-            self.write(0, f"async def harness_{prefix}():")
+            self.write(0, f"async def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"asyncio.run(harness_{prefix}())")
+            self.write(0, f"asyncio.run(harness_{prefix}({param_call}))")
 
         # --- Environment 5: Generator Function (NEW) ---
         elif env_choice == 4:
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Generator Function"')
-            self.write(0, f"def harness_{prefix}():")
+            self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.write(0, "yield # Make this a generator")
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "# We must consume the generator for its code to execute.")
-            self.write(0, f"for _ in harness_{prefix}(): pass")
+            self.write(0, f"for _ in harness_{prefix}({param_call}): pass")
 
         # --- Environment 6: Lambda-called Function (NEW) ---
         else:  # env_choice == 5
             self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Lambda-called Function"')
-            self.write(0, f"def harness_{prefix}():")
+            self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
+            self.write_pattern(final_setup, final_body)
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"caller = lambda: harness_{prefix}()")
+            self.write(0, f"caller = lambda: harness_{prefix}({param_call})")
             self.write(0, "caller()")
 
     def write_pattern(self, setup_code: str, body_code: str, level=0):
@@ -2742,5 +2764,63 @@ class WriteJITCode:
 
         return ast.BinOp(left=left_operand, op=chosen_op, right=right_operand)
 
+    def _generate_mutated_parameters(self, prefix: str) -> dict:
+        """
+        Generates a dictionary containing parameter definitions and corresponding
+        arguments for a function call, using various mutation strategies.
 
+        Returns: {
+            'def_str': The string for the function definition (e.g., "p0, p1=[]").
+            'call_str': The string for the function call (e.g., "val0, a_list").
+            'setup_code': Any code needed before the function definition.
+            'param_names': A list of parameter names for the AST generator.
+        }
+        """
+        strategy_roll = random()
+        setup_code = []
+        param_names = []
+
+        if strategy_roll < 0.25:
+            # --- Strategy 1: Pathological Parameter Count ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Parameter Strategy: Pathological Count"')
+            count = 260
+            param_names = [f"p_{i}_{prefix}" for i in range(count)]
+            def_str = ", ".join(param_names)
+            call_args = [self.arg_generator.genInt()[0] for _ in range(count)]
+            call_str = ", ".join(call_args)
+
+        elif strategy_roll < 0.5:
+            # --- Strategy 2: Mutable Default Argument ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Parameter Strategy: Mutable Default"')
+            param_names = [f"p0_{prefix}", f"p1_{prefix}"]
+            # The default object is created once and shared across calls
+            def_str = f"{param_names[0]}, {param_names[1]}=[]"
+            # Call the function in a way that uses the default argument
+            call_str = self.arg_generator.genString()[0]
+
+        elif strategy_roll < 0.75:
+            # --- Strategy 3: Argument Aliasing ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Parameter Strategy: Argument Aliasing"')
+            param_names = [f"p_a_{prefix}", f"p_b_{prefix}"]
+            def_str = ", ".join(param_names)
+            # Define the mutable object that will be aliased
+            aliased_obj_name = f"aliased_list_{prefix}"
+            setup_code.append(f"{aliased_obj_name} = [1, 2, 3, 4, 5]")
+            # Pass the same object to multiple parameters
+            call_str = f"{aliased_obj_name}, {aliased_obj_name}"
+
+        else:
+            # --- Strategy 4: Standard, simple parameters ---
+            self.write_print_to_stderr(0, f'"[{prefix}] Parameter Strategy: Standard"')
+            param_names = [f"p_{i}_{prefix}" for i in range(randint(1, 4))]
+            def_str = ", ".join(param_names)
+            call_args = [self.arg_generator.genInt()[0] for _ in range(len(param_names))]
+            call_str = ", ".join(call_args)
+
+        return {
+            "def_str": def_str,
+            "call_str": call_str,
+            "setup_code": "\n".join(setup_code),
+            "param_names": param_names,
+        }
 
