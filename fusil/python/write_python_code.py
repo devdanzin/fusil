@@ -263,7 +263,7 @@ class WritePythonCode(WriteCode):
             dedent(
                 """\
                 from gc import collect
-                from random import choice, randint, random
+                from random import choice, randint, random, sample
                 from sys import stderr, path as sys_path
                 from os.path import dirname
                 import ast

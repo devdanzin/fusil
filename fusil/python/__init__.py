@@ -274,6 +274,12 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        jit_options.add_option(
+            "--jit-fuzz-patterns",
+            help="Fuzz specific JIT bug patterns by comma-separated names (e.g., 'decref_escapes').",
+            type="str",
+            default=None,
+        )
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any 
+from textwrap import dedent
+from typing import Any
 from random import choice, randint, random
 from typing import TYPE_CHECKING
+
+from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
@@ -48,6 +51,10 @@ class WriteJITCode:
 
         if self.options.rediscover_decref_crash:
             self._generate_decref_escapes_scenario(prefix)
+            return
+
+        if self.options.jit_fuzz_patterns:
+            self._generate_variational_scenario(prefix, self.options.jit_fuzz_patterns)
             return
 
         # Correctness testing takes precedence if enabled.
@@ -2457,5 +2464,110 @@ class WriteJITCode:
             0, f'"[{prefix}] <<< Finished `test_decref_escapes` Re-discovery Scenario >>>"'
         )
         self.emptyLine()
+
+    def _generate_variational_scenario(self, prefix: str, pattern_names: str) -> None:
+        """
+        Takes a bug pattern template, applies a series of random mutations,
+        and generates the resulting test case.
+        """
+        if pattern_names == "ALL":
+            pattern_names = ",".join(BUG_PATTERNS.keys())
+        pattern_name = choice(pattern_names.split(","))
+        pattern = BUG_PATTERNS.get(pattern_name)
+        if not pattern:
+            self.write_print_to_stderr(0, f'"[!] Unknown bug pattern name: {pattern_name}"')
+            return
+
+        self.write_print_to_stderr(0,
+                                   f'"[{prefix}] >>> Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
+
+        # 1. Prepare a dictionary of values for the template placeholders.
+        mutations = self._get_mutated_values_for_pattern(prefix)
+
+        # 2. Apply mutations to the setup and body code templates.
+        setup_code = pattern['setup_code'].format(**mutations)
+        body_code = pattern['body_code'].format(**mutations)
+
+        # 3. Apply Environment Mutation: Wrap the code in a random function context.
+        self._write_mutated_code_in_environment(prefix, setup_code, body_code)
+
+        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"')
+        self.emptyLine()
+
+    def _get_mutated_values_for_pattern(self, prefix: str) -> dict:
+        """
+        Creates a dictionary of randomized values to be injected into
+        a bug pattern template.
+        """
+
+        # --- Value & Type Mutation ---
+        # Choose a random "evil" value to corrupt variables with.
+        # This mutates the *type* of the corruption itself.
+        corruption_payload = self.arg_generator.genInterestingValues()[0]
+
+        # --- Operator Mutation ---
+        # Choose a random suite of operators for this run.
+        op_choices = ['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']
+        chosen_operator = choice(op_choices)
+
+        return {
+            # Placeholders for simple variables
+            'prefix': prefix,
+            'loop_var': f"i_{prefix}",
+
+            # Mutated values
+            'loop_iterations': randint(500, self.options.jit_loop_iterations),
+            'trigger_iteration': randint(400, 498),  # A specific range for precision
+            'corruption_payload': corruption_payload,
+            'operator': chosen_operator,
+
+            # Add more as needed by patterns...
+            'inheritance_depth': randint(50, 500),
+            'warmup_calls': self.options.jit_loop_iterations // 10,
+        }
+
+    def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str) -> None:
+        """
+        Takes the mutated code and writes it into the script, wrapped in
+        a randomly chosen execution environment.
+        """
+        # --- Environment Mutation ---
+        env_choice = random()
+
+        if env_choice < 0.5:
+            # Environment 1: Simple top-level function
+            self.write(0, f"def harness_{prefix}():")
+            self.addLevel(1)
+            self.write_pattern(setup_code, body_code)
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, f"harness_{prefix}()")
+        elif env_choice < 0.8:
+            # Environment 2: Nested function
+            self.write(0, f"def outer_{prefix}():")
+            self.addLevel(1)
+            self.write(0, f"def harness_{prefix}():")
+            self.addLevel(1)
+            self.write_pattern(setup_code, body_code)
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, f"harness_{prefix}()")
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, f"outer_{prefix}()")
+        else:
+            # Environment 3: Class method
+            self.write(0, f"class Runner_{prefix}:")
+            self.addLevel(1)
+            self.write(0, f"def harness(self):")
+            self.addLevel(1)
+            # Add 'self' to setup/body if needed, or just define it.
+            self.write(0, "prefix = 'm_prefix'")
+            self.write_pattern(setup_code, body_code)
+            self.restoreLevel(self.parent.base_level - 2)
+            self.write(0, f"Runner_{prefix}().harness()")
+
+    def write_pattern(self, setup_code: str, body_code: str, level=0):
+        for line in dedent(setup_code).splitlines():
+            self.write(level, line)
+        for line in dedent(body_code).splitlines():
+            self.write(level, line)
 
 
