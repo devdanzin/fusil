@@ -231,31 +231,14 @@ class WriteJITCode:
         instance_var = f"instance_{prefix}"
 
         self.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"')
-
-        # Generate instantiation code
-        # (This reuses logic from your existing _fuzz_one_class)
         self.write(0, f"{instance_var} = callFunc('{prefix}_init', '{class_name}')")
 
-        # Generate the hot loop
+        # Use the new helper to create the loop structure
         self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
         self.addLevel(1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        self._begin_hot_loop(prefix, level=0)  # Use the helper
+        # if self.options.jit_raise_exceptions:
         self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
 
         # Generate the repeated call inside the loop
         self.parent._generate_and_write_call(
@@ -269,10 +252,13 @@ class WriteJITCode:
             in_jit_loop=True,
             verbose=False,
         )
+        self.restoreLevel(self.parent.base_level - 1)
+        self.restoreLevel(self.parent.base_level - 1)  # try
 
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for
+        # Cleanly exit all levels opened by the helper
+        # self.restoreLevel(self.parent.base_level - 1)
         if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
+            # Add the matching 'except' block for the 'try' in the helper
             self.write(0, "except ValueError as e_val_err:")
             self.addLevel(1)
             self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
@@ -300,17 +286,22 @@ class WriteJITCode:
         class_name = target_info['class_name']
         method_name = target_info['method_name']
 
-        # Invalidate by replacing the method on the class with a lambda
-        # This is inspired by test_guard_type_version_executor_invalidated from test_opt.py
+        # +++ NEW: Diversify the invalidation payload +++
+        payloads = [
+            "lambda *a, **kw: 'invalidation payload'",  # The original lambda
+            self.arg_generator.genInt()[0],              # An integer
+            self.arg_generator.genString()[0],           # A string
+            "None",                                      # None
+        ]
+        chosen_payload = choice(payloads)
+
         self.write(0, "# Maliciously replacing the method on the class to invalidate JIT cache")
         self.write(0, "try:")
         self.write(1,
-                   f"setattr({self.module_name}.{class_name}, '{method_name}', lambda *a, **kw: 'invalidation payload')")
+                   f"setattr({self.module_name}.{class_name}, '{method_name}', {chosen_payload})")
         self.write(1, "collect() # Encourage cleanup")
         self.write(0, "except Exception as e:")
         self.write_print_to_stderr(1, f'f"[{prefix}] PHASE 2: Exception invalidating {target_info["class_name"]}: {{ e }}"')
-
-
         self.emptyLine()
 
     def _generate_phase3_reexecute(self, prefix: str, target_info: dict) -> None:
@@ -320,41 +311,28 @@ class WriteJITCode:
         instance_var = target_info['instance_var']
         method_name = target_info['method_name']
 
+        # Use the new helper to create the loop structure
         self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
         self.addLevel(1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "try:")
+        base_level = self.parent.base_level
+        self._begin_hot_loop(prefix, level=0)
+
+        self.write(1, "try:")
         self.addLevel(1)
 
-        # Re-execute the original call. We don't need the full _generate_and_write_call,
-        # just a simple call to the now-potentially-broken method.
-        self.write(0, f"getattr({instance_var}, '{method_name}')()")
+        # Re-execute the original call.
+        self.write(1, f"getattr({instance_var}, '{method_name}')()")
 
         self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
+        self.write(1, "except Exception as e:")
         self.addLevel(1)
-        # Log expected exceptions, a crash is the real prize.
-        self.write_print_to_stderr(0, f'f"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
-        self.write(0, "break")
+        self.write_print_to_stderr(1, f'f"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
+        self.write(1, "break")  # Exit loop if it fails
 
-        self.restoreLevel(self.parent.base_level - 3) # Exit try, loop, if
+        # Cleanly exit all levels
+        self.restoreLevel(base_level)
         if self.options.jit_raise_exceptions:
+            # Add the matching 'except' block for the 'try' in the helper
             self.write(0, "except ValueError as e_val_err:")
             self.addLevel(1)
             self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
@@ -419,114 +397,13 @@ class WriteJITCode:
     def _generate_deleter_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
         Generates a sophisticated scenario that uses a __del__ side effect
-        to induce type confusion for local, instance, and class variables.
-        The side effect is triggered only once, near the end of the hot loop.
+        to induce type confusion.
+
+        This is now implemented by delegating to our more powerful variational
+        engine using the 'decref_escapes' bug pattern.
         """
-        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Advanced __del__ Side Effect Scenario <<<"')
-
-        # --- 1. SETUP OUTSIDE THE LOOP ---
-        # Define unique names for all our variables using the prefix.
-        target_var = f"target_{prefix}"
-        fm_target_var = f"fm_{target_var}"
-        dummy_class_name = f"Dummy_{prefix}"
-        dummy_instance_name = f"dummy_instance_{prefix}"
-        fm_dummy_class_attr = f"fm_{dummy_instance_name}_a"
-        fm_dummy_instance_attr = f"fm_{dummy_instance_name}_b"
-        loop_iterations = self.options.jit_loop_iterations
-
-        # Create the local variable and its FrameModifier.
-        self.write(0, f"# A. Create a local variable and its FrameModifier")
-        self.write(0, f"{target_var} = 100")
-        self.write(0, f"{fm_target_var} = FrameModifier('{target_var}', 'local-string')")
-        self.write(0, f"fm_target_i_{prefix} = FrameModifier('i_{prefix}', 'local-string')")
-        self.emptyLine()
-
-        # Create the class, instance, and their FrameModifiers.
-        self.write(0, f"# B. Create a class with instance/class attributes and their FrameModifiers")
-        self.write(0, f"class {dummy_class_name}:")
-        self.write(1, "a = 200  # Class attribute")
-        self.write(1, "def __init__(self):")
-        self.write(2, "self.b = 300  # Instance attribute")
-        self.write(0, f"{dummy_instance_name} = {dummy_class_name}()")
-        # Note: The target strings now include the instance name, e.g., 'dummy_instance_f1.a'
-        self.write(0, f"{fm_dummy_class_attr} = FrameModifier('{dummy_instance_name}.a', 'class-attr-string')")
-        self.write(0, f"{fm_dummy_instance_attr} = FrameModifier('{dummy_instance_name}.b', 'instance-attr-string')")
-        self.emptyLine()
-
-        # --- 2. HOT LOOP ---
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        # --- 2A. WARM-UP PHASE (inside loop) ---
-        self.write(0, f"# Use all variables to warm up the JIT with their initial types")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"{target_var} + {target_var}")
-        self.write(0, f"i_{prefix} + i_{prefix}")
-        # self.write(0, f"x = {target_var} + i_{prefix}")
-        self.write(0, f"y = {dummy_instance_name}.a + i_{prefix}")
-        self.write(0, f"z = {dummy_instance_name}.b + i_{prefix}")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except TypeError: pass")
-        self.emptyLine()
-
-        # --- 2B. TRIGGER PHASE (inside loop) ---
-        # Trigger the deletion on the penultimate iteration to ensure the loop
-        # runs one more time with the corrupted state.
-        self.write(0, f"# On the penultimate loop, delete the FrameModifiers to trigger __del__")
-        self.write(0, f"if i_{prefix} == {loop_iterations - 2}:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] DELETING FRAME MODIFIERS..."')
-        self.write(0, f"del {fm_target_var}")
-        self.write(0, f"del {fm_dummy_class_attr}")
-        self.write(0, f"del {fm_dummy_instance_attr}")
-        self.write(0, f"del fm_target_i_{prefix}")
-        self.write(0, "collect()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # --- 2C. RE-EXECUTE PHASE (inside loop) ---
-        self.write(0, f"# Use the variables again, which may hit a corrupted JIT state after deletion")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"i_{prefix} + i_{prefix}")
-        self.write(0, f"{target_var} + {target_var}")
-        self.write(0, f"res_local = {target_var} + i_{prefix}")
-        self.write(0, f"res_cls_attr = {dummy_instance_name}.a + i_{prefix}")
-        self.write(0, f"res_inst_attr = {dummy_instance_name}.b + i_{prefix}")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except TypeError as e:")
-        self.write(1, "pass # This TypeError is expected if the side effect worked")
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-
-        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Advanced __del__ Side Effect Scenario >>>"')
-        self.emptyLine()
+        self.write_print_to_stderr(0, f'"[{prefix}] Delegating to variational engine for __del__ side effect scenario."')
+        self._generate_variational_scenario(prefix, 'decref_escapes')
 
     def _generate_many_vars_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
@@ -2866,8 +2743,9 @@ class WriteJITCode:
         if self.options.jit_raise_exceptions:
             self.write(level, f"if random() < {self.options.jit_exception_prob}:")
             self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
+            self.write_print_to_stderr(level, f'"[{prefix}] Intentionally raising exception in hot loop!"')
             self.write(level, "raise ValueError('JIT fuzzing probe')")
+            self.restoreLevel(self.parent.base_level - 1)
             self.restoreLevel(self.parent.base_level - 1)
 
 
