@@ -270,6 +270,7 @@ class WritePythonCode(WriteCode):
                 import inspect
                 import io
                 import math
+                import operator
                 import time
                 import sys
                 from threading import Thread

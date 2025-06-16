@@ -407,117 +407,80 @@ class WriteJITCode:
 
     def _generate_many_vars_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
-        Generates a function with >256 local variables to stress the JIT's
-        bytecode parser, specifically its handling of the EXTENDED_ARG opcode.
+        Generates a function with >256 local variables and a complex,
+        AST-mutated body that operates on them.
         """
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Generative Scenario <<<"""')
+
+        # 1. Generate the variable definitions.
+        num_vars = 260
+        var_names = [f"var_{i}_{prefix}" for i in range(num_vars)]
+        var_defs = "\n".join([f"{name} = {i}" for i, name in enumerate(var_names)])
+
+        # 2. Get the 'many_vars_base' pattern.
+        pattern = BUG_PATTERNS['many_vars_base']
+
+        # 3. Get a complex expression from the AST mutator, giving it ALL the variables.
+        mutations = self._get_mutated_values_for_pattern(prefix, var_names)
+        mutations['var_definitions'] = var_defs
+
+        # 4. Format and write the complete, powerful scenario.
+        setup_code = dedent(pattern['setup_code']).format(**mutations)
+        body_code = dedent(pattern['body_code']).format(**mutations)
+
         func_name = f"many_vars_func_{prefix}"
-        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Resource Limit Scenario <<<"""')
-        self.write(0, f"# Define a function with an unusually large number of local variables.")
         self.write(0, f"def {func_name}():")
         self.addLevel(1)
-
-        # 1. Generate over 256 local variable assignments.
-        num_vars = 260  # A value safely over the 256 threshold
-        for i in range(num_vars):
-            self.write(0, f"var_{i} = {i}")
-
-        # 2. Add a hot loop that uses some of these variables to make the function
-        #    a candidate for JIT compilation.
-        self.write(0, f"# Hot loop to trigger JIT compilation of this large function.")
-        self.write(0, "total = 0")
-        if self.options.jit_raise_exceptions and 0:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions and 0:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        # Use the first, middle, and last variables to ensure they aren't optimized away.
-        self.write(0, f"total += var_0 + var_{num_vars // 2} + var_{num_vars - 1}")
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        self.write(0, "return total")
-        self.restoreLevel(self.parent.base_level - 1)  # Exit def
-        self.emptyLine()
-
-        # 3. Call the newly defined function.
-        self.write(0, f"# Execute the function with many variables.")
-        self.write(0, f"{func_name}()")
-        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Many Vars" Scenario >>>"""')
-        self.emptyLine()
-        if self.options.jit_raise_exceptions and 0:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+        self.write_pattern(setup_code, body_code)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, f"{func_name}()")  # Execute the function
 
     def _generate_deep_calls_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
-        Generates a deep chain of function calls to stress the JIT's
-        stack analysis and trace stack limits.
+        Generates a deep call chain where each function contains a
+        different, AST-mutated expression.
         """
-        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Deep Calls" Resource Limit Scenario <<<"""')
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Generative Deep Calls" Scenario <<<"""')
+        depth = 15
 
-        # 1. Define the base case for the call chain.
-        depth = 20  # A reasonably deep call chain
-        self.write(0, f"# Define a deep chain of {depth} nested function calls.")
-        self.write(0, f"def f_0_{prefix}(): return 1")
+        # 1. Generate the chain of functions.
+        for i in range(depth):
+            func_name = f"f_{i}_{prefix}"
+            # At each level, generate a NEW mutated expression.
+            mutations = self._get_mutated_values_for_pattern(prefix, [f'p_{prefix}'])
+            expression = mutations['expression']
 
-        # 2. Generate the chain of functions, each calling the previous one.
-        for i in range(1, depth):
-            self.write(0, f"def f_{i}_{prefix}(): return 1 + f_{i - 1}_{prefix}()")
-
-        top_level_func = f"f_{depth - 1}_{prefix}"
-        self.emptyLine()
-
-        # 3. Call the top-level function inside a hot loop to trigger the JIT.
-        #    Wrap it in a try...except RecursionError since this is a possible outcome.
-        if self.options.jit_raise_exceptions:
+            self.write(0, f"def {func_name}(p_{prefix}):")
+            self.addLevel(1)
             self.write(0, "try:")
             self.addLevel(1)
-        self.write(0, f"# Execute the top-level function of the chain in a hot loop.")
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
+            # The next call is embedded inside the expression.
+            if i > 0:
+                next_call = f"f_{i - 1}_{prefix}(p_{prefix})"
+                self.write(0, f"res = {expression} + {next_call}")
+            else:  # Base case
+                self.write(0, f"res = {expression}")
+            self.write(0, "return res")
             self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
+            self.write(0, "except Exception: return 1")
             self.restoreLevel(self.parent.base_level - 1)
 
-        self.write(0, "try:")
+        # 2. Use our hot loop helper to call the top-level function.
+        top_level_func = f"f_{depth - 1}_{prefix}"
+        self._begin_hot_loop(prefix)
         self.addLevel(1)
-        self.write(0, f"{top_level_func}()")
+        self.write(1, "try:")
+        self.addLevel(1)
+        self.write(1, f"{top_level_func}({self.arg_generator.genSmallUint()[0]})")
         self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except RecursionError:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected RecursionError."')
-        self.write(0, "break # Exit loop if recursion limit is hit")
-        self.restoreLevel(self.parent.base_level - 2)  # Exit except and for loop
+        self.write(1, "except RecursionError: break")
+        self.restoreLevel(self.parent.base_level - 1)
+
+        # Finalize the hot loop block
+        self.restoreLevel(self.parent.base_level - 1)
 
         if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
+            # self.restoreLevel(self.parent.base_level - 1)  # try
             self.write(0, "except ValueError as e_val_err:")
             self.addLevel(1)
             self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
