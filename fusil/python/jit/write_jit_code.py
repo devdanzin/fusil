@@ -131,7 +131,7 @@ class WriteJITCode:
 
     def _generate_friendly_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """Chooses and generates one of the JIT-friendly (warm-up) scenarios."""
-        if random() < 0.5:
+        if random() < 1.5:
             self._generate_jit_pattern_block(prefix, fuzzed_func_name, fuzzed_func_obj)
         else:
             self._generate_polymorphic_call_block(prefix, fuzzed_func_name, fuzzed_func_obj)
