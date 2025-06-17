@@ -1406,224 +1406,20 @@ class WriteJITCode:
         CORRECTNESS SCENARIO 1: Generates a 'Twin Execution' test for a
         block of JIT-friendly patterns to check for silent correctness bugs.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Math Patterns) <<<"'
-        )
+        return self._generate_paired_ast_mutation_scenario(prefix, 'jit_friendly_math')
 
-        const_a_str = self.arg_generator.genInt()[0]
-        const_b_str = self.arg_generator.genSmallUint()[0]
-
-        jit_func_name = f"jit_target_math_{prefix}"
-        control_func_name = f"control_math_{prefix}"
-
-        # 1. Define the JIT Target function.
-        self.write(0, "# This function will be run on a 'hot' path to engage the JIT.")
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        # Pass the pre-generated constants to the body generator.
-        self._generate_math_logic_body(prefix, const_a_str, const_b_str)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function with identical logic.
-        self.write(0, "# This function has identical logic but will be run only once.")
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        # Pass the SAME pre-generated constants to this body generator as well.
-        self._generate_math_logic_body(prefix, const_a_str, const_b_str)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-        self.emptyLine()
-
-        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
-        self.write(0, f"jit_result = {jit_func_name}()")
-        self.write(0, f"control_result = no_jit_harness({control_func_name})")
-        self.emptyLine()
-        self.write(0,
-                   f'assert jit_result == control_result, f"JIT CORRECTNESS BUG! JIT Result: {{jit_result}}, Control Result: {{control_result}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (Math Patterns) Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_evil_math_logic_body(self, prefix: str, constants: dict) -> None:
+    def _generate_evil_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
-        Generates the body of a function with complex, "evil" JIT-friendly
-        patterns, using boundary values from the INTERESTING list.
+        Now prepares the constants and delegates to the unified engine.
         """
-        # 1. Initialize variables using the pre-generated constants.
-        self.write(1, f"# Initialize variables with potentially problematic boundary values.")
-        self.write(1, f"var_a = {constants['val_a']}")
-        self.write(1, f"var_b = {constants['val_b']}")
-        self.write(1, f"var_c = {constants['val_c']}")
-        self.write(1, f"str_d = {constants['str_d']}")
-        self.write(1, "total = 0.0 # Use a float accumulator for broader compatibility")
-        self.emptyLine()
-
-        # 2. Create the hot loop.
-        loop_iterations = self.options.jit_loop_iterations // 20
-        loop_var = f"i_{prefix}"
-        self.write(1, f"for {loop_var} in range(1, {loop_iterations}): # Start from 1 to avoid division by zero")
-        self.addLevel(1)
-
-        # 3. Weave in more complex and "evil" patterns inside the loop.
-        self.write(1, "try:")
-        self.addLevel(1)
-        # Mix float, int, and boundary values. Use operators the JIT optimizes.
-        self.write(1, f"temp_val = (var_a + var_b) / {loop_var}")
-        self.write(1, f"temp_val_2 = var_c * {loop_var}")
-        # Perform a comparison that will change throughout the loop.
-        self.write(1, f"if temp_val > temp_val_2:")
-        self.addLevel(1)
-        # Use string operations as well.
-        self.write(1, f"total += len(str_d) + len(str(temp_val))")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "else:")
-        self.addLevel(1)
-        self.write(1, f"total -= temp_val_2")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except (ValueError, TypeError, ZeroDivisionError, OverflowError):")
-        self.addLevel(1)
-        # It's expected that operations on boundary values might raise exceptions.
-        # We just need to handle them so the loop can continue.
-        self.write(1, "total -= 1")
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        self.write(1, "return total")
-
-    def _generate_evil_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                      fuzzed_func_obj: Any) -> None:
-        """
-        CORRECTNESS SCENARIO (EVIL): Generates a 'Twin Execution' test using
-        complex operations and boundary values to stress the JIT's correctness.
-        """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting EVIL JIT Correctness Scenario (Boundary Values) <<<"'
-        )
-
-        # 1. Generate the problematic constants ONCE.
-        #    We pull directly from the `INTERESTING` list for maximum effect.
-        constants = {
+        # Prepare the "evil" constants required by the pattern's setup_code
+        extra_mutations = {
             'val_a': self.arg_generator.genInterestingValues()[0],
             'val_b': self.arg_generator.genInterestingValues()[0],
             'val_c': self.arg_generator.genInterestingValues()[0],
             'str_d': self.arg_generator.genString()[0],
         }
-
-        jit_func_name = f"jit_target_evil_{prefix}"
-        control_func_name = f"control_evil_{prefix}"
-
-        # 2. Define the JIT Target function.
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        self._generate_evil_math_logic_body(prefix, constants)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Define the Control function with identical logic.
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        self._generate_evil_math_logic_body(prefix, constants)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 4. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their results are identical.")
-        self.write(0, f"jit_result, control_result = None, None")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-        self.write(0, f"jit_result = {jit_func_name}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] JIT version raised unexpected exception: {{e}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"control_result = no_jit_harness({control_func_name})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Control version raised unexpected exception: {{e}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-
-        # We can only assert if both completed without error.
-        # A discrepancy in which one raises an error is itself a bug.
-        self.write(0,
-                   f'are_nan = math.isnan(jit_result) and math.isnan(control_result)')
-        self.write(0,
-                   f'assert jit_result == control_result or are_nan, f"EVIL JIT CORRECTNESS DEFECT! JIT Result: {{jit_result}}, Control Result: {{control_result}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< EVIL JIT Correctness Scenario Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_deleter_logic_body(self, prefix: str) -> None:
-        """
-        Generates the body of a function that performs the __del__ side effect
-        attack. It returns the final state of the targeted variables for correctness checking.
-        """
-        # Define unique names for all our variables using the prefix.
-        target_var = f"target_{prefix}"
-        fm_target_var = f"fm_{target_var}"
-        dummy_class_name = f"Dummy_{prefix}"
-        dummy_instance_name = f"dummy_instance_{prefix}"
-        fm_dummy_class_attr = f"fm_{dummy_instance_name}_a"
-        fm_dummy_instance_attr = f"fm_{dummy_instance_name}_b"
-        loop_iterations = self.options.jit_loop_iterations
-        trigger_iteration = loop_iterations - 2  # Trigger on the penultimate iteration
-
-        # 1. SETUP - This logic is now inside the function body.
-        self.write(1, f"# A. Create a local variable and its FrameModifier")
-        self.write(1, f"{target_var} = 100")
-        self.write(1, f"{fm_target_var} = FrameModifier('{target_var}', 'local-string')")
-        self.emptyLine()
-
-        self.write(1, f"# B. Create a class with instance/class attributes and their FrameModifiers")
-        self.write(1, f"class {dummy_class_name}:")
-        self.addLevel(1)
-        self.write(1, "a = 200  # Class attribute")
-        self.write(1, "def __init__(self): self.b = 300  # Instance attribute")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, f"{dummy_instance_name} = {dummy_class_name}()")
-        self.write(1, f"{fm_dummy_class_attr} = FrameModifier('{dummy_instance_name}.a', 'class-attr-string')")
-        self.write(1, f"{fm_dummy_instance_attr} = FrameModifier('{dummy_instance_name}.b', 'instance-attr-string')")
-        self.emptyLine()
-
-        # 2. HOT LOOP
-        self.write(1, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-        self.write(1, "try:")
-        self.addLevel(1)
-        # Warm-up phase
-        self.write(1, f"x = {target_var} + i_{prefix}")
-        self.write(1, f"y = {dummy_instance_name}.a + i_{prefix}")
-        self.write(1, f"z = {dummy_instance_name}.b + i_{prefix}")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except TypeError: pass")
-
-        # Trigger phase
-        self.write(1, f"if i_{prefix} == {trigger_iteration}:")
-        self.addLevel(1)
-        self.write(1, f"del {fm_target_var}")
-        self.write(1, f"del {fm_dummy_class_attr}")
-        self.write(1, f"del {fm_dummy_instance_attr}")
-        self.write(1, "collect()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-
-        # 3. RETURN FINAL STATE for comparison.
-        self.write(1, f"# Return the final state of all targeted variables.")
-        self.write(1, f"return ({target_var}, {dummy_instance_name}.a, {dummy_instance_name}.b)")
+        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_boundary_math', extra_mutations)
 
     def _generate_deleter_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
                                                       fuzzed_func_obj: Any) -> None:
@@ -1631,77 +1427,7 @@ class WriteJITCode:
         CORRECTNESS SCENARIO 2: Generates a 'Twin Execution' test for the
         __del__ side effect attack to check for silent state corruption.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (__del__ Attack) <<<"'
-        )
-
-        jit_func_name = f"jit_target_deleter_{prefix}"
-        control_func_name = f"control_deleter_{prefix}"
-
-        # 1. Define the JIT Target function.
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        self._generate_deleter_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function with identical logic.
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        self._generate_deleter_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their final states are identical.")
-        self.write(0, f"jit_final_state = {jit_func_name}()")
-        self.write(0, f"control_final_state = no_jit_harness({control_func_name})")
-
-        # Use our NaN-aware comparison for the assertion.
-        self.write(0,
-                   f'assert compare_results(jit_final_state, control_final_state), f"JIT STATE MISMATCH after __del__ attack! JIT: {{jit_final_state}}, Control: {{control_final_state}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (__del__ Attack) Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_deep_calls_logic_body(self, prefix: str, func_name_prefix: str) -> str:
-        """
-        Generates the definitions for a deep chain of functions, where each
-        function in the chain performs complex work.
-
-        Returns:
-            The name of the top-level function to be called.
-        """
-        depth = 15
-        self.write(1, f"# Define a deep chain of {depth} functions.")
-
-        # 1. Define the base case (the final function in the chain).
-        self.write(1, f"def {func_name_prefix}_0(p):")
-        self.addLevel(1)
-        self.write(1, "x = len('base_case') + p")
-        self.write(1, "y = x % 5")
-        self.write(1, "return x - y")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Generate the intermediate functions in the chain.
-        for i in range(1, depth):
-            self.write(1, f"def {func_name_prefix}_{i}(p):")
-            self.addLevel(1)
-            self.write(1, f"local_val = p * {i}")
-            self.write(1, "s = 'abcdef'")
-            self.write(1, f"if local_val > 10 and (s[{i} % len(s)]):")
-            self.addLevel(1)
-            # Recursively call the next function in the chain.
-            self.write(1, f"local_val += {func_name_prefix}_{i - 1}(p)")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(1, "return local_val")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.emptyLine()
-
-        return f"{func_name_prefix}_{depth - 1}"
+        return self._generate_paired_ast_mutation_scenario(prefix, 'deleter_side_effect')
 
     def _generate_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
                                                       fuzzed_func_obj: Any) -> None:
@@ -1709,194 +1435,41 @@ class WriteJITCode:
         CORRECTNESS SCENARIO 3: Generates a 'Twin Execution' test for the
         'Mixed Deep Calls' scenario to verify its correctness.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Deep Calls) <<<"'
-        )
+        return self._generate_paired_ast_mutation_scenario(prefix, 'deep_calls_correctness')
 
-        jit_func_prefix = f"jit_f_{prefix}"
-        control_func_prefix = f"control_f_{prefix}"
-
-        # 1. Define the JIT Target function chain.
-        self.write(0, "# This function chain will be run on a 'hot' path.")
-        self.write(0, f"def jit_target_harness_{prefix}():")
-        self.addLevel(1)
-        jit_top_level_func = self._generate_deep_calls_logic_body(prefix, jit_func_prefix)
-        # Call the top-level function inside a loop.
-        self.write(1, f"total = 0")
-        self.write(1, f"for i in range(10): total += {jit_top_level_func}(i)")
-        self.write(1, f"return total")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function chain with identical logic.
-        self.write(0, "# This function chain has identical logic but will be run only once.")
-        self.write(0, f"def control_harness_{prefix}():")
-        self.addLevel(1)
-        control_top_level_func = self._generate_deep_calls_logic_body(prefix, control_func_prefix)
-        self.write(1, f"total = 0")
-        self.write(1, f"for i in range(10): total += {control_top_level_func}(i)")
-        self.write(1, f"return total")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Generate the execution and assertion code.
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness(jit_target_harness_{prefix}, {self.options.jit_loop_iterations})")
-        self.emptyLine()
-
-        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
-        self.write(0, f"jit_result = jit_target_harness_{prefix}()")
-        self.write(0, f"control_result = no_jit_harness(control_harness_{prefix})")
-
-        self.write(0,
-                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (Deep Calls)! JIT: {{jit_result}}, Control: {{control_result}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (Deep Calls) Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_evil_deep_calls_logic_body(self, prefix: str, func_name_prefix: str,
-                                             constants: list[str], operators: list[str],
-                                             exception_level: int, fuzzed_func_name: str) -> str:
+    def _generate_evil_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
-        Generates the body for the 'evil' deep calls scenario, using boundary
-        values, a suite of operators, and a potential exception trigger.
+        Prepares the complex setup for the evil deep call pattern and delegates
+        to the unified engine.
         """
         depth = 15
-        self.write(1, "# This function chain uses boundary values and mixed operators.")
-
-        # 1. Define the base case. It performs a final operation and
-        #    also calls a real fuzzed function.
-        self.write(1, f"def {func_name_prefix}_0(p_tuple):")
-        self.addLevel(1)
-        self.write(1, "res = list(p_tuple)")
-        self.write(1, "try:")
-        self.addLevel(1)
-        self.write(1, f"op = {operators[0]}")
-        self.write(1, f"const = {constants[0]}")
-        self.write(1, "res[0] = op(res[0], const)")
-        self.write(1, f"{self.module_name}.{fuzzed_func_name}(res[0])")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except (TypeError, ValueError, ZeroDivisionError, OverflowError): pass")
-        self.write(1, "return tuple(res)")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Generate the intermediate functions.
+        # Build the chain of function definitions for the pattern's setup_code
+        func_chain_lines = []
         for i in range(1, depth):
-            self.write(1, f"def {func_name_prefix}_{i}(p_tuple):")
-            self.addLevel(1)
-            # Potentially raise our probe exception.
-            if i == exception_level:
-                self.write(1, "if random() < 0.001:")
-                self.addLevel(1)
-                self.write_print_to_stderr(1, f'"[{prefix}] EVIL DEEP CALL: Raising ValueError probe!"')
-                self.write(1, "raise ValueError(('evil_deep_call_probe',))")
-                self.restoreLevel(self.parent.base_level - 1)
+            func_def = (
+                f"def f_{i}_{prefix}(p_tuple):\n"
+                f"    try:\n"
+                f"        op = OPERATOR_SUITE[{i % 4}]\n"
+                f"        const = CONSTANTS[{i % 4}]\n"
+                f"        res = list(p_tuple)\n"
+                f"        res[1] = op(res[1], const)\n"
+                f"        if {i} == EXCEPTION_LEVEL: raise ValueError(('evil_deep_call_probe',))\n"
+                f"        return f_{i - 1}_{prefix}(tuple(res))\n"
+                f"    except Exception: return p_tuple"
+            )
+            func_chain_lines.append(dedent(func_def))
 
-            self.write(1, "res = list(p_tuple)")
-            self.write(1, "try:")
-            self.addLevel(1)
-            # Use a different operator and constant at each level of the chain.
-            self.write(1, f"op = {operators[i % len(operators)]}")
-            self.write(1, f"const = {constants[i % len(constants)]}")
-            self.write(1, "res[1] = op(res[1], const)")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(1, "except (TypeError, ValueError, ZeroDivisionError, OverflowError): pass")
-            # Call the next function in the chain.
-            self.write(1, f"return {func_name_prefix}_{i - 1}(tuple(res))")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.emptyLine()
-
-        return f"{func_name_prefix}_{depth - 1}"
-
-    def _generate_evil_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                      fuzzed_func_obj: Any) -> None:
-        """
-        CORRECTNESS SCENARIO (EVIL DEEP CALLS): Generates a 'Twin Execution'
-        test for a deep call chain using boundary values and mixed operators.
-        """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting EVIL JIT Correctness Scenario (Deep Calls) <<<"'
-        )
-        self.write(0, "import operator")
-
-        # 1. Setup for the scenario: Choose operators and boundary values ONCE.
-        operator_suite = ['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']
-        constants = [self.arg_generator.genInterestingValues()[0] for _ in range(4)]
-        exception_level = randint(5, 12)  # Choose a random level to hide the exception.
-
-        jit_func_prefix = f"jit_evil_f_{prefix}"
-        control_func_prefix = f"control_evil_f_{prefix}"
-
-        # 2. Define the JIT Target function chain.
-        self.write(0, f"def jit_target_harness_{prefix}():")
-        self.addLevel(1)
-        jit_top_level_func = self._generate_evil_deep_calls_logic_body(
-            prefix, jit_func_prefix, constants, operator_suite, exception_level, fuzzed_func_name
-        )
-        self.write(1, f"return {jit_top_level_func}(({constants[0]}, {constants[1]}))")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Define the Control function chain.
-        self.write(0, f"def control_harness_{prefix}():")
-        self.addLevel(1)
-        control_top_level_func = self._generate_evil_deep_calls_logic_body(
-            prefix, control_func_prefix, constants, operator_suite, exception_level, fuzzed_func_name
-        )
-        self.write(1, f"return {control_top_level_func}(({constants[0]}, {constants[1]}))")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 4. Generate the execution and assertion code.
-        self.write(0, "# Run both versions and assert their final states are identical.")
-        self.write(0, f"jit_result, control_result = None, None")
-        self.write(0, f"jit_exc, control_exc = None, None")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness(jit_target_harness_{prefix}, {self.options.jit_loop_iterations})")
-        self.write(0, f"jit_result = jit_target_harness_{prefix}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e: jit_exc = e")
-
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"control_result = no_jit_harness(control_harness_{prefix})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e: control_exc = e")
-
-        # Assertions
-        self.write(0,
-                   "if not isinstance(jit_exc, ValueError) and not isinstance(control_exc, ValueError):")
-        self.write(1,
-                   "assert type(jit_exc) == type(control_exc) or None in (jit_exc, control_exc), f'Exception type mismatch! JIT: {type(jit_exc)}, Control: {type(control_exc)}'")
-        self.write(0,
-                   "if isinstance(jit_exc, ValueError) and isinstance(control_exc, ValueError): assert jit_exc.args == control_exc.args, 'Probe exception payload mismatch!'")
-        self.write(0, "if not compare_results(jit_result, control_result):")
-        self.addLevel(1)
-        # Try to represent the results for the error message, but handle the ValueError.
-        self.write(0, "try: jit_repr = repr(jit_result)")
-        self.write(0, "except ValueError: jit_repr = '<int too large to display>'")
-        self.write(0, "try: control_repr = repr(control_result)")
-        self.write(0, "except ValueError: control_repr = '<int too large to display>'")
-
-        # Raise the AssertionError with the safe representations.
-        self.write(0,
-                   'raise AssertionError(f"EVIL DEEP CALLS BUG! JIT: {jit_repr}, Control: {control_repr}")'
-                   )
-        self.restoreLevel(self.parent.base_level - 1)
-
-        # Add an else case for clarity in the generated code
-        self.write(0, "else:")
-        self.addLevel(1)
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< EVIL JIT Correctness Scenario (Deep Calls) Passed >>>"'
-        )
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        extra_mutations = {
+            'operator_suite': "['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']",
+            'constants': [self.arg_generator.genInterestingValues()[0] for _ in range(4)],
+            'exception_level': randint(5, 12),
+            'function_chain': "\n".join(func_chain_lines),
+            'depth': depth,
+            'depth_minus_1': depth - 1,
+            'module_name': self.module_name,
+            'fuzzed_func_name': fuzzed_func_name,
+        }
+        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_deep_calls_correctness', extra_mutations)
 
     def _generate_inplace_add_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
                                                          fuzzed_func_obj: Any) -> None:
@@ -1904,115 +1477,7 @@ class WriteJITCode:
         GREY-BOX CORRECTNESS SCENARIO 1: Attacks the guard on the
         _BINARY_OP_INPLACE_ADD_UNICODE specialization.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (In-Place Add Attack) <<<"'
-        )
-
-        jit_func_name = f"jit_target_inplace_{prefix}"
-        control_func_name = f"control_inplace_{prefix}"
-
-        # 1. Define the JIT Target function.
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        self._generate_inplace_add_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function.
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        self._generate_inplace_add_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Generate the execution and assertion code.
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-        self.emptyLine()
-
-        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
-        self.write(0, f"jit_result = {jit_func_name}()")
-        self.write(0, f"control_result = no_jit_harness({control_func_name})")
-        self.emptyLine()
-
-        self.write(0,
-                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (In-Place Add)! JIT: {{jit_result}}, Control: {{control_result}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (In-Place Add Attack) Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_inplace_add_logic_body(self, prefix: str) -> None:
-        """
-        Generates the body of a function that performs the in-place add attack.
-        """
-        target_var = f"s_{prefix}"
-        loop_iterations = self.options.jit_loop_iterations // 2
-        trigger_iteration = loop_iterations - 2
-
-        # 1. Initialize the target string variable and the FrameModifier payload.
-        self.addLevel(1)
-        self.write(0, f"{target_var} = 'start_'")
-        self.write(0, f"fm_payload = {target_var} + 'a' # Create a new, different string object")
-        fm_vars = self._define_frame_modifier_instances(
-            prefix, {target_var: "fm_payload"}  # Pass the variable name containing the payload
-        )
-        self.emptyLine()
-
-        # 2. Hot loop to warm up the s += operation.
-        self.write(0, f"for i in range({loop_iterations}):")
-        self.addLevel(1)
-
-        # 3. On the penultimate iteration, trigger the __del__ to corrupt 's'.
-        self._generate_del_trigger('i', loop_iterations, fm_vars)
-
-        # 4. Perform the in-place add.
-        # Before the trigger, this is normal. After, the DEOPT_IF guard should fail.
-        self.write(0, f"try: {target_var} += str(i)")
-        self.write(0, "except Exception: pass")
-
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-
-        # 5. Return the final state of the string for comparison.
-        self.write(0, f"return {target_var}")
-        self.restoreLevel(self.parent.base_level - 1)
-
-    def _generate_global_invalidation_logic_body(self, prefix: str) -> None:
-        """
-        Generates the body of a function that performs the global dictionary
-        invalidation attack. Returns the accumulated result for checking.
-        """
-        global_func_name = f"my_global_func_{prefix}"
-        loop_iterations = self.options.jit_loop_iterations // 10
-
-        # 1. Define a simple global function that will be our JIT target.
-        self.write(1, f"# Define a global function to be targeted.")
-        self.write(1, f"def {global_func_name}(): return 1")
-        self.emptyLine()
-
-        # 2. Phase 1 (Warm-up): Run a hot loop calling the global function.
-        #    This will cause the JIT to specialize the LOAD_GLOBAL and cache the dk_version.
-        self.write(1, f"accumulator = 0")
-        self.write(1, f"for _ in range({loop_iterations}):")
-        self.addLevel(1)
-        self.write(1, f"accumulator += {global_func_name}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Phase 2 (Invalidate): Modify the globals() dictionary.
-        #    This action changes the dk_version, which should trigger the guard.
-        self.write(1, "# Invalidate the dictionary key version by adding a new global.")
-        self.write(1, f"globals()['new_global_{prefix}'] = 123")
-        self.emptyLine()
-
-        # 4. Phase 3 (Re-execute): Call the function one more time.
-        #    This call will hit the DEOPT_IF guard.
-        self.write(1, f"accumulator += {global_func_name}()")
-        self.emptyLine()
-
-        # 5. Return the final accumulated value for correctness checking.
-        self.write(1, "return accumulator")
+        return self._generate_paired_ast_mutation_scenario(prefix, 'inplace_add_attack')
 
     def _generate_global_invalidation_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
                                                           fuzzed_func_obj: Any) -> None:
@@ -2020,88 +1485,7 @@ class WriteJITCode:
         GREY-BOX CORRECTNESS SCENARIO 2: Attacks the dk_version guard
         for LOAD_GLOBAL by invalidating the globals() dictionary.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Global Invalidation) <<<"'
-        )
-
-        jit_func_name = f"jit_target_global_{prefix}"
-        control_func_name = f"control_global_{prefix}"
-
-        # 1. Define the JIT Target function.
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        self._generate_global_invalidation_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function.
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        self._generate_global_invalidation_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Generate the execution and assertion code.
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-        self.emptyLine()
-
-        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
-        self.write(0, f"jit_result = {jit_func_name}()")
-        self.write(0, f"control_result = no_jit_harness({control_func_name})")
-        self.emptyLine()
-
-        self.write(0,
-                   f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG (Global Invalidation)! JIT: {{jit_result}}, Control: {{control_result}}"')
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (Global Invalidation) Passed >>>"'
-        )
-        self.emptyLine()
-
-    def _generate_managed_dict_logic_body(self, prefix: str) -> None:
-        """
-        Generates the body of a function that attacks the managed dictionary guard.
-        Returns the final list of objects for state comparison.
-        """
-        loop_iterations = self.options.jit_loop_iterations
-
-        # 1. Define two classes: one with a __dict__, one with __slots__.
-        self.write(1, f"# Define a standard class and a class with __slots__.")
-        self.write(1, f"class ClassWithDict_{prefix}: pass")
-        self.write(1, f"class ClassWithSlots_{prefix}:")
-        self.addLevel(1)
-        self.write(1, "__slots__ = ['x']")  # This class has no __dict__
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Create a list of instances to use polymorphically.
-        self.write(1, f"objects_to_set = [ClassWithDict_{prefix}(), ClassWithSlots_{prefix}()]")
-        self.emptyLine()
-
-        # 3. Hot loop to warm up the STORE_ATTR operation.
-        self.write(1, f"for i in range({loop_iterations}):")
-        self.addLevel(1)
-
-        # 4. Polymorphically select an object and set an attribute.
-        #    This will alternate between the fast path (dict) and the
-        #    slow path (slots), forcing the DEOPT_IF guard to be hit frequently.
-        self.write(1, "obj = objects_to_set[i % 2]")
-        self.write(1, "try:")
-        self.addLevel(1)
-        self.write(1, "obj.x = i")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except AttributeError:")
-        self.addLevel(1)
-        # We expect this for the slotted class if 'x' isn't in __slots__,
-        # which is part of the test.
-        self.write(1, "pass")
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-
-        # 5. Return the final list of objects to check their state.
-        self.write(1, "return objects_to_set")
+        return self._generate_paired_ast_mutation_scenario(prefix, 'global_invalidation')
 
     def _generate_managed_dict_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
                                                           fuzzed_func_obj: object) -> None:
@@ -2109,55 +1493,7 @@ class WriteJITCode:
         GREY-BOX CORRECTNESS SCENARIO 3: Attacks the managed dictionary
         guard for STORE_ATTR.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Correctness Scenario (Managed Dict Attack) <<<"'
-        )
-
-        jit_func_name = f"jit_target_managed_dict_{prefix}"
-        control_func_name = f"control_managed_dict_{prefix}"
-
-        # 1. Define the JIT Target function.
-        self.write(0, f"def {jit_func_name}():")
-        self.addLevel(1)
-        self._generate_managed_dict_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 2. Define the Control function.
-        self.write(0, f"def {control_func_name}():")
-        self.addLevel(1)
-        self._generate_managed_dict_logic_body(prefix)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 3. Generate the execution and comparison code.
-        self.write(0, f"# 1. Warm up the JIT target function so it gets compiled.")
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-        self.emptyLine()
-
-        self.write(0, f"# 2. Get the final result from the JIT-compiled version and the control version.")
-        self.write(0, f"jit_result = {jit_func_name}()")
-        self.write(0, f"control_result = no_jit_harness({control_func_name})")
-        self.emptyLine()
-
-        # Compare the final 'x' attribute of the objects from both runs.
-        self.write(0, "jit_dict_obj_x = getattr(jit_result[0], 'x', 'NOT_SET')")
-        self.write(0, "control_dict_obj_x = getattr(control_result[0], 'x', 'NOT_SET')")
-        self.write(0, "jit_slots_obj_x = getattr(jit_result[1], 'x', 'NOT_SET')")
-        self.write(0, "control_slots_obj_x = getattr(control_result[1], 'x', 'NOT_SET')")
-        self.emptyLine()
-
-        self.write(0,
-                   f'assert jit_dict_obj_x == control_dict_obj_x, f"JIT MISMATCH (Dict Object)! JIT: {{jit_dict_obj_x}}, Control: {{control_dict_obj_x}}"'
-                   )
-        self.write(0,
-                   f'assert jit_slots_obj_x == control_slots_obj_x, f"JIT MISMATCH (Slots Object)! JIT: {{jit_slots_obj_x}}, Control: {{control_slots_obj_x}}"'
-                   )
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario (Managed Dict Attack) Passed >>>"'
-        )
-        self.emptyLine()
+        return self._generate_paired_ast_mutation_scenario(prefix, 'managed_dict_attack')
 
     def _generate_decref_escapes_scenario(self, prefix: str) -> None:
         """
@@ -2710,5 +2046,98 @@ class WriteJITCode:
             self.write(level, "raise ValueError('JIT fuzzing probe')")
             self.restoreLevel(self.parent.base_level - 1)
             self.restoreLevel(self.parent.base_level - 1)
+
+    def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str,
+                                               extra_mutations: dict = None) -> None:
+        """
+        Generates a 'Twin Execution' correctness test based on a bug pattern,
+        ensuring both JIT and Control paths are identically mutated using a
+        seeded AST mutation process.
+        """
+        pattern = BUG_PATTERNS.get(pattern_name)
+        if not pattern:
+            self.write_print_to_stderr(0, f'"[!] Unknown bug pattern for correctness check: {pattern_name}"')
+            return
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (AST Paired Mutation) <<<"'
+        )
+
+        # 1. Prepare the full dictionary of mutations
+        mutations = self._get_mutated_values_for_pattern(prefix, [])
+        if extra_mutations:
+            mutations.update(extra_mutations)
+
+        is_self_contained = "def JIT_path" in pattern['body_code'] or "assert compare_results" in pattern['body_code']
+
+        if is_self_contained:
+            # --- PATH A: For self-contained patterns like 'global_invalidation' ---
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (Self-Contained) <<<"')
+
+            # Format the entire pattern's setup and body code.
+            setup_code = dedent(pattern['setup_code']).format(**mutations)
+            body_code = dedent(pattern['body_code']).format(**mutations)
+
+            # Optionally mutate the entire body with the AST engine.
+            if self.options.jit_fuzz_ast_mutation:
+                body_code = self.ast_mutator.mutate(body_code, seed=randint(0, 2 ** 32 - 1))
+
+            # Use our robust write_pattern to wrap the entire scenario in a try/except block.
+            self.write_pattern(setup_code, body_code)
+
+        else:
+            # --- PATH B: For "body-based" patterns that need the harness generated for them ---
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (AST Paired Mutation) <<<"')
+
+            # Format and write the setup code first.
+            setup_code = dedent(pattern['setup_code']).format(**mutations)
+            self.write(0, setup_code)
+            self.emptyLine()
+
+            # Use a single seed to mutate the body code identically for both paths.
+            mutation_seed = randint(0, 2 ** 32 - 1)
+            initial_body_code = dedent(pattern['body_code']).format(**mutations)
+            mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
+
+            # Define the JIT Target and Control functions using the IDENTICAL mutated code.
+            jit_func_name = f"jit_target_{prefix}"
+            control_func_name = f"control_{prefix}"
+
+            self.write(0, f"def {jit_func_name}():")
+            self.addLevel(1)
+            for line in mutated_code.splitlines():
+                self.write(1, line)  # Use correct level for each line
+            self.restoreLevel(self.parent.base_level - 1)
+            self.emptyLine()
+
+            self.write(0, f"def {control_func_name}():")
+            self.addLevel(1)
+            for line in mutated_code.splitlines():  # Do the same for the control function
+                self.write(1, line)
+            self.restoreLevel(self.parent.base_level - 1)
+            self.emptyLine()
+
+            # Generate the "Twin Execution" harness, wrapped in a try/except block.
+            self.write(0, "try:")
+            self.addLevel(1)
+            self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
+            self.write(0, f"jit_result = {jit_func_name}()")
+            self.write(0, f"control_result = no_jit_harness({control_func_name})")
+            self.emptyLine()
+            self.write(0,
+                       f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}"')
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, "except AssertionError:")
+            self.addLevel(1)
+            self.write(0, "raise")
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(0, "except Exception: pass")
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario ({pattern_name}) Passed >>>"'
+        )
+        self.emptyLine()
 
 

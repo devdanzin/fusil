@@ -369,4 +369,251 @@ for {loop_var} in range(1, 1000):
 return total
 """
     },
+    'jit_friendly_math': {
+        'description': 'A "twin execution" test for a block of JIT-friendly math and logic patterns.',
+        'target_mechanism': 'General JIT arithmetic and logic paths',
+        'setup_code': """
+# Setup some basic variables for the pattern to use.
+var_a_{prefix} = 100
+var_b_{prefix} = 200
+""",
+        'body_code': """
+total = 0
+# Use pre-generated constants to ensure both paths are identical.
+var_int_a = var_a_{prefix}
+var_int_b = var_b_{prefix}
+for {loop_var} in range(1000):
+    if {loop_var} > var_int_b:
+        temp_val = (var_int_a + {loop_var}) % 1000
+        total += temp_val
+    else:
+        total -= 1
+return total
+"""
+    },
+    'evil_boundary_math': {
+        'description': 'A correctness test using complex operations and boundary values.',
+        'target_mechanism': 'JIT handling of boundary values (NaN, inf, maxint) and exceptions.',
+        'setup_code': """
+import operator
+# Pre-generate problematic constants once.
+var_a = {val_a}
+var_b = {val_b}
+var_c = {val_c}
+str_d = {str_d}
+""",
+        'body_code': """
+total = 0.0 # Use a float accumulator for broader compatibility
+for {loop_var} in range(1, 100): # Use a smaller loop for this complex test
+    try:
+        temp_val = (var_a + var_b) / {loop_var}
+        temp_val_2 = var_c * {loop_var}
+        if temp_val > temp_val_2:
+            total += len(str_d) + len(str(temp_val))
+        else:
+            total -= temp_val_2
+    except (ValueError, TypeError, ZeroDivisionError, OverflowError):
+        total -= 1
+return total
+"""
+    },
+    'deleter_side_effect': {
+        'description': 'A correctness test for the __del__ side effect attack.',
+        'target_mechanism': 'DEOPT_IF on type confusion from __del__ side effects.',
+        'setup_code': """
+class FrameModifier_{prefix}:
+    def __init__(self, var_name, new_value):
+        self.var_name = var_name
+        self.new_value = new_value
+    def __del__(self):
+        try:
+            frame = sys._getframe(1)
+            if self.var_name in frame.f_locals:
+                frame.f_locals[self.var_name] = self.new_value
+        except Exception: pass
+""",
+        'body_code': """
+# A. Create a local variable and its FrameModifier
+target_var = 100
+fm_target_var = FrameModifier_{prefix}('target_var', 'local-string')
+
+# Hot Loop
+for i in range(500):
+    try:
+        x = target_var + i
+    except TypeError:
+        pass
+    # Trigger on the penultimate iteration
+    if i == 498:
+        del fm_target_var
+        collect()
+return target_var
+"""
+    },
+    'inplace_add_attack': {
+        'description': 'A grey-box correctness test for the _BINARY_OP_INPLACE_ADD_UNICODE guard.',
+        'target_mechanism': 'DEOPT_IF guard for inplace string addition.',
+        'setup_code': """
+class FrameModifier_{prefix}:
+    def __init__(self, var_name, payload_var_name):
+        self.var_name = var_name
+        self.payload_var_name = payload_var_name
+    def __del__(self):
+        try:
+            frame = sys._getframe(1)
+            # Set the target variable to the value of the payload variable
+            frame.f_locals[self.var_name] = frame.f_locals[self.payload_var_name]
+        except Exception: pass
+""",
+        'body_code': """
+s_target = 'start_'
+# Create a new, different string object to be the payload
+fm_payload = s_target + 'a'
+fm = FrameModifier_{prefix}('s_target', 'fm_payload')
+
+for i in range(250):
+    if i == 248:
+        del fm
+        collect()
+    try:
+        s_target += str(i)
+    except Exception:
+        pass
+return s_target
+"""
+    },
+    'deep_calls_correctness': {
+        'description': 'A correctness test for a deep recursive call chain.',
+        'target_mechanism': 'JIT stack analysis, trace limits, function call overhead.',
+        'setup_code': """
+# Define a deep chain of functions. The AST mutator can alter the bodies.
+def f_0_{prefix}(p):
+    return p + 1
+
+def f_1_{prefix}(p):
+    return f_0_{prefix}(p) + 1
+
+def f_2_{prefix}(p):
+    return f_1_{prefix}(p) + 1
+
+def f_3_{prefix}(p):
+    return f_2_{prefix}(p) + 1
+
+def f_4_{prefix}(p):
+    return f_3_{prefix}(p) + 1
+
+def f_5_{prefix}(p):
+    return f_4_{prefix}(p) + 1
+
+def f_6_{prefix}(p):
+    return f_5_{prefix}(p) + 1
+
+def f_7_{prefix}(p):
+    return f_6_{prefix}(p) + 1
+
+def f_8_{prefix}(p):
+    return f_7_{prefix}(p) + 1
+
+def f_9_{prefix}(p):
+    return f_8_{prefix}(p) + 1
+
+def f_10_{prefix}(p):
+    return f_9_{prefix}(p) + 1
+
+def f_11_{prefix}(p):
+    return f_10_{prefix}(p) + 1
+
+def f_12_{prefix}(p):
+    return f_11_{prefix}(p) + 1
+
+def f_13_{prefix}(p):
+    return f_12_{prefix}(p) + 1
+
+def f_14_{prefix}(p):
+    return f_13_{prefix}(p) + 1
+""",
+        'body_code': """
+# The top-level function in the chain.
+top_level_func = f_14_{prefix}
+total = 0
+# The hot loop that calls the deep chain.
+for i in range(20):
+    total += top_level_func(i)
+return total
+"""
+    },
+    'managed_dict_attack': {
+        'description': 'A correctness test for the managed dictionary guard on STORE_ATTR.',
+        'target_mechanism': 'STORE_ATTR specialization, DEOPT_IF on non-dict object.',
+        'setup_code': """
+# Define the two classes needed for the polymorphic attribute access.
+class ClassWithDict_{prefix}:
+    pass
+
+class ClassWithSlots_{prefix}:
+    __slots__ = ['x'] # This class has no __dict__
+""",
+        'body_code': """
+# Create a list of instances to use polymorphically.
+objects_to_set = [ClassWithDict_{prefix}(), ClassWithSlots_{prefix}()]
+for i in range(1000):
+    # Polymorphically select an object and set an attribute.
+    # This forces the JIT to guard on the object's dictionary type.
+    obj = objects_to_set[i % 2]
+    try:
+        obj.x = i
+    except AttributeError:
+        # This is expected for the class with __slots__
+        pass
+
+# The final state of the objects is used for the correctness check.
+# We return the attributes' values to be asserted.
+dict_obj_x = getattr(objects_to_set[0], 'x', 'NOT_SET')
+slots_obj_x = getattr(objects_to_set[1], 'x', 'NOT_SET')
+return (dict_obj_x, slots_obj_x)
+"""
+    },
+    'evil_deep_calls_correctness': {
+        'description': 'A correctness test for a deep call chain that also uses boundary values, mixed operators, and calls a fuzzed function.',
+        'target_mechanism': 'JIT stack analysis, handling of boundary values, calls to external functions.',
+        'setup_code': """
+# Setup for the evil deep call test
+import operator
+
+# Use the pre-generated constants and operators for this scenario
+OPERATOR_SUITE = {operator_suite}
+CONSTANTS = {constants}
+EXCEPTION_LEVEL = {exception_level}
+
+# Define the recursive function chain
+def f_0_{prefix}(p_tuple):
+    res = list(p_tuple)
+    try:
+        op = OPERATOR_SUITE[0]
+        const = CONSTANTS[0]
+        res[0] = op(res[0], const)
+        # Also call the real fuzzed function from the target module
+        {module_name}.{fuzzed_func_name}(res[0])
+    except Exception:
+        pass
+    return tuple(res)
+
+# Generate the rest of the chain...
+{function_chain!s}
+""",
+        'body_code': """
+# The top-level function is the final one in the chain
+top_level_func = f_{depth_minus_1}_{prefix}
+try:
+    # Initial values for the test are the first two constants
+    result = top_level_func((CONSTANTS[0], CONSTANTS[1]))
+except ValueError as e:
+    # Check if this is our intentionally raised probe
+    if e.args == ('evil_deep_call_probe',):
+        result = "PROBE_CAUGHT"
+    else:
+        raise
+return result
+"""
+    },
 }

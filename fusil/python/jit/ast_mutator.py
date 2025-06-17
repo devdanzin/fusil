@@ -72,7 +72,7 @@ class GuardInjector(ast.NodeTransformer):
         # First, visit children to avoid infinite recursion
         node = super().visit(node)
         # Only wrap nodes that are statements
-        if isinstance(node, ast.stmt) and not isinstance(node, ast.FunctionDef) and random.random() < 0.1:
+        if isinstance(node, ast.stmt) and not isinstance(node, ast.FunctionDef) and random.random() < 0.05:
             test = ast.Compare(
                 left=ast.Call(func=ast.Name(id='random', ctx=ast.Load()), args=[], keywords=[]),
                 ops=[ast.Lt()],
