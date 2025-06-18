@@ -1561,170 +1561,143 @@ class WriteJITCode:
 
     def _generate_variational_scenario(self, prefix: str, pattern_names: str) -> None:
         """
-        Takes a bug pattern template and generates test cases.
-        Can operate in three modes:
-        1. Systematic Values: Iterates through all known "interesting" values.
-        2. Type-Aware: Iterates through a set of contrasting types.
-        3. Random (default): Applies a single set of random mutations.
+        Acts as a master dispatcher. It now ensures that parameter mutations are
+        always generated before being passed to specialized helpers.
         """
+        # --- 1. Pattern Selection ---
         if pattern_names == "ALL":
-            pattern_names = ",".join(BUG_PATTERNS.keys())
-        pattern_name = choice(pattern_names.split(","))
+            all_patterns = list(BUG_PATTERNS.keys())
+            pattern_name = choice(all_patterns)
+        else:
+            pattern_name = choice(pattern_names.split(","))
+
         pattern = BUG_PATTERNS.get(pattern_name)
         if not pattern:
             self.write_print_to_stderr(0, f'"[!] Unknown bug pattern name: {pattern_name}"')
             return
 
-        has_payload_placeholder = (
-                '{corruption_payload}' in pattern['setup_code'] or
-                '{corruption_payload}' in pattern['body_code']
+        tags = pattern.get('tags', {'standard'})
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Fuzzing Pattern: {pattern_name} (Tags: {", ".join(tags)}) <<<<"'
         )
 
-        if self.options.jit_fuzz_ast_mutation:
-            # AST MUTATION MODE
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] >>> AST MUTATION Fuzzing Pattern: {pattern_name} <<<"')
+        # --- 2. ALWAYS Generate Base and Parameter Mutations First ---
+        # This ensures 'def_str', 'call_str', etc. are always present.
+        params = self._generate_mutated_parameters(prefix)
+        mutations = self._get_mutated_values_for_pattern(prefix, params['param_names'])
+        mutations.update(params)
 
-            mutations = self._get_mutated_values_for_pattern(prefix, [])
+        # --- 3. Dispatch to Specialized Helpers to ADD or OVERWRITE mutations ---
+        if 'needs-many-vars-setup' in tags:
+            mutations = self._get_mutations_for_many_vars(prefix, mutations)
+        elif 'needs-evil-deep-calls-setup' in tags:
+            mutations = self._get_mutations_for_deep_calls(prefix, mutations, is_evil=True)
+        elif 'needs-deep-calls-setup' in tags:
+            mutations = self._get_mutations_for_deep_calls(prefix, mutations, is_evil=False)
+        elif 'needs-evil-math-setup' in tags:
+            mutations = self._get_mutations_for_evil_math(prefix, mutations)
+
+        # --- 4. Code Generation (Dispatch based on tags) ---
+        if 'correctness' in tags:
+            self._generate_paired_ast_mutation_scenario(prefix, pattern_name, pattern, mutations)
+        else:
+            setup_code = dedent(pattern['setup_code']).format(**mutations)
             body_code = dedent(pattern['body_code']).format(**mutations)
 
-            # Check if this is a correctness pattern
-            is_correctness_pattern = (
-                    "def jit_target" in body_code and
-                    "def control_" in body_code
-            )
+            if self.options.jit_fuzz_ast_mutation:
+                self.write_print_to_stderr(0, f'"[{prefix}] Applying AST structural mutations."')
+                body_code = self.ast_mutator.mutate(body_code)
 
-            if is_correctness_pattern:
-                # --- PAIRED MUTATION FOR CORRECTNESS ---
-                jit_body = self._get_function_body(body_code, "jit_target")
-                control_body = self._get_function_body(body_code, "control_")
+            self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations)
 
-                # Find the assertion line to append after mutation
-                assertion_line = [
-                    line for line in body_code.splitlines()
-                    if line.strip().startswith("assert")
-                ]
-
-                if jit_body and control_body and assertion_line:
-                    mutation_seed = randint(0, 2 ** 32 - 1)
-
-                    mutated_jit_body = self.ast_mutator.mutate(jit_body, seed=mutation_seed)
-                    mutated_control_body = self.ast_mutator.mutate(control_body, seed=mutation_seed)
-
-                    # Reassemble the final code
-                    final_body_code = (
-                        f"{mutated_jit_body}\n\n"
-                        f"{mutated_control_body}\n\n"
-                        f"# Harness and assertion logic from original pattern...\n"
-                        f"{assertion_line[0]}"  # Simplified re-assembly for clarity
-                    )
-                    # Note: A full implementation would need to robustly find and
-                    # preserve the harness calls between the function defs and the assert.
-                    # For now, we demonstrate the core seeded mutation logic.
-
-                    # Write the pattern setup and the reassembled, mutated body
-                    # (Setup is not mutated for correctness patterns to preserve harnesses)
-                    setup_code = dedent(pattern['setup_code']).format(prefix=prefix)
-                    self.write_pattern(setup_code, final_body_code)
-                else:
-                    self.write_print_to_stderr(0,
-                                               f'"[!] Could not parse correctness pattern {pattern_name}. Skipping."')
-
-            else:
-                # Use a simple mutation dict for placeholders like {prefix}
-                mutations = self._get_mutated_values_for_pattern(prefix, [])
-
-                # Format the template with basic values first
-                initial_setup_code = dedent(pattern['setup_code']).format(**mutations)
-                initial_body_code = dedent(pattern['body_code']).format(**mutations)
-
-                # Pass the formatted code to the AST mutator
-                mutated_body_code = self.ast_mutator.mutate(initial_body_code)
-
-                self.write_pattern(initial_setup_code, mutated_body_code)
-                self.emptyLine()
-
-        elif self.options.jit_fuzz_systematic_values and has_payload_placeholder:
-            # Logic from previous step remains here...
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] >>> SYSTEMATIC Fuzzing Pattern: {pattern_name} <<<"')
-            interesting_values = fusil.python.values.INTERESTING
-            for i, payload_str in enumerate(interesting_values):
-                iter_prefix = f"{prefix}_{i}"
-
-                self.write_print_to_stderr(0, f'"""--- Iteration {i}: Payload = {payload_str} ---"""')
-
-                mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
-                mutations['corruption_payload'] = payload_str
-
-                setup_code = pattern['setup_code'].format(**mutations)
-                body_code = pattern['body_code'].format(**mutations)
-
-                self.write_pattern(setup_code, body_code)
-                self.emptyLine()
-
-        elif self.options.jit_fuzz_type_aware and has_payload_placeholder:
-            # TYPE-AWARE MODE
-            self.write_print_to_stderr(
-                0,
-                f'"[{prefix}] >>> TYPE-AWARE Fuzzing Pattern: {pattern_name} <<<"'
-            )
-
-            original_type = pattern.get('payload_variable_type')
-            if not original_type:
-                self.write_print_to_stderr(
-                    0,
-                    f'"[!] Pattern {pattern_name} is missing "payload_variable_type" metadata. Skipping type-aware fuzzing."'
-                )
-            else:
-                # Define a suite of generators for our contrasting types
-                type_generators = {
-                    'str': self.arg_generator.genString,
-                    'bytes': self.arg_generator.genBytes,
-                    'float': self.arg_generator.genFloat,
-                    'list': self.arg_generator.genList,
-                    'NoneType': lambda: ['None'],
-                    'tricky': self.arg_generator.genTrickyObjects,
-                }
-
-                # Remove the original type to ensure we only use contrasting types
-                if original_type in type_generators:
-                    del type_generators[original_type]
-
-                for type_name, generator_func in type_generators.items():
-                    iter_prefix = f"{prefix}_{type_name}"
-                    # Generate a value string for the chosen type
-                    payload_str = " ".join(generator_func())
-
-                    self.write_print_to_stderr(0,
-                                           f'"""--- Corrupting with type {type_name}: Payload = {payload_str} ---"""')
-
-                    mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
-                    mutations['corruption_payload'] = payload_str
-
-                    setup_code = pattern['setup_code'].format(**mutations)
-                    body_code = pattern['body_code'].format(**mutations)
-
-                    self.write_pattern(setup_code, body_code)
-                    self.emptyLine()
-        else:
-            if self.options.jit_fuzz_systematic_values and not has_payload_placeholder:
-                self.write_print_to_stderr(0,
-                                           f'"[{prefix}] Pattern {pattern_name} does not use a payload. Generating one random variant instead."')
-
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] >>> RANDOM Fuzzing Pattern: {pattern_name} - {pattern["description"]} <<<"')
-            mutations = self._get_mutated_values_for_pattern(prefix, [])
-
-            if '{corruption_payload}' not in mutations:
-                mutations['corruption_payload'] = "None"
-
-            setup_code = pattern['setup_code'].format(**mutations)
-            body_code = pattern['body_code'].format(**mutations)
-            self._write_mutated_code_in_environment(prefix, setup_code, body_code)
-
-        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"')
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"'
+        )
         self.emptyLine()
+
+    def _get_mutations_for_many_vars(self, prefix: str, mutations: dict) -> dict:
+        """
+        Generates mutations specifically for patterns tagged with 'many-vars'.
+        This includes the variable definitions and a complex expression using them.
+        """
+        self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: many_vars"')
+        num_vars = 260
+        var_names = [f"var_{i}_{prefix}" for i in range(num_vars)]
+        mutations['var_definitions'] = "\n".join([f"{name} = {i}" for i, name in enumerate(var_names)])
+
+        expression_ast = self._generate_expression_ast(available_vars=var_names)
+        try:
+            mutations['expression'] = ast.unparse(expression_ast)
+        except AttributeError:
+            mutations['expression'] = " # AST unparsing failed"
+        return mutations
+
+    def _get_mutations_for_evil_math(self, prefix: str, mutations: dict) -> dict:
+        """
+        Generates mutations for patterns tagged with 'boundary-values'.
+        This involves selecting several "interesting" values from our list.
+        """
+        self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: evil_math"')
+        mutations.update({
+            'val_a': self.arg_generator.genInterestingValues()[0],
+            'val_b': self.arg_generator.genInterestingValues()[0],
+            'val_c': self.arg_generator.genInterestingValues()[0],
+            'str_d': self.arg_generator.genString()[0],
+        })
+        return mutations
+
+    def _get_mutations_for_deep_calls(self, prefix: str, mutations, is_evil: bool = False) -> dict:
+        """
+        Generates mutations for 'deep-calls' patterns. This includes dynamically
+        building a string that defines a chain of recursive functions.
+        """
+        generator_name = "evil_deep_calls" if is_evil else "deep_calls"
+        self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: {generator_name}"')
+
+        fuzzed_func_name = choice(self.parent.module_functions) if self.parent.module_functions else "pass"
+
+        depth = 15
+        func_chain_lines = []
+
+        # Build the string for the function chain that will be injected into the setup_code.
+        for i in range(1, depth):
+            if is_evil:
+                # The "evil" version has more complex logic inside each function.
+                func_body = dedent(f"""
+                    res = list(p_tuple)
+                    try:
+                        op = OPERATOR_SUITE[{i % 4}]
+                        const = CONSTANTS[{i % 4}]
+                        res[1] = op(res[1], const)
+                        if {i} == EXCEPTION_LEVEL: raise ValueError(('evil_deep_call_probe',))
+                        return f_{i - 1}_{prefix}(tuple(res))
+                    except Exception:
+                        return p_tuple
+                """)
+            else:
+                # The standard version is a simple recursive addition.
+                func_body = f"return f_{i - 1}_{prefix}(p) + 1"
+
+            func_def = f"def f_{i}_{prefix}({'p_tuple' if is_evil else 'p'}):\n    {func_body.replace(chr(10), chr(10) + '    ')}"
+            func_chain_lines.append(dedent(func_def))
+
+        # Add the special keys needed by the 'deep_calls' patterns.
+        mutations.update({
+            'function_chain': "\n".join(func_chain_lines),
+            'depth': depth,
+            'depth_minus_1': depth - 1,  # for the top-level call
+            'module_name': self.module_name,
+            'fuzzed_func_name': fuzzed_func_name,
+        })
+
+        if is_evil:
+            mutations.update({
+                'operator_suite': "['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']",
+                'constants': [self.arg_generator.genInterestingValues()[0] for _ in range(4)],
+                'exception_level': randint(5, 12),
+            })
+
+        return mutations
 
     def _get_mutated_values_for_pattern(self, prefix: str, param_names: list[str]) -> dict:
         """
@@ -1786,95 +1759,88 @@ class WriteJITCode:
             'warmup_calls': self.options.jit_loop_iterations // 10,
         }
 
-    def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str) -> None:
+    def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str,
+                                           params: dict = None) -> None:
         """
-        Takes the mutated code and writes it into the script, wrapped in
-        a randomly chosen execution environment from an expanded suite.
+        Takes the final generated code and wraps it in a randomly chosen
+        execution environment, correctly applying mutated parameters.
         """
-        # 1. Generate the mutated parameter and argument set FIRST.
-        params = self._generate_mutated_parameters(prefix)
+        # If no specific parameters were generated (e.g., for simple iterative modes),
+        # use empty defaults.
+        if params is None:
+            params = {'def_str': '', 'call_str': '', 'setup_code': ''}
+
         param_def = params['def_str']
         param_call = params['call_str']
         param_setup = params['setup_code']
-        param_names = params['param_names']
 
-        # Inject parameter setup code before the rest of the logic
+        # Prepend any setup code needed for the parameters (e.g., defining an aliased list).
         if param_setup:
             self.write(0, param_setup)
 
-        # 2. Generate the rest of the mutations, PASSING IN the param_names
-        # This is a key change: the expression now knows about the parameters
-        # (The logic of _get_mutated_values_for_pattern is now conceptually here)
-        mutations = self._get_mutated_values_for_pattern(prefix, param_names)
-
-        # 3. Format the core setup and body with these mutations
-        final_setup = setup_code.format(**mutations)
-        final_body = body_code.format(**mutations)
-
-        # --- Environment Mutation ---
         env_choice = randint(0, 5)
+        env_map = {
+            0: "Top-Level Function", 1: "Nested Function", 2: "Class Method",
+            3: "Async Function", 4: "Generator Function", 5: "Lambda-called Function"
+        }
+        self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: {env_map[env_choice]}"')
 
-        # --- Environment 1: Simple top-level function (existing) ---
+        # --- Environment 1: Simple top-level function ---
         if env_choice == 0:
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Top-Level Function"')
             self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"harness_{prefix}({param_call})")
 
-
-        # --- Environment 2: Nested function (existing) ---
+        # --- Environment 2: Nested function ---
         elif env_choice == 1:
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Nested Function"')
-            self.write(0, f"def outer_{prefix}({param_def}):")
+            self.write(0, f"def outer_{prefix}():")
             self.addLevel(1)
             self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"harness_{prefix}({param_call})")
             self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"outer_{prefix}({param_call})")
+            self.write(0, f"outer_{prefix}()")
 
-        # --- Environment 3: Class method (existing) ---
+        # --- Environment 3: Class method ---
         elif env_choice == 2:
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Class Method"')
             self.write(0, f"class Runner_{prefix}:")
             self.addLevel(1)
+            # Add 'self' to the parameter definition for the method.
+            method_param_def = f"self, {param_def}" if param_def else "self"
             self.write(0, f"def harness(self, {param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 2)
             self.write(0, f"Runner_{prefix}().harness({param_call})")
 
-        # --- Environment 4: Asynchronous Function (NEW) ---
+        # --- Environment 4: Asynchronous Function ---
         elif env_choice == 3:
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Async Function"')
             self.write(0, "import asyncio")
             self.write(0, f"async def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"asyncio.run(harness_{prefix}({param_call}))")
 
-        # --- Environment 5: Generator Function (NEW) ---
+        # --- Environment 5: Generator Function ---
         elif env_choice == 4:
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Generator Function"')
             self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.write(0, "yield # Make this a generator")
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "# We must consume the generator for its code to execute.")
             self.write(0, f"for _ in harness_{prefix}({param_call}): pass")
 
-        # --- Environment 6: Lambda-called Function (NEW) ---
+        # --- Environment 6: Lambda-called Function ---
         else:  # env_choice == 5
-            self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: Lambda-called Function"')
             self.write(0, f"def harness_{prefix}({param_def}):")
             self.addLevel(1)
-            self.write_pattern(final_setup, final_body)
+            self.write_pattern(setup_code, body_code)
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, f"caller = lambda: harness_{prefix}({param_call})")
             self.write(0, "caller()")
@@ -2047,8 +2013,9 @@ class WriteJITCode:
             self.restoreLevel(self.parent.base_level - 1)
             self.restoreLevel(self.parent.base_level - 1)
 
-    def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str,
+    def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict,
                                                extra_mutations: dict = None) -> None:
+
         """
         Generates a 'Twin Execution' correctness test based on a bug pattern,
         ensuring both JIT and Control paths are identically mutated using a
@@ -2064,7 +2031,7 @@ class WriteJITCode:
         )
 
         # 1. Prepare the full dictionary of mutations
-        mutations = self._get_mutated_values_for_pattern(prefix, [])
+        mutations = extra_mutations if extra_mutations is not None else {}
         if extra_mutations:
             mutations.update(extra_mutations)
 

@@ -2,6 +2,7 @@ BUG_PATTERNS = {
     'decref_escapes': {
         'description': 'Attacks JIT assumptions about local variable stability using a __del__ side effect. Based on GH-124483.',
         'target_mechanism': 'DEOPT_IF on variable type change',
+        'tags': {'crash', 'side-effect', '__del__', 'payload-driven'},
         'payload_variable_type': 'int',  # The variable being replaced is an integer from a range().
         'setup_code': """
     import operator
@@ -28,6 +29,7 @@ BUG_PATTERNS = {
     'isinstance_patch': {
         'description': 'Attacks isinstance elimination by monkey-patching __instancecheck__.',
         'target_mechanism': 'JIT `isinstance` elimination, side effects',
+        'tags': {'crash', 'side-effect', '__del__', 'metaprogramming', 'isinstance'},
         'setup_code': """
 from abc import ABCMeta
 # Define the metaclass that we will later modify.
@@ -86,6 +88,7 @@ for {loop_var} in range({loop_iterations}):
     'type_version_polymorphism': {
         'description': 'Attacks JIT attribute caches by using polymorphic shapes for the same attribute name.',
         'target_mechanism': 'LOAD_ATTR specialization, type version caching',
+        'tags': {'crash', 'type-version', 'load-attr', 'polymorphism'},
         'setup_code': """
 # Define classes where 'payload' has a different nature.
 class ShapeA_{prefix}: payload = 123
@@ -117,6 +120,7 @@ for {loop_var} in range({loop_iterations}):
     'global_invalidation': {
         'description': "Attacks the JIT's cached knowledge of the globals() dictionary.",
         'target_mechanism': 'LOAD_GLOBAL specialization, dk_version invalidation',
+        'tags': {'correctness', 'self-contained', 'invalidation', 'globals'},
         'setup_code': """
 # Define a simple global function that will be our JIT target.
 def my_global_func_{prefix}():
@@ -155,6 +159,7 @@ assert compare_results(jit_result, control_result), "GLOBAL INVALIDATION BUG! JI
     'isinstance_elimination': {
         'description': "Tests the JIT's optimization that removes isinstance() calls with constant results.",
         'target_mechanism': '_CALL_ISINSTANCE uop elimination',
+        'tags': {'correctness', 'self-contained', 'isinstance'},
         'setup_code': """
 # No special setup needed for this pattern.
 """,
@@ -192,6 +197,7 @@ assert compare_results(jit_result, control_result), "ISINSTANCE ELIMINATION DEFE
     'pow_type_instability': {
         'description': "Tests the JIT's handling of value-dependent return types using pow().",
         'target_mechanism': "Type inference for BINARY_OP with NB_POWER",
+        'tags': {'correctness', 'self-contained', 'type-inference', 'pow'},
         'setup_code': """
 # Pairs of inputs for pow() that produce different result types.
 # (value, value) -> result_type
@@ -242,6 +248,7 @@ assert compare_results(jit_result, control_result), "POW() TYPE INSTABILITY DEFE
     'slice_type_propagation': {
         'description': 'Tests the JITs type propagation for slice operations.',
         'target_mechanism': 'Type propagation for BINARY_SLICE',
+        'tags': {'correctness', 'self-contained', 'binary-slice'},
         'setup_code': "# No special setup needed for this pattern.",
         'body_code': """
 # This scenario checks if the JIT correctly deduces the type of a slice result.
@@ -277,6 +284,7 @@ assert compare_results(jit_result, control_result), "SLICE TYPE PROPAGATION DEFE
     'jit_error_handling': {
         'description': "Tests JIT's error handling path by raising a TypeError in a hot loop.",
         'target_mechanism': 'Exception handling and stack unwinding in JIT-compiled code',
+        'tags': {'crash', 'exception-handling'},
         'setup_code': """
 # Create a list of many hashable items and one unhashable item at the end.
 # The JIT will optimize the loop for the hashable items.
@@ -298,6 +306,7 @@ except TypeError:
     'generator_method_call': {
         'description': 'Tests JIT stability with method calls inside generator expressions in a hot loop.',
         'target_mechanism': 'JIT interaction with generator frames',
+        'tags': {'crash', 'generator'},
         'setup_code': """
 class Target_{prefix}:
     def __init__(self):
@@ -322,6 +331,7 @@ for {loop_var} in range({loop_iterations}):
     'friendly_base': {
         'description': 'A general-purpose base pattern for friendly, AST-driven mutation. Contains a mix of common operations.',
         'target_mechanism': 'General JIT optimization paths',
+        'tags': {'standard', 'base-pattern'},
         'setup_code': """
 # Setup some basic variables for the pattern to use.
 var_a_{prefix} = 100
@@ -352,6 +362,7 @@ for {loop_var} in range(1, 2000):
     'many_vars_base': {
         'description': 'A base for creating functions with >256 variables and a mutated body.',
         'target_mechanism': 'EXTENDED_ARG, register allocation',
+        'tags': {'crash', 'resource-limit', 'many-vars', 'needs-many-vars-setup'},
         'setup_code': """
 # Define over 256 local variables.
 {var_definitions}
@@ -372,6 +383,7 @@ return total
     'jit_friendly_math': {
         'description': 'A "twin execution" test for a block of JIT-friendly math and logic patterns.',
         'target_mechanism': 'General JIT arithmetic and logic paths',
+        'tags': {'correctness', 'body-based'},
         'setup_code': """
 # Setup some basic variables for the pattern to use.
 var_a_{prefix} = 100
@@ -394,6 +406,7 @@ return total
     'evil_boundary_math': {
         'description': 'A correctness test using complex operations and boundary values.',
         'target_mechanism': 'JIT handling of boundary values (NaN, inf, maxint) and exceptions.',
+        'tags': {'correctness', 'body-based', 'boundary-values', 'needs-evil-math-setup'},
         'setup_code': """
 import operator
 # Pre-generate problematic constants once.
@@ -420,6 +433,7 @@ return total
     'deleter_side_effect': {
         'description': 'A correctness test for the __del__ side effect attack.',
         'target_mechanism': 'DEOPT_IF on type confusion from __del__ side effects.',
+        'tags': {'correctness', 'body-based', 'side-effect', '__del__'},
         'setup_code': """
 class FrameModifier_{prefix}:
     def __init__(self, var_name, new_value):
@@ -453,6 +467,7 @@ return target_var
     'inplace_add_attack': {
         'description': 'A grey-box correctness test for the _BINARY_OP_INPLACE_ADD_UNICODE guard.',
         'target_mechanism': 'DEOPT_IF guard for inplace string addition.',
+        'tags': {'correctness', 'body-based', 'side-effect', '__del__', 'inplace-op'},
         'setup_code': """
 class FrameModifier_{prefix}:
     def __init__(self, var_name, payload_var_name):
@@ -485,6 +500,7 @@ return s_target
     'deep_calls_correctness': {
         'description': 'A correctness test for a deep recursive call chain.',
         'target_mechanism': 'JIT stack analysis, trace limits, function call overhead.',
+        'tags': {'correctness', 'resource-limit', 'deep-calls', 'needs-deep-calls-setup'},
         'setup_code': """
 # Define a deep chain of functions. The AST mutator can alter the bodies.
 def f_0_{prefix}(p):
@@ -545,6 +561,7 @@ return total
     'managed_dict_attack': {
         'description': 'A correctness test for the managed dictionary guard on STORE_ATTR.',
         'target_mechanism': 'STORE_ATTR specialization, DEOPT_IF on non-dict object.',
+        'tags': {'correctness', 'body-based', 'store-attr', 'managed-dict', 'polymorphism'},
         'setup_code': """
 # Define the two classes needed for the polymorphic attribute access.
 class ClassWithDict_{prefix}:
@@ -576,6 +593,7 @@ return (dict_obj_x, slots_obj_x)
     'evil_deep_calls_correctness': {
         'description': 'A correctness test for a deep call chain that also uses boundary values, mixed operators, and calls a fuzzed function.',
         'target_mechanism': 'JIT stack analysis, handling of boundary values, calls to external functions.',
+        'tags': {'correctness', 'resource-limit', 'deep-calls', 'boundary-values', 'needs-evil-deep-calls-setup'},
         'setup_code': """
 # Setup for the evil deep call test
 import operator
