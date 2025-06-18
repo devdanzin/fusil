@@ -1891,7 +1891,7 @@ class WriteJITCode:
         self.write(level, "raise")
         self.restoreLevel(self.parent.base_level - 1)
         # Catch all other exceptions, INCLUDING normal AssertionErrors, and ignore them.
-        self.write(level, "except Exception:")
+        self.write(level, "except (Exception, SystemExit):")
         self.addLevel(1)
         self.write(level, "pass")
         self.restoreLevel(self.parent.base_level - 1)
@@ -2090,6 +2090,10 @@ class WriteJITCode:
             mutation_seed = randint(0, 2 ** 32 - 1)
             initial_body_code = dedent(pattern['body_code']).format(**mutations)
             mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
+
+            if not mutated_code.strip():
+                self.write_print_to_stderr(0, f'"[{prefix}] NOTE: Mutated body was empty, defaulting to pass."')
+                mutated_code = "pass"
 
             # Define the JIT Target and Control functions using the IDENTICAL mutated code.
             jit_func_name = f"jit_target_{prefix}"

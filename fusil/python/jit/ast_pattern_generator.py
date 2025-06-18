@@ -270,6 +270,9 @@ class ASTPatternGenerator:
         # 1. Generate a random block of code to be the test subject.
         test_body_ast = self.generate_statement_list(num_statements=random.randint(4, 8))
 
+        if not test_body_ast:
+            test_body_ast = [ast.Pass()]
+
         # 2. Create the JIT target function.
         jit_target_func = ast.FunctionDef(
             name='jit_target',
