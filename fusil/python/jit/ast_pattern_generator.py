@@ -291,7 +291,8 @@ class ASTPatternGenerator:
             jit_harness(jit_target, 500)
             jit_result = jit_target()
             control_result = no_jit_harness(control)
-            assert compare_results(jit_result, control_result), "JIT correctness bug synthesized!"
+            if not compare_results(jit_result, control_result):
+                raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
         """)
         harness_nodes = ast.parse(harness_str).body
 
