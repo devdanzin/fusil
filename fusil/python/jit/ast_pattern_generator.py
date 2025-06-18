@@ -18,6 +18,7 @@ class ASTPatternGenerator:
         self.parent = parent
         self.arg_generator = parent.arg_generator
         self.known_variables = set()
+        self.known_objects: dict[str, set[str]] = {}
         self.prefix_counter = 0
 
     def _get_prefix(self) -> str:
@@ -125,11 +126,14 @@ class ASTPatternGenerator:
         return ast.Compare(left=left, ops=[random.choice(ops)], comparators=[right])
 
     def _create_if_node(self, depth: int) -> ast.If:
-        """Creates an 'ast.If' node with recursively generated body/orelse blocks."""
+        """Creates an 'ast.If' node, ensuring the body is never empty."""
         test_condition = self._generate_comparison_ast()
 
         # Recursively generate the 'if' body.
         body_statements = self.generate_statement_list(random.randint(1, 3), depth + 1)
+
+        if not body_statements:
+            body_statements = [ast.Pass()]
 
         # Randomly decide whether to include an 'else' block.
         orelse_statements = []
@@ -139,13 +143,11 @@ class ASTPatternGenerator:
         return ast.If(test=test_condition, body=body_statements, orelse=orelse_statements)
 
     def _create_for_node(self, depth: int) -> ast.For:
-        """Creates an 'ast.For' node with a recursively generated body."""
-        # Create a loop variable, e.g., 'for i_v3 in ...'
+        """Creates an 'ast.For' node, ensuring the body is never empty."""
         loop_var_name = f"i_{self._get_prefix()}"
         target = ast.Name(id=loop_var_name, ctx=ast.Store())
-        self.known_variables.add(loop_var_name)  # The loop var is now in scope
+        self.known_variables.add(loop_var_name)
 
-        # Create the iterator, e.g., 'range(10)'.
         iterator = ast.Call(
             func=ast.Name(id='range', ctx=ast.Load()),
             args=[ast.Constant(value=random.randint(5, 50))],
@@ -154,6 +156,9 @@ class ASTPatternGenerator:
 
         # Recursively generate the loop body.
         body_statements = self.generate_statement_list(random.randint(2, 5), depth + 1)
+
+        if not body_statements:
+            body_statements = [ast.Pass()]
 
         return ast.For(target=target, iter=iterator, body=body_statements, orelse=[])
 
@@ -166,10 +171,11 @@ class ASTPatternGenerator:
         """
         statements = []
 
-        # The grammar now includes control flow statements.
         statement_grammar = {
             self._create_assignment_node: 0.5,
             self._create_call_node: 0.2,
+            self._create_attribute_assignment_node: 0.2,
+            self._create_attribute_deletion_node: 0.1,
             self._create_if_node: 0.15,
             self._create_for_node: 0.15,
         }
@@ -179,8 +185,9 @@ class ASTPatternGenerator:
         if depth >= max_depth:
             # At max depth, only allow simple, non-recursive statements.
             statement_grammar = {
-                self._create_assignment_node: 0.7,
-                self._create_call_node: 0.3,
+                self._create_assignment_node: 0.5,
+                self._create_attribute_assignment_node: 0.3,
+                self._create_call_node: 0.2,
             }
 
         for _ in range(num_statements):
@@ -197,7 +204,11 @@ class ASTPatternGenerator:
                 new_node = chosen_generator()
 
             if new_node:
-                statements.append(new_node)
+                # ast.Delete returns a single node, others might return a list
+                if isinstance(new_node, list):
+                    statements.extend(new_node)
+                else:
+                    statements.append(new_node)
         return statements
 
     def _synthesize_del_attack(self) -> List[ast.stmt]:
@@ -286,14 +297,79 @@ class ASTPatternGenerator:
 
         return [jit_target_func, control_func, *harness_nodes]
 
-    # --- REVISED Main Generation Entry Point ---
+    def _create_class_and_instance_nodes(self) -> List[ast.stmt]:
+        """Generates a simple class definition and an instance of it."""
+        class_name = f"SynthClass_{self._get_prefix()}"
+        instance_name = f"synth_instance_{self._get_prefix()}"
+
+        class_def = ast.ClassDef(
+            name=class_name,
+            bases=[],
+            keywords=[],
+            body=[ast.Pass()],
+            decorator_list=[]
+        )
+
+        instance_creation = ast.Assign(
+            targets=[ast.Name(id=instance_name, ctx=ast.Store())],
+            value=ast.Call(func=ast.Name(id=class_name, ctx=ast.Load()), args=[], keywords=[])
+        )
+
+        # Track the new instance and initialize its attribute set
+        self.known_objects[instance_name] = set()
+        self.known_variables.add(instance_name)
+
+        return [class_def, instance_creation]
+
+    def _create_attribute_assignment_node(self) -> ast.Assign | None:
+        """Creates an 'ast.Assign' node for an attribute (e.g., obj.x = 1)."""
+        if not self.known_objects:
+            return None  # Can't assign an attribute if no objects exist
+
+        target_obj_name = random.choice(list(self.known_objects.keys()))
+
+        # Decide whether to create a new attribute or reassign an existing one
+        if self.known_objects[target_obj_name] and random.random() < 0.5:
+            attr_name = random.choice(list(self.known_objects[target_obj_name]))
+        else:
+            attr_name = f"attr_{self._get_prefix()}"
+            self.known_objects[target_obj_name].add(attr_name)
+
+        target = ast.Attribute(
+            value=ast.Name(id=target_obj_name, ctx=ast.Load()),
+            attr=attr_name,
+            ctx=ast.Store()
+        )
+        value = self._generate_expression_ast()
+        return ast.Assign(targets=[target], value=value)
+
+    def _create_attribute_deletion_node(self) -> ast.Delete | None:
+        """Creates an 'ast.Delete' node for an attribute (e.g., del obj.x)."""
+        # Find an object that has attributes we can delete
+        eligible_objects = [name for name, attrs in self.known_objects.items() if attrs]
+        if not eligible_objects:
+            return None
+
+        target_obj_name = random.choice(eligible_objects)
+        attr_to_delete = random.choice(list(self.known_objects[target_obj_name]))
+
+        # Remove the attribute from our known state
+        self.known_objects[target_obj_name].remove(attr_to_delete)
+
+        target = ast.Attribute(
+            value=ast.Name(id=target_obj_name, ctx=ast.Load()),
+            attr=attr_to_delete,
+            ctx=ast.Del()
+        )
+        return ast.Delete(targets=[target])
 
     def generate_pattern(self) -> str:
         """
         Main public method. Makes a high-level strategic choice and calls the
         appropriate synthesizer.
         """
-        self.known_variables = set()  # Reset scope for each new pattern
+        self.known_variables = set()
+        self.known_objects = {}
         self.prefix_counter = 0
 
         # High-level strategy choice
@@ -307,7 +383,10 @@ class ASTPatternGenerator:
                 statement_nodes = self._synthesize_del_attack()
             else:
                 # Otherwise, generate a standard block of code.
-                statement_nodes = self.generate_statement_list(num_statements=random.randint(5, 15))
+                statement_nodes = self.generate_statement_list(num_statements=random.randint(2, 15))
+
+        if not statement_nodes:
+            statement_nodes = [ast.Pass()]
 
         module_node = ast.Module(body=statement_nodes, type_ignores=[])
         ast.fix_missing_locations(module_node)
