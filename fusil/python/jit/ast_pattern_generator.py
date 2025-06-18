@@ -1,4 +1,5 @@
 import ast
+import copy
 import random
 from textwrap import dedent
 from typing import TYPE_CHECKING, List
@@ -26,28 +27,51 @@ class ASTPatternGenerator:
 
     def _generate_expression_ast(self, depth: int = 0) -> ast.expr:
         """
-        Recursively builds an AST for a complex, random expression.
-        (This is a copy of the helper from our ASTMutator, now used for generation).
+        Recursively builds an AST for a random expression. It now has a
+        significant chance to generate a simple, non-recursive expression
+        to increase the variety of generated tests.
         """
-        # Base Case: If we are deep enough, return a variable or a constant.
+        # --- NEW: Probabilistic choice between simple and complex expressions ---
+        # With a 40% chance, generate a very simple expression.
+        if random.random() < 0.4 and self.known_variables:
+
+            # Choose between a simple binary operation, or just a single variable/constant.
+            if random.random() < 0.7:
+                # --- Generate a simple binary operation (e.g., var + 5) ---
+                left = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+
+                # The right operand can be another variable or a new constant.
+                if random.random() < 0.5 and len(self.known_variables) > 1:
+                    right = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+                else:
+                    right = ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
+
+                ast_ops = [ast.Add(), ast.Sub(), ast.Mult(), ast.BitAnd(), ast.BitOr(), ast.BitXor()]
+                return ast.BinOp(left=left, op=random.choice(ast_ops), right=right)
+
+            else:
+                # --- Generate just a single variable or constant ---
+                if random.random() < 0.8:
+                    return ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+                else:
+                    return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
+
+        # --- EXISTING: Fallback to the recursive complex expression generator ---
         if depth > random.randint(1, 2):
-            if self.known_variables and random.random() < 0.7:
-                # Use a variable that we know has been defined.
+            # Base Case for recursion
+            if self.known_variables:
                 return ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
             else:
-                # Create a new, simple constant.
                 return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
 
-        # Recursive Step: Create a binary operation with new sub-expressions.
+        # Recursive Step for complex expressions
         ast_ops = [
             ast.Add(), ast.Sub(), ast.Mult(), ast.Div(), ast.FloorDiv(), ast.Mod(),
             ast.BitAnd(), ast.BitOr(), ast.BitXor(), ast.LShift(), ast.RShift()
         ]
         chosen_op = random.choice(ast_ops)
-
         left_operand = self._generate_expression_ast(depth + 1)
         right_operand = self._generate_expression_ast(depth + 1)
-
         return ast.BinOp(left=left_operand, op=chosen_op, right=right_operand)
 
     def _create_assignment_node(self) -> ast.Assign:
@@ -176,24 +200,119 @@ class ASTPatternGenerator:
                 statements.append(new_node)
         return statements
 
+    def _synthesize_del_attack(self) -> List[ast.stmt]:
+        """Synthesizes a full __del__ side-effect attack from scratch."""
+        # 1. Define the FrameModifier class programmatically.
+        fm_class_def_str = dedent("""
+            class FrameModifier:
+                def __init__(self, name, val):
+                    self.name = name
+                    self.val = val
+                def __del__(self):
+                    try:
+                        sys._getframe(1).f_locals[self.name] = self.val
+                    except Exception:
+                        pass
+        """)
+        fm_class_nodes = ast.parse(fm_class_def_str).body
+
+        # 2. Generate a simple loop body to be the target of the attack.
+        body_logic = self.generate_statement_list(num_statements=3)
+
+        # 3. Choose a variable created in the loop body to be the victim.
+        target_var = random.choice(list(self.known_variables)) if self.known_variables else 'x'
+
+        # 4. Create the setup for the attack.
+        fm_instance_creation = ast.Assign(
+            targets=[ast.Name(id='fm', ctx=ast.Store())],
+            value=ast.Call(
+                func=ast.Name(id='FrameModifier', ctx=ast.Load()),
+                args=[ast.Constant(value=target_var), ast.Constant(value='corrupted')],
+                keywords=[]
+            )
+        )
+
+        # 5. Create the trigger.
+        del_trigger = ast.Delete(targets=[ast.Name(id='fm', ctx=ast.Del())])
+
+        # 6. Assemble the final attack structure within a loop.
+        loop = ast.For(
+            target=ast.Name(id='i_del', ctx=ast.Store()),
+            iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[ast.Constant(value=500)], keywords=[]),
+            body=[
+                *body_logic,
+                # On the penultimate iteration, delete the frame modifier.
+                ast.If(
+                    test=ast.Compare(left=ast.Name(id='i_del', ctx=ast.Load()), ops=[ast.Eq()],
+                                     comparators=[ast.Constant(value=498)]),
+                    body=[del_trigger],
+                    orelse=[]
+                )
+            ],
+            orelse=[]
+        )
+
+        return [*fm_class_nodes, fm_instance_creation, loop]
+
+    def _synthesize_correctness_test(self) -> List[ast.stmt]:
+        """Synthesizes a full 'Twin Execution' correctness test."""
+        # 1. Generate a random block of code to be the test subject.
+        test_body_ast = self.generate_statement_list(num_statements=random.randint(4, 8))
+
+        # 2. Create the JIT target function.
+        jit_target_func = ast.FunctionDef(
+            name='jit_target',
+            args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
+            body=test_body_ast,
+            decorator_list=[]
+        )
+
+        # 3. Create the Control function with an identical body.
+        control_func = ast.FunctionDef(
+            name='control',
+            args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
+            body=copy.deepcopy(test_body_ast),  # Use a deep copy
+            decorator_list=[]
+        )
+
+        # 4. Programmatically build the harness calls and assertion.
+        harness_str = dedent("""
+            jit_harness(jit_target, 500)
+            jit_result = jit_target()
+            control_result = no_jit_harness(control)
+            assert compare_results(jit_result, control_result), "JIT correctness bug synthesized!"
+        """)
+        harness_nodes = ast.parse(harness_str).body
+
+        return [jit_target_func, control_func, *harness_nodes]
+
+    # --- REVISED Main Generation Entry Point ---
+
     def generate_pattern(self) -> str:
         """
-        Main public method. Generates a full pattern as a string.
+        Main public method. Makes a high-level strategic choice and calls the
+        appropriate synthesizer.
         """
         self.known_variables = set()  # Reset scope for each new pattern
         self.prefix_counter = 0
 
-        # Generate the body of our new pattern.
-        num_statements = random.randint(5, 15)
-        statement_nodes = self.generate_statement_list(num_statements)
+        # High-level strategy choice
+        if random.random() < 0.3:
+            # --- Generate a Correctness Test ---
+            statement_nodes = self._synthesize_correctness_test()
+        else:
+            # --- Generate a Crash/Standard Test ---
+            if random.random() < 0.2:
+                # With a small chance, synthesize a targeted __del__ attack.
+                statement_nodes = self._synthesize_del_attack()
+            else:
+                # Otherwise, generate a standard block of code.
+                statement_nodes = self.generate_statement_list(num_statements=random.randint(5, 15))
 
-        # Wrap the statements in a Module node to create a valid tree.
         module_node = ast.Module(body=statement_nodes, type_ignores=[])
         ast.fix_missing_locations(module_node)
 
-        # Unparse the final AST back into a string of Python code.
         try:
             return ast.unparse(module_node)
         except AttributeError:
             return "# AST unparsing failed."
-
