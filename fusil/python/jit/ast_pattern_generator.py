@@ -87,26 +87,91 @@ class ASTPatternGenerator:
         )
         return ast.Expr(value=call_node)
 
-    def generate_statement_list(self, num_statements: int) -> List[ast.stmt]:
+    def _generate_comparison_ast(self) -> ast.Compare:
+        """Generates a random comparison expression, e.g., 'a < b'."""
+        if not self.known_variables:
+            # If no variables exist yet, compare two constants.
+            left = ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
+        else:
+            left = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+
+        right = self._generate_expression_ast(depth=2)  # Keep comparison simple
+
+        ops = [ast.Eq(), ast.NotEq(), ast.Lt(), ast.LtE(), ast.Gt(), ast.GtE()]
+        return ast.Compare(left=left, ops=[random.choice(ops)], comparators=[right])
+
+    def _create_if_node(self, depth: int) -> ast.If:
+        """Creates an 'ast.If' node with recursively generated body/orelse blocks."""
+        test_condition = self._generate_comparison_ast()
+
+        # Recursively generate the 'if' body.
+        body_statements = self.generate_statement_list(random.randint(1, 3), depth + 1)
+
+        # Randomly decide whether to include an 'else' block.
+        orelse_statements = []
+        if random.random() < 0.5:
+            orelse_statements = self.generate_statement_list(random.randint(1, 2), depth + 1)
+
+        return ast.If(test=test_condition, body=body_statements, orelse=orelse_statements)
+
+    def _create_for_node(self, depth: int) -> ast.For:
+        """Creates an 'ast.For' node with a recursively generated body."""
+        # Create a loop variable, e.g., 'for i_v3 in ...'
+        loop_var_name = f"i_{self._get_prefix()}"
+        target = ast.Name(id=loop_var_name, ctx=ast.Store())
+        self.known_variables.add(loop_var_name)  # The loop var is now in scope
+
+        # Create the iterator, e.g., 'range(10)'.
+        iterator = ast.Call(
+            func=ast.Name(id='range', ctx=ast.Load()),
+            args=[ast.Constant(value=random.randint(5, 50))],
+            keywords=[]
+        )
+
+        # Recursively generate the loop body.
+        body_statements = self.generate_statement_list(random.randint(2, 5), depth + 1)
+
+        return ast.For(target=target, iter=iterator, body=body_statements, orelse=[])
+
+    # --- REVISED Core Generation Loop ---
+
+    def generate_statement_list(self, num_statements: int, depth: int = 0) -> List[ast.stmt]:
         """
-        The core generation loop. Creates a linear sequence of statements.
+        The core generation loop. Creates a sequence of statements, now with
+        the potential for nested control flow.
         """
         statements = []
-        # The grammar for our simple, linear code generator.
+
+        # The grammar now includes control flow statements.
         statement_grammar = {
-            self._create_assignment_node: 0.6,
-            self._create_call_node: 0.4,
+            self._create_assignment_node: 0.5,
+            self._create_call_node: 0.2,
+            self._create_if_node: 0.15,
+            self._create_for_node: 0.15,
         }
 
+        # To prevent infinite recursion, limit the depth of control flow.
+        max_depth = 2
+        if depth >= max_depth:
+            # At max depth, only allow simple, non-recursive statements.
+            statement_grammar = {
+                self._create_assignment_node: 0.7,
+                self._create_call_node: 0.3,
+            }
+
         for _ in range(num_statements):
-            # Choose a statement type based on the weighted grammar.
             chosen_generator = random.choices(
                 population=list(statement_grammar.keys()),
                 weights=list(statement_grammar.values()),
                 k=1
             )[0]
 
-            new_node = chosen_generator()
+            # Pass the current depth to generators that need it.
+            if chosen_generator in (self._create_if_node, self._create_for_node):
+                new_node = chosen_generator(depth)
+            else:
+                new_node = chosen_generator()
+
             if new_node:
                 statements.append(new_node)
         return statements
