@@ -1885,13 +1885,12 @@ class WriteJITCode:
             self.write(level, line)
 
         self.restoreLevel(self.parent.base_level - 1)
-        # Raise AssertionErrors so we know the control and JITted code results don't match.
-        self.write(level, "except AssertionError:")
+        # Catch our specific signal and let it bubble up.
+        self.write(level, "except JITCorrectnessError:")
         self.addLevel(1)
         self.write(level, "raise")
         self.restoreLevel(self.parent.base_level - 1)
-        # Catch any exception to prevent the fuzzer from stopping on
-        # benign errors, allowing it to continue hunting for crashes.
+        # Catch all other exceptions, INCLUDING normal AssertionErrors, and ignore them.
         self.write(level, "except Exception:")
         self.addLevel(1)
         self.write(level, "pass")
@@ -2117,8 +2116,14 @@ class WriteJITCode:
             self.write(0, f"jit_result = {jit_func_name}()")
             self.write(0, f"control_result = no_jit_harness({control_func_name})")
             self.emptyLine()
+
+            # +++ NEW: Use 'if not...raise' instead of 'assert' +++
+            self.write(0, "if not compare_results(jit_result, control_result):")
+            self.addLevel(1)
             self.write(0,
-                       f'assert compare_results(jit_result, control_result), f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}"')
+                       'raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {jit_result}, Control: {control_result}")')
+            self.restoreLevel(self.parent.base_level - 1)
+
             self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "except AssertionError:")
             self.addLevel(1)

@@ -356,6 +356,10 @@ class WritePythonCode(WriteCode):
             ),
         )
 
+        self.write(0, "# Define a custom exception to distinguish our check from others.")
+        self.write(0, "class JITCorrectnessError(AssertionError): pass")
+        self.emptyLine()
+
         if USE_MANGLE_FEATURE:
             self.write(0, mangle_obj)
         self.emptyLine()

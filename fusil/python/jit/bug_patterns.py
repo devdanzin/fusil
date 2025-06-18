@@ -153,7 +153,8 @@ def Control_path():
 jit_result = JIT_path()
 control_result = no_jit_harness(Control_path)
 
-assert compare_results(jit_result, control_result), "GLOBAL INVALIDATION BUG! JIT: %s, Control: %s" % (jit_result, control_result)
+if not compare_results(jit_result, control_result):
+    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
 """
     },
     'isinstance_elimination': {
@@ -191,7 +192,8 @@ jit_harness(jit_target_isinstance_{prefix}, {warmup_calls})
 jit_result = jit_target_isinstance_{prefix}()
 control_result = no_jit_harness(control_isinstance_{prefix})
 
-assert compare_results(jit_result, control_result), "ISINSTANCE ELIMINATION DEFECT! JIT: %s, Control: %s" % (jit_result, control_result)
+if not compare_results(jit_result, control_result):
+    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
 """
     },
     'pow_type_instability': {
@@ -242,7 +244,8 @@ jit_harness(jit_target_pow_{prefix}, {warmup_calls}, *warmup_args)
 jit_result = jit_target_pow_{prefix}(*test_args)
 control_result = no_jit_harness(control_pow_{prefix}, *test_args)
 
-assert compare_results(jit_result, control_result), "POW() TYPE INSTABILITY DEFECT! JIT: %s, Control: %s" % (jit_result, control_result)
+if not compare_results(jit_result, control_result):
+    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
 """
     },
     'slice_type_propagation': {
@@ -278,7 +281,8 @@ jit_harness(jit_target_slice_{prefix}, {warmup_calls})
 jit_result = jit_target_slice_{prefix}()
 control_result = no_jit_harness(control_slice_{prefix})
 
-assert compare_results(jit_result, control_result), "SLICE TYPE PROPAGATION DEFECT! JIT: %s, Control: %s" % (jit_result, control_result)
+if not compare_results(jit_result, control_result):
+    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
 """
     },
     'jit_error_handling': {
