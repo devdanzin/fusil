@@ -299,6 +299,12 @@ class Fuzzer(Application):
            default=False,
         )
         jit_options.add_option(
+            "--jit-generate-pattern",
+           help="Enable the experimental AST-based pattern synthesizer.",
+           action="store_true",
+           default=False,
+        )
+        jit_options.add_option(
             "--jit-correctness-prob",
             help="Probability (0.0-1.0) of running a correctness test when enabled.",
             type="float",

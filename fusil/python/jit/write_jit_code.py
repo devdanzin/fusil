@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import fusil.python.values
 from fusil.python.jit.ast_mutator import ASTMutator
+from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ class WriteJITCode:
         self.module_name = parent.module_name
 
         self.ast_mutator = ASTMutator()
+        self.ast_pattern_generator = ASTPatternGenerator(parent)
 
         # Bind the writing methods directly for convenience
         self.write = parent.write
@@ -54,6 +56,28 @@ class WriteJITCode:
             return
 
         # --- High-Priority Modes ---
+        if self.options.jit_generate_pattern:
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
+
+            # 1. Generate a brand new pattern from scratch.
+            synthesized_body = self.ast_pattern_generator.generate_pattern()
+
+            # 2. This new pattern is self-contained, so setup_code is empty.
+            setup_code = ""
+
+            # 3. For now, we will wrap this synthesized code in a simple environment.
+            #    We can enhance this later to have the generator also create parameters.
+            self.write_print_to_stderr(0, f'"[{prefix}] Wrapping synthesized pattern in a simple environment."')
+            params = {'def_str': '', 'call_str': '', 'setup_code': ''}
+
+            # 4. Use our existing environmental wrapper to execute the new code.
+            #    This also applies our `try...except` guard automatically.
+            self._write_mutated_code_in_environment(prefix, setup_code, synthesized_body, params)
+
+            self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished AST Pattern Synthesis >>>"')
+            self.emptyLine()
+            return
+
         if self.options.rediscover_decref_crash:
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Re-discovery of GH-124483"')
             self._generate_decref_escapes_scenario(prefix)
