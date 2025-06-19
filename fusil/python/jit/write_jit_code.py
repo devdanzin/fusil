@@ -23,6 +23,7 @@ The key responsibilities of this module are:
 from __future__ import annotations
 
 import ast
+import inspect
 from textwrap import dedent
 from typing import Any
 from random import choice, randint, random
@@ -78,27 +79,37 @@ class WriteJITCode:
         self.write_print_to_stderr = parent.write_print_to_stderr
 
         self.jit_warmed_targets = []
+        self.fuzzable_classes = None
 
     def generate_scenario(self, prefix: str) -> None:
         """
-        Main entry point, now fully refactored to use the new --jit-mode flag
-        as its primary dispatcher.
+        Main entry point, now with an added check to run the new class
+        fuzzing scenario as a high-priority strategy.
         """
         if not self.parent.module_functions:
-            return
-        fuzzed_func_name = choice(self.parent.module_functions)
-        try:
-            fuzzed_func_obj = getattr(self.parent.module, fuzzed_func_name)
-        except AttributeError:
+            fuzzed_func_name = None
+            fuzzed_func_obj = None
+        else:
+            fuzzed_func_name = choice(self.parent.module_functions)
+            try:
+                fuzzed_func_obj = getattr(self.parent.module, fuzzed_func_name)
+            except AttributeError:
+                fuzzed_func_obj = None
+
+        # --- NEW: Check for Class Fuzzing Mode ---
+        # With a 25% chance, prioritize the new class fuzzer if enabled.
+        if self.options.jit_fuzz_classes and random() < 0.25:
+            # This call will handle everything: discovery, instantiation, and the hot loop.
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: JIT Class Fuzzing"')
+            self._generate_class_fuzzing_scenario(prefix)
             return
 
+        # --- The existing --jit-mode dispatch logic follows as the fallback ---
         mode = self.options.jit_mode
 
-        # First, handle the special 'all' mode.
-        if mode.lower() == 'all':
+        if mode == 'all':
             self._execute_randomized_strategy(prefix, fuzzed_func_name, fuzzed_func_obj)
 
-        # Dispatch to the specific mode chosen by the user.
         elif mode == 'synthesize':
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
             body_code = self.ast_pattern_generator.generate_pattern()
@@ -115,10 +126,15 @@ class WriteJITCode:
 
     def _execute_randomized_strategy(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """
-        Called by --jit-mode=all. Randomly picks a mode and compatible
-        modifiers for a single test case generation.
+        Called by --jit-mode=all. It now includes class fuzzing in its
+        pool of random choices.
         """
-        chosen_mode = choice(['synthesize', 'variational', 'legacy'])
+        # Add our new scenario to the list of possible strategies.
+        possible_modes = ['synthesize', 'variational', 'legacy']
+        if self.options.jit_fuzz_classes:
+            possible_modes.append('class_fuzzing')
+
+        chosen_mode = choice(possible_modes)
         self.write_print_to_stderr(0, f'"[{prefix}] JIT-MODE=ALL: Randomly selected mode: {chosen_mode}"')
 
         # Store original values and set temporary random ones
@@ -130,16 +146,15 @@ class WriteJITCode:
             setattr(self.options, flag, choice([True, False]))
 
         # Dispatch to the chosen mode's logic
-        if chosen_mode == 'synthesize':
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
+        if chosen_mode == 'class_fuzzing':
+            self._generate_class_fuzzing_scenario(prefix)
+        elif chosen_mode == 'synthesize':
             body_code = self.ast_pattern_generator.generate_pattern()
             params = self._generate_mutated_parameters(prefix)
             self._write_mutated_code_in_environment(prefix, "", body_code, params)
         elif chosen_mode == 'variational':
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
-            self._generate_variational_scenario(prefix, 'ALL')  # Choose any pattern
+            self._generate_variational_scenario(prefix, 'ALL')
         elif chosen_mode == 'legacy':
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Legacy Scenario Generation"')
             self._generate_legacy_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
         # Restore original flag values
@@ -2169,5 +2184,189 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)
         self.write(0, "except JITCorrectnessError: raise")
         self.write(0, "except Exception: pass")
+
+    def _discover_and_filter_classes(self) -> list:
+        """
+        Scans the target module for classes and filters them to find ones
+        that are suitable for automated instantiation and fuzzing.
+
+        Returns:
+            A list of class objects that can be safely fuzzed.
+        """
+        # If we have already discovered the classes, return the cached result.
+        if self.fuzzable_classes is not None:
+            return self.fuzzable_classes
+
+        self.write_print_to_stderr(0, '"[+] Discovering and filtering classes for JIT fuzzing..."')
+
+        discovered_classes = []
+        if not self.parent.module_classes:
+            self.fuzzable_classes = []
+            return []
+
+        for class_name in self.parent.module_classes:
+            try:
+                class_obj = getattr(self.parent.module, class_name)
+
+                # --- Filtering Logic ---
+
+                # Filter 1: Skip abstract base classes
+                if inspect.isabstract(class_obj):
+                    continue
+
+                # Filter 2: Skip exceptions
+                if isinstance(class_obj, type) and issubclass(class_obj, BaseException):
+                    continue
+
+                # Filter 3: Analyze the __init__ method for instantiability
+                if hasattr(class_obj, '__init__'):
+                    init_sig = inspect.signature(class_obj.__init__)
+                    can_instantiate = True
+                    for param in init_sig.parameters.values():
+                        # Skip 'self' and other implicit parameters
+                        if param.name in ('self', 'cls'):
+                            continue
+                        # If a parameter has no default value and is not *args or **kwargs,
+                        # it's too hard to instantiate automatically for now.
+                        if (param.default is inspect.Parameter.empty and
+                                param.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                                                   inspect.Parameter.VAR_KEYWORD)):
+                            can_instantiate = False
+                            break
+
+                    if not can_instantiate:
+                        continue
+
+                # If all filters passed, add the class object to our list.
+                discovered_classes.append(class_obj)
+
+            except (TypeError, ValueError, AttributeError):
+                # Some objects can't be inspected easily; skip them.
+                continue
+
+        self.write_print_to_stderr(0, f'"[+] Found {len(discovered_classes)} fuzzable classes."')
+        self.fuzzable_classes = discovered_classes
+        return self.fuzzable_classes
+
+    def _generate_args_for_method(self, method_obj: object) -> str:
+        """
+        Inspects a method's signature and generates a string of plausible
+        arguments for calling it. Implements a "mostly smart, sometimes chaotic"
+        strategy to balance successful calls with JIT-stressing type confusion.
+
+        Args:
+            method_obj: The method object to be inspected.
+
+        Returns:
+            A string containing the arguments for the call (e.g., "'path/to/file', 100").
+        """
+        args_list = []
+        try:
+            sig = inspect.signature(method_obj)
+            for param in sig.parameters.values():
+                # Skip 'self', 'cls', *args, **kwargs
+                if param.name in ('self', 'cls') or param.kind in (inspect.Parameter.VAR_POSITIONAL,
+                                                                   inspect.Parameter.VAR_KEYWORD):
+                    continue
+
+                # With a small probability, inject a random "evil" value
+                if random() < 0.1:
+                    args_list.append(self.arg_generator.genInterestingValues()[0])
+                    continue
+
+                # --- "Smart" Generation based on parameter name ---
+                # This is a simple heuristic-based approach.
+                param_name = param.name.lower()
+                if 'path' in param_name or 'file' in param_name or 'name' in param_name:
+                    args_list.append(self.arg_generator.genString()[0])
+                elif 'count' in param_name or 'index' in param_name or 'size' in param_name or 'len' in param_name:
+                    args_list.append(self.arg_generator.genSmallUint()[0])
+                elif 'flag' in param_name or 'enable' in param_name:
+                    args_list.append(self.arg_generator.genBool()[0])
+                else:
+                    # Default to a simple integer if we have no better heuristic.
+                    args_list.append(self.arg_generator.genInt()[0])
+
+        except (TypeError, ValueError):
+            # If signature inspection fails, fall back to generating a single random arg.
+            args_list.append(self.arg_generator.genInterestingValues()[0])
+
+        return ", ".join(map(str, args_list))
+
+    def _generate_class_fuzzing_scenario(self, prefix: str) -> None:
+        """
+        Selects a class, instantiates it safely, and calls one of its methods
+        repeatedly in a JIT-warming hot loop with "smart" arguments.
+        """
+        fuzzable_classes = self._discover_and_filter_classes()
+        if not fuzzable_classes:
+            self.write_print_to_stderr(0, '"[-] No suitable classes found for JIT fuzzing in this module."')
+            return
+
+        target_class = choice(fuzzable_classes)
+        class_name = target_class.__name__
+        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting JIT Class Fuzzing for: {class_name} <<<"')
+
+        # --- THE FIX ---
+        instance_var = f"instance_{prefix}"
+
+        # 1. Pre-initialize the instance variable to None. This prevents
+        #    UnboundLocalError if instantiation fails.
+        self.write(0, f"{instance_var} = None")
+
+        # 2. Wrap the instantiation call in a try...except block.
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"# Instantiate a target class from the module.")
+        self.write(0, f"{instance_var} = {self.module_name}.{class_name}()")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0, f'"[-] NOTE: Failed to instantiate {class_name}: {{e.__class__.__name__}}"')
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # Discover a suitable method on the class to call.
+        methods = self.parent._get_object_methods(target_class, class_name)
+        if not methods:
+            self.write_print_to_stderr(0, f'"[-] No suitable methods found on class {class_name}."')
+            return
+
+        method_name = choice(list(methods.keys()))
+        method_obj = methods[method_name]
+
+        # Generate "smart" arguments for the chosen method.
+        args_str = self._generate_args_for_method(method_obj)
+        self.write_print_to_stderr(0, f'"[{prefix}] Targeting method: {class_name}.{method_name}"')
+
+        # Generate the JIT-warming hot loop. The `if instance_var:` check
+        # now safely handles instantiation failures.
+        self.write(0, f"if {instance_var}:")
+        self.addLevel(1)
+        self._begin_hot_loop(prefix, level=1)
+
+        self.write(1, "try:")
+        self.addLevel(1)
+        self.write(1, f"getattr({instance_var}, '{method_name}')({args_str})")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(1, "except Exception: pass")
+
+        # Cleanly exit the levels opened by the helper.
+        self.restoreLevel(self.parent.base_level - 1)
+        if self.options.jit_raise_exceptions:
+            # Add the matching 'except' block for the 'try' in the helper
+            self.write(1, "except ValueError as e_val_err:")
+            self.addLevel(1)
+            self.write(1, "if e_val_err.args == ('JIT fuzzing probe',):")
+            self.addLevel(1)
+            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
+            self.restoreLevel(self.parent.base_level - 1)
+            self.write(1, "else: raise")
+            self.restoreLevel(self.parent.base_level - 1)
+
+        self.restoreLevel(self.parent.base_level - 1)  # Closes the initial `if instance_var:`
+        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"')
+        self.emptyLine()
+
 
 

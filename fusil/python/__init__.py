@@ -299,6 +299,14 @@ class Fuzzer(Application):
             help="[legacy mode] Run the specific, hard-coded scenario to reproduce the GH-124483 decref bug.",
         )
 
+        # --- New Strategy-Enabling Flag ---
+        jit_options.add_option(
+            "--jit-fuzz-classes",
+            action="store_true",
+            default=False,
+            help="Enable the JIT class method fuzzer. This will occasionally generate scenarios that instantiate classes and call their methods in a hot loop.",
+        )
+
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
