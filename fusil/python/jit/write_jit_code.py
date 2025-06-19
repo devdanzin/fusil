@@ -43,9 +43,8 @@ class WriteJITCode:
 
     def generate_scenario(self, prefix: str) -> None:
         """
-        Main entry point for generating a JIT-specific scenario.
-        This method decides which type of scenario to generate based on a
-        clear hierarchy of command-line options.
+        Main entry point, now fully refactored to use the new --jit-mode flag
+        as its primary dispatcher.
         """
         if not self.parent.module_functions:
             return
@@ -55,55 +54,88 @@ class WriteJITCode:
         except AttributeError:
             return
 
-        # --- High-Priority Modes ---
-        if self.options.jit_generate_pattern:
+        mode = self.options.jit_mode
+
+        # First, handle the special 'all' mode.
+        if mode.lower() == 'all':
+            self._execute_randomized_strategy(prefix, fuzzed_func_name, fuzzed_func_obj)
+
+        # Dispatch to the specific mode chosen by the user.
+        elif mode == 'synthesize':
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
+            body_code = self.ast_pattern_generator.generate_pattern()
+            params = self._generate_mutated_parameters(prefix)
+            self._write_mutated_code_in_environment(prefix, "", body_code, params)
 
-            # 1. Generate a brand new pattern from scratch.
-            synthesized_body = self.ast_pattern_generator.generate_pattern()
+        elif mode == 'variational':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
+            self._generate_variational_scenario(prefix, self.options.jit_pattern_name)
 
-            # 2. This new pattern is self-contained, so setup_code is empty.
-            setup_code = ""
+        elif mode == 'legacy':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Legacy Scenario Generation"')
+            self._generate_legacy_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
-            # 3. For now, we will wrap this synthesized code in a simple environment.
-            #    We can enhance this later to have the generator also create parameters.
-            self.write_print_to_stderr(0, f'"[{prefix}] Wrapping synthesized pattern in a simple environment."')
-            params = {'def_str': '', 'call_str': '', 'setup_code': ''}
+    def _execute_randomized_strategy(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+        """
+        Called by --jit-mode=all. Randomly picks a mode and compatible
+        modifiers for a single test case generation.
+        """
+        chosen_mode = choice(['synthesize', 'variational', 'legacy'])
+        self.write_print_to_stderr(0, f'"[{prefix}] JIT-MODE=ALL: Randomly selected mode: {chosen_mode}"')
 
-            # 4. Use our existing environmental wrapper to execute the new code.
-            #    This also applies our `try...except` guard automatically.
-            self._write_mutated_code_in_environment(prefix, setup_code, synthesized_body, params)
+        # Store original values and set temporary random ones
+        flags_to_modify = [
+            "jit_fuzz_ast_mutation", "jit_wrap_statements"
+        ]
+        original_flag_values = {flag: getattr(self.options, flag) for flag in flags_to_modify}
+        for flag in flags_to_modify:
+            setattr(self.options, flag, choice([True, False]))
 
-            self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished AST Pattern Synthesis >>>"')
-            self.emptyLine()
-            return
+        # Dispatch to the chosen mode's logic
+        if chosen_mode == 'synthesize':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
+            body_code = self.ast_pattern_generator.generate_pattern()
+            params = self._generate_mutated_parameters(prefix)
+            self._write_mutated_code_in_environment(prefix, "", body_code, params)
+        elif chosen_mode == 'variational':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
+            self._generate_variational_scenario(prefix, 'ALL')  # Choose any pattern
+        elif chosen_mode == 'legacy':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Legacy Scenario Generation"')
+            self._generate_legacy_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
+        # Restore original flag values
+        for flag, value in original_flag_values.items():
+            setattr(self.options, flag, value)
+
+    def _generate_legacy_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+        """
+        Executes the original "legacy" fuzzing logic. It chooses between
+        correctness, hostile, or friendly scenarios based on the original
+        set of command-line flags. This is preserved for regression testing.
+        """
+        # Handle specific re-discovery flag ---
         if self.options.rediscover_decref_crash:
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Re-discovery of GH-124483"')
+            self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Re-discovery Scenario"')
             self._generate_decref_escapes_scenario(prefix)
             return
 
-        if self.options.jit_fuzz_patterns:
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
-            self._generate_variational_scenario(prefix, self.options.jit_fuzz_patterns)
-            return
-
-        # --- Main Scenario Selection ---
+        # 1. First, check if we should run a correctness test.
         if self.options.jit_correctness_testing and random() < self.options.jit_correctness_prob:
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: JIT Correctness Testing"')
+            self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Correctness Scenario"')
             self._generate_correctness_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
             return
 
-        level = self.options.jit_fuzz_level
-        if level >= 2 and random() < self.options.jit_hostile_prob:
-            is_mixed = (level >= 3)
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Hostile Scenario (Mixed: {is_mixed})"')
-            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj, is_mixed=is_mixed)
-            return
+        # 2. If not, decide whether to generate a hostile scenario.
+        if random() < self.options.jit_hostile_prob:
+            self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Hostile Scenario"')
+            # Dispatch to the hostile scenario generator.
+            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
-        # --- Fallback Scenario ---
-        self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Friendly Scenario"')
-        self._generate_friendly_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+        # 3. As a final fallback, generate a simple "friendly" scenario.
+        else:
+            self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Friendly Scenario"')
+            self._generate_friendly_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
 
     def _generate_correctness_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
         """Chooses and generates one of the self-checking correctness scenarios."""
@@ -120,45 +152,51 @@ class WriteJITCode:
         chosen = choice(generators)
         chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
 
-    def _generate_hostile_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any,
-                                   is_mixed: bool) -> None:
-        """Chooses and generates one of the hostile (crash-finding) scenarios."""
-        # Level 2 scenarios (isolated hostile)
-        hostile_generators = [
+    def _generate_hostile_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+        """
+        (This method is preserved for legacy mode)
+        Chooses and generates one of the hostile (crash-finding) scenarios.
+        """
+        # The list of our original, non-pattern-based hostile generators.
+        basic_hostile_generators = [
             self._generate_invalidation_scenario,
             self._generate_deleter_scenario,
             self._generate_many_vars_scenario,
             self._generate_deep_calls_scenario,
             self._generate_type_version_scenario,
-            self._generate_concurrency_scenario
+            self._generate_concurrency_scenario,
+            self._generate_side_exit_scenario,
+            self._generate_isinstance_attack_scenario
         ]
 
         # Level 3 scenarios (mixed hostile)
-        if is_mixed:
-            hostile_generators.extend([
-                self._generate_mixed_many_vars_scenario,
-                self._generate_del_invalidation_scenario,
-                self._generate_mixed_deep_calls_scenario,
-                self._generate_deep_call_invalidation_scenario,
-                self._generate_fuzzed_func_invalidation_scenario,
-                self._generate_polymorphic_call_block_scenario
-            ])
+        mixed_hostile_generators = [
+            self._generate_mixed_many_vars_scenario,
+            self._generate_del_invalidation_scenario,
+            self._generate_mixed_deep_calls_scenario,
+            self._generate_deep_call_invalidation_scenario,
+            self._generate_fuzzed_func_invalidation_scenario,
+            self._generate_polymorphic_call_block_scenario
+        ]
 
-        # Add flag-based scenarios
-        if self.options.jit_hostile_side_exits:
-            hostile_generators.append(self._generate_side_exit_scenario)
-        if self.options.jit_hostile_isinstance:
-            hostile_generators.append(self._generate_isinstance_attack_scenario)
-
+        if random() < 0.8:
+            hostile_generators = basic_hostile_generators
+        else:
+            hostile_generators = mixed_hostile_generators
         chosen = choice(hostile_generators)
         chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
 
     def _generate_friendly_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
-        """Chooses and generates one of the JIT-friendly (warm-up) scenarios."""
-        if random() < 1.5:
-            self._generate_jit_pattern_block(prefix, fuzzed_func_name, fuzzed_func_obj)
-        else:
+        """
+        (This method is now simplified for legacy mode)
+        Chooses and generates one of the JIT-friendly (warm-up) scenarios.
+        """
+        if random() < 0.0:
+            # Use the simple polymorphic call block.
             self._generate_polymorphic_call_block(prefix, fuzzed_func_name, fuzzed_func_obj)
+        else:
+            # Use the JIT pattern block, which is now powered by the variational engine.
+            self._generate_jit_pattern_block(prefix, fuzzed_func_name, fuzzed_func_obj)
 
     def generate_stateful_object_scenario(self, prefix: str, instance_var_name: str, class_name_str: str,
                                           class_type: type) -> None:
@@ -1775,7 +1813,7 @@ class WriteJITCode:
         return {
             'prefix': prefix,
             'loop_var': loop_var,
-            'loop_iterations': randint(500, self.options.jit_loop_iterations),
+            'loop_iterations': randint(500, max(self.options.jit_loop_iterations, 550)),
             'trigger_iteration': randint(400, 498),
             'corruption_payload': corruption_payload,
             'expression': expression_str,

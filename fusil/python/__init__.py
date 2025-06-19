@@ -195,36 +195,26 @@ class Fuzzer(Application):
             default=False,
         )
         jit_options.add_option(
+            "--jit-mode",
+            help="Main JIT fuzzing strategy to use: "
+                 "'synthesize' (default: create new patterns with AST), "
+                 "'variational' (mutate existing patterns), "
+                 "'legacy' (run old hardcoded scenarios), "
+                 "'all' (randomly pick a strategy for each test case).",
+            choices=('synthesize', 'variational', 'legacy', 'all'),
+            default='synthesize',
+        )
+        jit_options.add_option(
             "--jit-loop-iterations",
             help="Number of iterations for JIT hot loops (default: 10000)",
             type="int",
             default=10000,
         )
         jit_options.add_option(
-            "--jit-polymorphic-degree",
-            help="Number of different types to use in a polymorphic call (default: 4)",
-            type="int",
-            default=4,
-        )
-        jit_options.add_option(
-            "--jit-pattern-mix-prob",
-            help="Probability (0.0-1.0) of generating a JIT-pattern block instead of a standard call (default: 0.25)",
-            type="float",
-            default=0.25,
-        )
-        jit_options.add_option(
             "--jit-hostile-prob",
             help="Probability (0.0-1.0) of generating a hostile invalidation scenario (default: 0.1)",
             type="float",
             default=0.2,
-        )
-        jit_options.add_option(
-            "--jit-fuzz-level",
-            help="Set the intensity of JIT fuzzing. "
-                 "1=Friendly Patterns, 2=Isolated Hostile Scenarios, 3=Mixed Hostile Scenarios. "
-                 "Requires --jit-fuzz. (default: 1)",
-            type="int",
-            default=1,
         )
         jit_options.add_option(
             "--jit-aggressive-gc",
@@ -239,12 +229,6 @@ class Fuzzer(Application):
             default=100,
         )
         jit_options.add_option(
-            "--jit-hostile-side-exits",
-            help="Enable scenarios that force frequent JIT deoptimization (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
             "--jit-raise-exceptions",
             help="Deliberately raise exceptions inside JIT-hot loops (default: False)",
             action="store_true",
@@ -255,12 +239,6 @@ class Fuzzer(Application):
             help="The probability (0.0 to 1.0) of raising an exception per loop (default: 0.001)",
             type="float",
             default=0.001,
-        )
-        jit_options.add_option(
-            "--jit-hostile-isinstance",
-            help="Enable scenarios that attack the JIT's isinstance elimination (default: False)",
-            action="store_true",
-            default=False,
         )
         jit_options.add_option(
             "--jit-correctness-testing",
@@ -275,10 +253,10 @@ class Fuzzer(Application):
             default=False,
         )
         jit_options.add_option(
-            "--jit-fuzz-patterns",
-            help="Fuzz specific JIT bug patterns by comma-separated names (e.g., 'decref_escapes').",
+            "--jit-pattern-name",
+            help="For 'variational' mode, specifies which pattern(s) to use from bug_patterns.py (e.g., 'decref_escapes' or 'ALL').",
             type="str",
-            default=None,
+            default='ALL',
         )
         jit_options.add_option(
             "--jit-fuzz-systematic-values",
