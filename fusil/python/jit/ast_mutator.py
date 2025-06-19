@@ -1,3 +1,20 @@
+"""
+Provides the AST-based structural mutation engine for the JIT fuzzer.
+
+This module contains the `ASTMutator` class and its library of `NodeTransformer`
+subclasses. Its purpose is to take a string of valid Python code, parse it into
+an Abstract Syntax Tree (AST), and then apply a randomized pipeline of
+transformations to structurally alter the code.
+
+This allows the fuzzer to generate novel variations of existing bug patterns
+that go beyond simple value or operator changes. The transformations include
+swapping operators, perturbing constants, duplicating statements, and changing
+container types, among others.
+
+This engine is primarily used by the variational fuzzer when the
+`--jit-fuzz-ast-mutation` flag is enabled.
+"""
+
 import ast
 import builtins
 import random

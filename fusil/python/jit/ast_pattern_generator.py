@@ -1,3 +1,23 @@
+"""
+Provides the generative pattern synthesis engine for the JIT fuzzer.
+
+This module contains the `ASTPatternGenerator`, which is the most advanced
+component of the JIT fuzzing framework. Unlike the `ASTMutator`, which modifies
+existing code, this generator creates entirely new fuzzing patterns from scratch
+by programmatically constructing an Abstract Syntax Tree (AST) based on a
+weighted grammar of Python statements and expressions.
+
+Its key features include:
+- A stateful, two-pass generation process to ensure logical correctness
+  (e.g., pre-initializing all variables).
+- Synthesis of complex control flow structures (nested loops and conditionals).
+- JIT-specific awareness, allowing it to autonomously generate known-buggy
+  constructs like `__del__` side-effect attacks and "Twin Execution"
+  correctness tests.
+
+This engine is activated by the `--jit-mode=synthesize` command-line option.
+"""
+
 import ast
 import copy
 import random

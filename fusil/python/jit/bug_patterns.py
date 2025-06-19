@@ -1,3 +1,22 @@
+"""
+A library of bug patterns and templates for the JIT variational fuzzer.
+
+This file contains the `BUG_PATTERNS` dictionary, which is the central
+repository of known JIT bug classes and templates for generating stressful
+scenarios. Each entry in this dictionary represents a specific type of test
+case that the variational fuzzer (`--jit-mode=variational`) can use as a
+starting point for mutation.
+
+Adding a New Pattern:
+---------------------
+To add a new pattern, simply add a new key-value pair to the `BUG_PATTERNS`
+dictionary. The fuzzer will automatically discover it and make it available
+via the `--jit-pattern-name` command-line option.
+
+For a full guide on the pattern structure, required keys, and available tags,
+please see the detailed developer's guide at the top of this file.
+"""
+
 BUG_PATTERNS = {
     'decref_escapes': {
         'description': 'Attacks JIT assumptions about local variable stability using a __del__ side effect. Based on GH-124483.',

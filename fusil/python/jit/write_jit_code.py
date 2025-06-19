@@ -1,3 +1,25 @@
+"""
+Main orchestrator for the CPython Tier 2 JIT Fuzzing subsystem.
+
+This module provides the `WriteJITCode` class, which acts as the primary
+entry point and dispatcher for all JIT-related test case generation. It is
+instantiated by the main `WritePythonCode` class and handles the high-level
+logic for deciding which fuzzing strategy to employ based on the user's
+command-line options.
+
+The key responsibilities of this module are:
+- Parsing JIT-specific command-line options.
+- Dispatching test case generation to one of three main modes:
+  1. `synthesize`: Calls the ASTPatternGenerator to create novel patterns
+     from scratch.
+  2. `variational`: Calls the variational engine to mutate existing patterns
+     from the bug_patterns.py library.
+  3. `legacy`: Calls the original, hard-coded scenario generators for
+     regression testing.
+- Wrapping the final generated code in a variety of execution environments
+  (e.g., functions, class methods, async functions) to increase coverage.
+"""
+
 from __future__ import annotations
 
 import ast
