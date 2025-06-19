@@ -17,7 +17,7 @@ class ASTPatternGenerator:
     def __init__(self, parent: "WritePythonCode"):
         self.parent = parent
         self.arg_generator = parent.arg_generator
-        self.known_variables = set()
+        self.scope_variables: set[str] = set()
         self.known_objects: dict[str, set[str]] = {}
         self.prefix_counter = 0
 
@@ -28,61 +28,53 @@ class ASTPatternGenerator:
 
     def _generate_expression_ast(self, depth: int = 0) -> ast.expr:
         """
-        Recursively builds an AST for a random expression. It now has a
-        significant chance to generate a simple, non-recursive expression
-        to increase the variety of generated tests.
+        Recursively builds an AST for an expression, now ensuring it only uses
+        variables that have been previously defined in the current scope.
         """
-        # --- NEW: Probabilistic choice between simple and complex expressions ---
-        # With a 40% chance, generate a very simple expression.
-        if random.random() < 0.4 and self.known_variables:
+        # --- THE FIX: Check if we have any variables to work with ---
+        # If no variables are known, we MUST return a constant.
+        if not self.scope_variables:
+            return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
 
-            # Choose between a simple binary operation, or just a single variable/constant.
-            if random.random() < 0.7:
-                # --- Generate a simple binary operation (e.g., var + 5) ---
-                left = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
-
-                # The right operand can be another variable or a new constant.
-                if random.random() < 0.5 and len(self.known_variables) > 1:
-                    right = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
-                else:
-                    right = ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
-
-                ast_ops = [ast.Add(), ast.Sub(), ast.Mult(), ast.BitAnd(), ast.BitOr(), ast.BitXor()]
-                return ast.BinOp(left=left, op=random.choice(ast_ops), right=right)
-
-            else:
-                # --- Generate just a single variable or constant ---
-                if random.random() < 0.8:
-                    return ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
-                else:
-                    return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
-
-        # --- EXISTING: Fallback to the recursive complex expression generator ---
+        # Base Case for recursion
         if depth > random.randint(1, 2):
-            # Base Case for recursion
-            if self.known_variables:
-                return ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+            # When ending recursion, we can choose a known variable or a new constant.
+            if random.random() < 0.7:
+                return ast.Name(id=random.choice(list(self.scope_variables)), ctx=ast.Load())
             else:
                 return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
 
-        # Recursive Step for complex expressions
+        # Recursive Step: We know variables exist, so we can build a complex expression.
         ast_ops = [
             ast.Add(), ast.Sub(), ast.Mult(), ast.Div(), ast.FloorDiv(), ast.Mod(),
             ast.BitAnd(), ast.BitOr(), ast.BitXor(), ast.LShift(), ast.RShift()
         ]
         chosen_op = random.choice(ast_ops)
+
+        # Operands can be new recursive expressions.
         left_operand = self._generate_expression_ast(depth + 1)
         right_operand = self._generate_expression_ast(depth + 1)
+
         return ast.BinOp(left=left_operand, op=chosen_op, right=right_operand)
 
     def _create_assignment_node(self) -> ast.Assign:
-        """Creates an 'ast.Assign' node (e.g., x = a + b)."""
-        # Generate a new variable name and add it to our scope.
+        """
+        Creates an 'ast.Assign' node. This method is now the primary way
+        that variables become "known" to the generator.
+        """
         new_var_name = f"var_{self._get_prefix()}"
-        self.known_variables.add(new_var_name)
+        self.scope_variables.add(new_var_name)
 
+        # If we have known variables, maybe use them in the expression.
+        if self.scope_variables and random.random() < 0.8:
+            value = self._generate_expression_ast()
+        else:
+            # Otherwise, force the value to be a simple constant to avoid UnboundLocalError.
+            value = ast.Constant(value=int(self.arg_generator.genInt()[0]))
+
+        # After the value is determined, create the target and mark the new variable as known.
         target = ast.Name(id=new_var_name, ctx=ast.Store())
-        value = self._generate_expression_ast()
+        self.scope_variables.add(new_var_name)
 
         return ast.Assign(targets=[target], value=value)
 
@@ -114,11 +106,11 @@ class ASTPatternGenerator:
 
     def _generate_comparison_ast(self) -> ast.Compare:
         """Generates a random comparison expression, e.g., 'a < b'."""
-        if not self.known_variables:
+        if not self.scope_variables:
             # If no variables exist yet, compare two constants.
             left = ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
         else:
-            left = ast.Name(id=random.choice(list(self.known_variables)), ctx=ast.Load())
+            left = ast.Name(id=random.choice(list(self.scope_variables)), ctx=ast.Load())
 
         right = self._generate_expression_ast(depth=2)  # Keep comparison simple
 
@@ -145,8 +137,8 @@ class ASTPatternGenerator:
     def _create_for_node(self, depth: int) -> ast.For:
         """Creates an 'ast.For' node, ensuring the body is never empty."""
         loop_var_name = f"i_{self._get_prefix()}"
+        self.scope_variables.add(loop_var_name)
         target = ast.Name(id=loop_var_name, ctx=ast.Store())
-        self.known_variables.add(loop_var_name)
 
         iterator = ast.Call(
             func=ast.Name(id='range', ctx=ast.Load()),
@@ -204,6 +196,18 @@ class ASTPatternGenerator:
                 new_node = chosen_generator()
 
             if new_node:
+                if self.parent.options.jit_wrap_statements:
+                    # We only wrap simple statements, not control flow structures
+                    # as that could lead to invalid syntax (e.g., try: if ...: ...).
+                    if isinstance(new_node, (ast.Assign, ast.Expr, ast.Delete)):
+                        handler = ast.ExceptHandler(
+                            type=ast.Name(id='Exception', ctx=ast.Load()),
+                            name=None,
+                            body=[ast.Pass()]
+                        )
+                        # Replace the node with a Try block containing the node.
+                        new_node = ast.Try(body=[new_node], handlers=[handler], orelse=[], finalbody=[])
+
                 # ast.Delete returns a single node, others might return a list
                 if isinstance(new_node, list):
                     statements.extend(new_node)
@@ -231,7 +235,7 @@ class ASTPatternGenerator:
         body_logic = self.generate_statement_list(num_statements=3)
 
         # 3. Choose a variable created in the loop body to be the victim.
-        target_var = random.choice(list(self.known_variables)) if self.known_variables else 'x'
+        target_var = random.choice(list(self.scope_variables)) if self.scope_variables else 'x'
 
         # 4. Create the setup for the attack.
         fm_instance_creation = ast.Assign(
@@ -321,7 +325,7 @@ class ASTPatternGenerator:
 
         # Track the new instance and initialize its attribute set
         self.known_objects[instance_name] = set()
-        self.known_variables.add(instance_name)
+        self.scope_variables.add(instance_name)
 
         return [class_def, instance_creation]
 
@@ -369,30 +373,38 @@ class ASTPatternGenerator:
 
     def generate_pattern(self) -> str:
         """
-        Main public method. Makes a high-level strategic choice and calls the
-        appropriate synthesizer.
+        Main public method. Generates a full pattern as a string, now with
+        a two-pass process to pre-initialize all variables.
         """
-        self.known_variables = set()
+        # Reset state for the new pattern.
+        self.scope_variables = set()
         self.known_objects = {}
         self.prefix_counter = 0
 
-        # High-level strategy choice
-        if random.random() < 0.3:
-            # --- Generate a Correctness Test ---
-            statement_nodes = self._synthesize_correctness_test()
-        else:
-            # --- Generate a Crash/Standard Test ---
-            if random.random() < 0.2:
-                # With a small chance, synthesize a targeted __del__ attack.
-                statement_nodes = self._synthesize_del_attack()
-            else:
-                # Otherwise, generate a standard block of code.
-                statement_nodes = self.generate_statement_list(num_statements=random.randint(2, 15))
+        # --- PASS 1: Generate the main logic ---
+        # This will populate self.scope_variables as a side effect.
+        num_statements = random.randint(2, 15)
+        main_statement_nodes = self.generate_statement_list(num_statements)
 
-        if not statement_nodes:
-            statement_nodes = [ast.Pass()]
+        # --- PASS 2: Create and Prepend Initializer Nodes ---
+        initializers = []
+        for var_name in sorted(list(self.scope_variables)):
+            # Create an AST node for `var_name = None`
+            assign_node = ast.Assign(
+                targets=[ast.Name(id=var_name, ctx=ast.Store())],
+                value=ast.Constant(value=None)
+            )
+            initializers.append(assign_node)
 
-        module_node = ast.Module(body=statement_nodes, type_ignores=[])
+        # Combine the initializers with the main logic.
+        final_statement_nodes = initializers + main_statement_nodes
+
+        # Safeguard against empty generation.
+        if not final_statement_nodes:
+            final_statement_nodes = [ast.Pass()]
+
+        # Unparse the final, complete AST.
+        module_node = ast.Module(body=final_statement_nodes, type_ignores=[])
         ast.fix_missing_locations(module_node)
 
         try:

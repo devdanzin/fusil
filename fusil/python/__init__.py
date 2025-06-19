@@ -305,6 +305,12 @@ class Fuzzer(Application):
            default=False,
         )
         jit_options.add_option(
+            "--jit-wrap-statements",
+            help="In AST synthesis mode, wrap each generated statement in a try/except block to increase resilience.",
+            action="store_true",
+            default=False,
+        )
+        jit_options.add_option(
             "--jit-correctness-prob",
             help="Probability (0.0-1.0) of running a correctness test when enabled.",
             type="float",
