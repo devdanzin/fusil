@@ -2075,107 +2075,61 @@ class WriteJITCode:
             self.restoreLevel(self.parent.base_level - 1)
 
     def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict,
-                                               extra_mutations: dict = None) -> None:
-
+                                               mutations: dict) -> None:
         """
-        Generates a 'Twin Execution' correctness test based on a bug pattern,
-        ensuring both JIT and Control paths are identically mutated using a
-        seeded AST mutation process.
+        Generates a 'Twin Execution' correctness test.
+        This is now the single, unified engine for all correctness patterns.
         """
-        pattern = BUG_PATTERNS.get(pattern_name)
-        if not pattern:
-            self.write_print_to_stderr(0, f'"[!] Unknown bug pattern for correctness check: {pattern_name}"')
-            return
+        self.write_print_to_stderr(0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} <<<"')
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (AST Paired Mutation) <<<"'
-        )
-
-        # 1. Prepare the full dictionary of mutations
-        mutations = extra_mutations if extra_mutations is not None else {}
-        if extra_mutations:
-            mutations.update(extra_mutations)
-
-        is_self_contained = "def JIT_path" in pattern['body_code'] or "assert compare_results" in pattern['body_code']
-
-        if is_self_contained:
-            # --- PATH A: For self-contained patterns like 'global_invalidation' ---
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (Self-Contained) <<<"')
-
-            # Format the entire pattern's setup and body code.
-            setup_code = dedent(pattern['setup_code']).format(**mutations)
-            body_code = dedent(pattern['body_code']).format(**mutations)
-
-            # Optionally mutate the entire body with the AST engine.
-            if self.options.jit_fuzz_ast_mutation:
-                body_code = self.ast_mutator.mutate(body_code, seed=randint(0, 2 ** 32 - 1))
-
-            # Use our robust write_pattern to wrap the entire scenario in a try/except block.
-            self.write_pattern(setup_code, body_code)
-
-        else:
-            # --- PATH B: For "body-based" patterns that need the harness generated for them ---
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} (AST Paired Mutation) <<<"')
-
-            # Format and write the setup code first.
-            setup_code = dedent(pattern['setup_code']).format(**mutations)
-            self.write(0, setup_code)
-            self.emptyLine()
-
-            # Use a single seed to mutate the body code identically for both paths.
-            mutation_seed = randint(0, 2 ** 32 - 1)
-            initial_body_code = dedent(pattern['body_code']).format(**mutations)
-            mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
-
-            if not mutated_code.strip():
-                self.write_print_to_stderr(0, f'"[{prefix}] NOTE: Mutated body was empty, defaulting to pass."')
-                mutated_code = "pass"
-
-            # Define the JIT Target and Control functions using the IDENTICAL mutated code.
-            jit_func_name = f"jit_target_{prefix}"
-            control_func_name = f"control_{prefix}"
-
-            self.write(0, f"def {jit_func_name}():")
-            self.addLevel(1)
-            for line in mutated_code.splitlines():
-                self.write(1, line)  # Use correct level for each line
-            self.restoreLevel(self.parent.base_level - 1)
-            self.emptyLine()
-
-            self.write(0, f"def {control_func_name}():")
-            self.addLevel(1)
-            for line in mutated_code.splitlines():  # Do the same for the control function
-                self.write(1, line)
-            self.restoreLevel(self.parent.base_level - 1)
-            self.emptyLine()
-
-            # Generate the "Twin Execution" harness, wrapped in a try/except block.
-            self.write(0, "try:")
-            self.addLevel(1)
-            self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations})")
-            self.write(0, f"jit_result = {jit_func_name}()")
-            self.write(0, f"control_result = no_jit_harness({control_func_name})")
-            self.emptyLine()
-
-            # +++ NEW: Use 'if not...raise' instead of 'assert' +++
-            self.write(0, "if not compare_results(jit_result, control_result):")
-            self.addLevel(1)
-            self.write(0,
-                       'raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {jit_result}, Control: {control_result}")')
-            self.restoreLevel(self.parent.base_level - 1)
-
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "except AssertionError:")
-            self.addLevel(1)
-            self.write(0, "raise")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "except Exception: pass")
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario ({pattern_name}) Passed >>>"'
-        )
+        # 1. Format the setup code. This part runs once.
+        setup_code = dedent(pattern['setup_code']).format(**mutations)
+        self.write(0, setup_code)
         self.emptyLine()
+
+        # 2. Get the core logic from the pattern's body.
+        initial_body_code = dedent(pattern['body_code']).format(**mutations)
+
+        # 3. Use a single seed to create one mutated version of the logic.
+        mutation_seed = randint(0, 2 ** 32 - 1)
+        mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
+        if not mutated_code.strip():
+            mutated_code = "pass"
+
+        # 4. Define the JIT and Control functions, using the IDENTICAL mutated code.
+        #    We now get parameter definitions from the pattern if they exist.
+        param_def = pattern.get('param_def', "")
+        param_call = pattern.get('param_call', "")
+
+        jit_func_name = f"jit_target_{prefix}"
+        control_func_name = f"control_{prefix}"
+
+        self.write(0, f"def {jit_func_name}({param_def}):")
+        self.addLevel(1)
+        for line in mutated_code.splitlines(): self.write(1, line)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        self.write(0, f"def {control_func_name}({param_def}):")
+        self.addLevel(1)
+        for line in mutated_code.splitlines(): self.write(1, line)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
+
+        # 5. Generate the single, correct "Twin Execution" harness.
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations}, {param_call})")
+        self.write(0, f"jit_result = {jit_func_name}({param_call})")
+        self.write(0, f"control_result = no_jit_harness({control_func_name}, {param_call})")
+        self.emptyLine()
+        self.write(0, "if not compare_results(jit_result, control_result):")
+        self.addLevel(1)
+        self.write(0,
+                   '    raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}")')
+        self.restoreLevel(self.parent.base_level - 1)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except JITCorrectnessError: raise")
+        self.write(0, "except Exception: pass")
 
 

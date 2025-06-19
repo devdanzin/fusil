@@ -120,169 +120,84 @@ for {loop_var} in range({loop_iterations}):
     'global_invalidation': {
         'description': "Attacks the JIT's cached knowledge of the globals() dictionary.",
         'target_mechanism': 'LOAD_GLOBAL specialization, dk_version invalidation',
-        'tags': {'correctness', 'self-contained', 'invalidation', 'globals'},
+        'tags': {'correctness', 'body-based', 'invalidation', 'globals'}, # <-- Updated tag
         'setup_code': """
 # Define a simple global function that will be our JIT target.
 def my_global_func_{prefix}():
     return 1
 """,
         'body_code': """
-# This scenario is designed for correctness checking.
-def JIT_path():
-    # Phase 1 (Warm-up)
-    accumulator = 0
-    for _ in range({loop_iterations}):
-        accumulator += my_global_func_{prefix}()
-
-    # Phase 2 (Invalidate)
-    globals()['new_global_for_invalidation_{prefix}'] = 123
-
-    # Phase 3 (Re-execute)
+# The core logic, now separated from the harness.
+accumulator = 0
+for _ in range({loop_iterations}):
     accumulator += my_global_func_{prefix}()
-    return accumulator
 
-def Control_path():
-    # Identical logic for the control path
-    accumulator = 0
-    for _ in range({loop_iterations}):
-        accumulator += my_global_func_{prefix}()
-    globals()['new_global_for_invalidation_{prefix}'] = 123
-    accumulator += my_global_func_{prefix}()
-    return accumulator
+# Invalidate the dictionary key version by adding a new global.
+globals()['new_global_for_invalidation_{prefix}'] = 123
 
-jit_result = JIT_path()
-control_result = no_jit_harness(Control_path)
-
-if not compare_results(jit_result, control_result):
-    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
+# Re-execute after invalidation.
+accumulator += my_global_func_{prefix}()
+return accumulator
 """
     },
     'isinstance_elimination': {
         'description': "Tests the JIT's optimization that removes isinstance() calls with constant results.",
         'target_mechanism': '_CALL_ISINSTANCE uop elimination',
-        'tags': {'correctness', 'self-contained', 'isinstance'},
-        'setup_code': """
-# No special setup needed for this pattern.
-""",
+        'tags': {'correctness', 'body-based', 'isinstance'}, # <-- Updated tag
+        'setup_code': "# No special setup needed for this pattern.",
         'body_code': """
-# This scenario checks if the JIT correctly optimizes away a constant isinstance() check.
-
-def jit_target_isinstance_{prefix}():
-    total = 0
-    # The JIT should recognize that isinstance(10, int) is always True and optimize this branch.
-    for i in range({loop_iterations}):
-        if isinstance(10, int):
-            total += 1
-        else:
-            total -= 100 # This path should never be taken.
-    return total
-
-def control_isinstance_{prefix}():
-    total = 0
-    # The control path hardcodes the known correct result of the check.
-    for i in range({loop_iterations}):
-        if True: # The hardcoded result of isinstance(10, int)
-            total += 1
-        else:
-            total -= 100
-    return total
-
-# Warm-up, Execute, Compare
-jit_harness(jit_target_isinstance_{prefix}, {warmup_calls})
-jit_result = jit_target_isinstance_{prefix}()
-control_result = no_jit_harness(control_isinstance_{prefix})
-
-if not compare_results(jit_result, control_result):
-    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
+# The JIT should recognize that isinstance(10, int) is always True.
+total = 0
+for i in range({loop_iterations}):
+    if isinstance(10, int):
+        total += 1
+    else:
+        total -= 100 # This path should never be taken.
+return total
 """
     },
     'pow_type_instability': {
         'description': "Tests the JIT's handling of value-dependent return types using pow().",
         'target_mechanism': "Type inference for BINARY_OP with NB_POWER",
-        'tags': {'correctness', 'self-contained', 'type-inference', 'pow'},
+        'tags': {'correctness', 'body-based', 'pow', 'type-inference'},  # Now tagged as 'body-based'
         'setup_code': """
-# Pairs of inputs for pow() that produce different result types.
-# (value, value) -> result_type
+# This setup code will be written once, outside the generated functions.
 interesting_pow_pairs = [
-    ((2, 10), int),         # int ** int -> int
-    ((2, -2), float),       # int ** neg_int -> float
-    ((-2, 0.5), complex),   # neg_int ** float -> complex
-    ((2.0, 2), float),      # float ** int -> float
-    ((-2.0, 0.5), complex)  # neg_float ** float -> complex
+    ((2, 10), int), ((2, -2), float), ((-2, 0.5), complex),
+    ((2.0, 2), float), ((-2.0, 0.5), complex)
 ]
-""",
-        'body_code': """
-# This scenario checks if the JIT can handle changing return types for pow().
-
-def jit_target_pow_{prefix}(a, b):
-    # This loop will be specialized based on the types of a, b, and the return value.
-    total = 0
-    for _ in range({loop_iterations}):
-        try:
-            # We use a complex number accumulator to handle all possible return types.
-            total += pow(a, b)
-        except TypeError:
-            total += 1
-    return total
-
-def control_pow_{prefix}(a, b):
-    total = 0
-    for _ in range({loop_iterations}):
-        try:
-            total += pow(a, b)
-        except TypeError:
-            total += 1
-    return total
-
-# Select a pair for warm-up and a different pair for the final test.
 warmup_pair, test_pair = sample(interesting_pow_pairs, 2)
 warmup_args, _ = warmup_pair
 test_args, _ = test_pair
-
-# Warm-up, Execute, Compare
-jit_harness(jit_target_pow_{prefix}, {warmup_calls}, *warmup_args)
-jit_result = jit_target_pow_{prefix}(*test_args)
-control_result = no_jit_harness(control_pow_{prefix}, *test_args)
-
-if not compare_results(jit_result, control_result):
-    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
+""",
+        'body_code': """
+# This is the core logic that will be duplicated and mutated.
+# The generator will wrap this in jit_target(a,b) and control(a,b).
+total = 0
+for _ in range({loop_iterations}):
+    try:
+        total += pow(a, b)
+    except TypeError:
+        total += 1
+return total
 """
     },
     'slice_type_propagation': {
         'description': 'Tests the JITs type propagation for slice operations.',
         'target_mechanism': 'Type propagation for BINARY_SLICE',
-        'tags': {'correctness', 'self-contained', 'binary-slice'},
+        'tags': {'correctness', 'body-based', 'binary-slice'}, # <-- Updated tag
         'setup_code': "# No special setup needed for this pattern.",
         'body_code': """
-# This scenario checks if the JIT correctly deduces the type of a slice result.
-
-def jit_target_slice_{prefix}():
-    the_list = [1, 2, 3, 4, 5]
-    total = 0
-    for i in range({loop_iterations}):
-        # The JIT should know the result of this slice is a list.
-        the_slice = the_list[1:4]
-        # Therefore, this list-specific operation should not require a type guard.
-        the_slice.append(i)
-        total += the_slice[-1]
-    return total
-
-def control_slice_{prefix}():
-    the_list = [1, 2, 3, 4, 5]
-    total = 0
-    for i in range({loop_iterations}):
-        the_slice = the_list[1:4]
-        the_slice.append(i)
-        total += the_slice[-1]
-    return total
-
-# Warm-up, Execute, Compare
-jit_harness(jit_target_slice_{prefix}, {warmup_calls})
-jit_result = jit_target_slice_{prefix}()
-control_result = no_jit_harness(control_slice_{prefix})
-
-if not compare_results(jit_result, control_result):
-    raise JITCorrectnessError(f"JIT CORRECTNESS BUG! JIT: {jit_result}, Control: {control_result}")
+# This scenario checks if the JIT correctly deduces the type of a slice.
+the_list = [1, 2, 3, 4, 5]
+total = 0
+for i in range({loop_iterations}):
+    # The JIT should know the result of this slice is a list.
+    the_slice = the_list[1:4]
+    # Therefore, this list-specific operation should not require a type guard.
+    the_slice.append(i)
+    total += the_slice[-1]
+return total
 """
     },
     'jit_error_handling': {
