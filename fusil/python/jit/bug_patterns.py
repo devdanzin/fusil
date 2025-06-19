@@ -14,8 +14,135 @@ dictionary. The fuzzer will automatically discover it and make it available
 via the `--jit-pattern-name` command-line option.
 
 For a full guide on the pattern structure, required keys, and available tags,
-please see the detailed developer's guide at the top of this file.
+please see the detailed developer's guide below.
 """
+
+# ==============================================================================
+#           Developer's Guide to the JIT Fuzzer Bug Pattern Library
+# ==============================================================================
+#
+# This file contains the BUG_PATTERNS dictionary, which is the central
+# repository of known JIT bug classes and templates for generating stressful
+# scenarios. This guide explains how to add new patterns to this library.
+#
+# ------------------------------------------------------------------------------
+# 1. Pattern Dictionary Structure
+# ------------------------------------------------------------------------------
+#
+# Each entry in the BUG_PATTERNS dictionary is itself a dictionary that defines
+# a single pattern. It must contain the following keys:
+#
+#   'description': (str) A brief, one-line description of what the pattern
+#                  tests. This is used for logging.
+#
+#   'target_mechanism': (str) A description of the specific JIT mechanism
+#                       or bug class being targeted (e.g., "DEOPT_IF guard").
+#
+#   'tags': (set) A set of strings that describe the pattern's type and
+#           requirements. This is CRITICAL for the generation engine to know
+#           how to handle the pattern. See section 2 for a full list of tags.
+#
+#   'setup_code': (str) A multi-line string of Python code that runs once
+#                 before the main body. Used for defining helper classes,
+#                 importing modules, or setting up complex constants. It can
+#                 use placeholders.
+#
+#   'body_code': (str) A multi-line string of Python code that represents the
+#                core logic of the test case. This is the part that is most
+#                often mutated by the AST engines.
+#
+#   'payload_variable_type': (str, optional) For patterns that use the
+#                            `{corruption_payload}` placeholder, this key
+#                            specifies the original type of the variable being
+#                            corrupted (e.g., 'int'). Used by the 'type-aware'
+#                            fuzzing mode.
+#
+#   'param_def': (str, optional) For correctness patterns that need arguments,
+#                this defines the parameters (e.g., "a, b").
+#
+#   'param_call': (str, optional) The corresponding arguments to use when
+#                 calling the function (e.g., "*test_args").
+#
+# ------------------------------------------------------------------------------
+# 2. The Tagging System
+# ------------------------------------------------------------------------------
+#
+# The 'tags' set is the most important part of a pattern definition. It tells
+# the dispatcher in `write_jit_code.py` how to process the pattern.
+#
+#   --- Purpose Tags (Choose one) ---
+#   'crash':          This is a standard pattern designed to find crashes or hangs.
+#   'correctness':    This is a "Twin Execution" pattern designed to find silent
+#                     correctness bugs.
+#
+#   --- Structure Tags (For correctness patterns, choose one) ---
+#   'body-based':     The pattern provides only the core logic in `body_code`.
+#                     The generator will automatically wrap it in the full
+#                     jit_target/control/assert harness. (This is the preferred format).
+#   'self-contained': The pattern's `body_code` contains the full harness
+#                     (def jit_target..., def control..., assert...). Use this
+#                     only for complex cases that cannot fit the body-based model.
+#
+#   --- Generation Requirement Tags (Use if needed) ---
+#   'needs-many-vars-setup':         Requires the special "many vars" generator.
+#   'needs-deep-calls-setup':        Requires the deep call chain generator.
+#   'needs-evil-deep-calls-setup':   Requires the "evil" deep call chain generator.
+#   'needs-evil-math-setup':         Requires the boundary value math generator.
+#
+#   --- Informational Tags (Use freely) ---
+#   'side-effect', '__del__', 'invalidation', 'globals', 'isinstance', 'pow',
+#   'type-inference', 'polymorphism', 'resource-limit', etc.
+#
+# ------------------------------------------------------------------------------
+# 3. Available Placeholders for Formatting
+# ------------------------------------------------------------------------------
+#
+# Your `setup_code` and `body_code` strings can contain placeholders that will
+# be filled in by the generation engine.
+#
+#   - `{prefix}`: A unique string for the current test case (e.g., 'f1').
+#                 Use this to create unique function and class names.
+#   - `{loop_var}`: A unique variable name for a loop (e.g., 'i_f1').
+#   - `{loop_iterations}`: A random integer for loop counts.
+#   - `{expression}`: Filled in by the hybrid expression engine (can be
+#                     simple infix, a functional call, or a complex AST).
+#   - `{corruption_payload}`: Filled in by the systematic or type-aware modes.
+#
+#   Special placeholders for tagged patterns:
+#   - `{var_definitions}`: (for 'needs-many-vars-setup')
+#   - `{function_chain}`: (for 'needs-deep-calls-setup')
+#   - `{val_a}`, `{val_b}` etc.: (for 'needs-evil-math-setup')
+#
+# ------------------------------------------------------------------------------
+# 4. Template for a New Pattern
+# ------------------------------------------------------------------------------
+#
+# To create a new pattern, copy, paste, and modify the skeleton below.
+#
+#    'my_new_bug_pattern': {
+#        'description': 'A clear, one-line description of the new pattern.',
+#        'target_mechanism': 'The specific JIT feature being tested.',
+#        'tags': {'crash'}, # Or {'correctness', 'body-based'}
+#        'setup_code': """
+# # Any imports or helper classes needed by the pattern go here.
+# # Remember to use {prefix} for unique naming.
+# class MyHelper_{prefix}:
+#     pass
+# """,
+#        'body_code': """
+# # The core logic of the test case goes here.
+# # Use placeholders like {loop_var} and {expression}.
+# for {loop_var} in range({loop_iterations}):
+#     try:
+#         _ = {expression}
+#     except Exception:
+#         pass
+# """
+#    },
+#
+# ==============================================================================
+
+
 
 BUG_PATTERNS = {
     'decref_escapes': {
