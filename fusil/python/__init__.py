@@ -196,104 +196,109 @@ class Fuzzer(Application):
         )
         jit_options.add_option(
             "--jit-mode",
-            help="Main JIT fuzzing strategy to use: "
+            help="Main JIT fuzzing strategy: "
                  "'synthesize' (default: create new patterns with AST), "
-                 "'variational' (mutate existing patterns), "
-                 "'legacy' (run old hardcoded scenarios), "
-                 "'all' (randomly pick a strategy for each test case).",
+                 "'variational' (mutate existing patterns from the library), "
+                 "'legacy' (run old hardcoded scenarios for regression testing), or "
+                 "'all' (randomly pick a strategy and modifiers for each test case, for maximum coverage).",
             choices=('synthesize', 'variational', 'legacy', 'all'),
             default='synthesize',
         )
-        jit_options.add_option(
-            "--jit-loop-iterations",
-            help="Number of iterations for JIT hot loops (default: 10000)",
-            type="int",
-            default=10000,
-        )
-        jit_options.add_option(
-            "--jit-hostile-prob",
-            help="Probability (0.0-1.0) of generating a hostile invalidation scenario (default: 0.1)",
-            type="float",
-            default=0.2,
-        )
-        jit_options.add_option(
-            "--jit-aggressive-gc",
-            help="Interleave frequent gc.collect() calls inside JIT hot loops (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
-            "--jit-gc-frequency",
-            help="Run gc.collect() every N iterations in a JIT hot loop (default: 100)",
-            type="int",
-            default=100,
-        )
-        jit_options.add_option(
-            "--jit-raise-exceptions",
-            help="Deliberately raise exceptions inside JIT-hot loops (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
-            "--jit-exception-prob",
-            help="The probability (0.0 to 1.0) of raising an exception per loop (default: 0.001)",
-            type="float",
-            default=0.001,
-        )
-        jit_options.add_option(
-            "--jit-correctness-testing",
-            help="Enable self-checking correctness tests for JIT scenarios (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
-            "--rediscover-decref-crash",
-            help="Run ONLY the specific scenario to rediscover the GH-124483 crash.",
-            action="store_true",
-            default=False,
-        )
+
+        # --- Variational Mode Modifiers ---
         jit_options.add_option(
             "--jit-pattern-name",
-            help="For 'variational' mode, specifies which pattern(s) to use from bug_patterns.py (e.g., 'decref_escapes' or 'ALL').",
+            help="[variational mode] Specifies which pattern(s) to use, e.g., 'decref_escapes' or 'ALL'.",
             type="str",
             default='ALL',
         )
         jit_options.add_option(
+            "--jit-fuzz-ast-mutation",
+            action="store_true",
+            default=False,
+            help="[variational mode] Enable the AST-based structural mutator on library patterns.",
+        )
+        jit_options.add_option(
             "--jit-fuzz-systematic-values",
-             help="When fuzzing a pattern, systematically iterate through all INTERESTING values as the payload. Disables random payload generation.",
-             action="store_true",
-             default=False,
+            action="store_true",
+            default=False,
+            help="[variational mode] Systematically iterate through all known boundary values as the corruption payload.",
         )
         jit_options.add_option(
             "--jit-fuzz-type-aware",
-            help="When fuzzing a pattern, systematically iterate through a set of contrasting types for the payload.",
             action="store_true",
             default=False,
+            help="[variational mode] Systematically iterate through a set of contrasting types for the corruption payload.",
         )
-        jit_options.add_option(
-            "--jit-fuzz-ast-mutation",
-           help="Enable the experimental generative AST-based mutation engine.",
-           action="store_true",
-           default=False,
-        )
-        jit_options.add_option(
-            "--jit-generate-pattern",
-           help="Enable the experimental AST-based pattern synthesizer.",
-           action="store_true",
-           default=False,
-        )
+
+        # --- Synthesizer Mode Modifier ---
         jit_options.add_option(
             "--jit-wrap-statements",
-            help="In AST synthesis mode, wrap each generated statement in a try/except block to increase resilience.",
             action="store_true",
             default=False,
+            help="[synthesize mode] Wrap each generated statement in a try/except block to increase resilience against benign errors.",
+        )
+
+        # --- Legacy Mode Modifier ---
+        jit_options.add_option(
+            "--jit-hostile-prob",
+            type="float",
+            default=0.1,
+            help="[legacy mode] Probability (0.0-1.0) of generating a hostile scenario instead of a friendly one.",
+        )
+
+        # --- General Behavior Modifiers (Apply to most modes) ---
+        jit_options.add_option(
+            "--jit-correctness-testing",
+            action="store_true",
+            default=False,
+            help="Enable 'Twin Execution' for supported patterns to find silent correctness bugs instead of just crashes.",
         )
         jit_options.add_option(
             "--jit-correctness-prob",
-            help="Probability (0.0-1.0) of running a correctness test when enabled.",
             type="float",
             default=0.2,
+            help="Probability (0.0-1.0) of running a correctness test when correctness testing is enabled.",
         )
+        jit_options.add_option(
+            "--jit-loop-iterations",
+            type="int",
+            default=500,
+            help="Number of iterations for JIT-warming hot loops.",
+        )
+        jit_options.add_option(
+            "--jit-aggressive-gc",
+            action="store_true",
+            default=False,
+            help="Inject gc.collect() calls inside hot loops to stress memory management.",
+        )
+        jit_options.add_option(
+            "--jit-gc-frequency",
+            type="int",
+            default=100,
+            help="Frequency of gc.collect() calls when aggressive GC is enabled (e.g., 100 means every 100 iterations)."
+        )
+        jit_options.add_option(
+            "--jit-raise-exceptions",
+            action="store_true",
+            default=False,
+            help="Inject random exceptions inside hot loops to stress the JIT's error handling paths.",
+        )
+        jit_options.add_option(
+            "--jit-exception-prob",
+            type="float",
+            default=0.001,
+            help="Probability (0.0-1.0) of raising an exception on any given loop iteration."
+        )
+
+        # --- Special-purpose legacy flag ---
+        jit_options.add_option(
+            "--rediscover-decref-crash",
+            action="store_true",
+            default=False,
+            help="[legacy mode] Run the specific, hard-coded scenario to reproduce the GH-124483 decref bug.",
+        )
+
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
