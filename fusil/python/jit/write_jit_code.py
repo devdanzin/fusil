@@ -39,10 +39,26 @@ if TYPE_CHECKING:
 
 class WriteJITCode:
     """
-    Generates Python code with scenarios specifically designed to stress
-    the CPython Tier 2 JIT optimizer.
-    """
+    Acts as the main orchestrator for the CPython JIT Fuzzing subsystem.
 
+    This class is instantiated by the primary `WritePythonCode` object and serves
+    as the main entry point for all JIT-related test case generation. It contains
+    the top-level dispatch logic that selects a fuzzing strategy based on the
+    user's command-line options.
+
+    The primary code generation flow is as follows:
+    1.  `generate_scenario()` is called.
+    2.  It reads the `--jit-mode` flag to determine the primary strategy
+        ('synthesize', 'variational', 'legacy', or 'all').
+    3.  It dispatches to a specialized helper method for that strategy:
+        - `_generate_variational_scenario()` for mutating existing patterns.
+        - The `ast_pattern_generator` for synthesizing new patterns.
+        - `_generate_legacy_scenario()` for running older, hard-coded tests.
+    4.  The chosen generator produces a block of code representing the core logic.
+    5.  This code is then passed to `_write_mutated_code_in_environment()` to be
+        wrapped in a randomly chosen execution context (e.g., a function, a
+        class method, an async function) to increase test diversity.
+    """
     def __init__(self, parent: "WritePythonCode"):
         # We hold a reference to the main writer to access its options,
         # argument generator, and file writing methods.

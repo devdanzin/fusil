@@ -167,6 +167,19 @@ class StatementDuplicator(ast.NodeTransformer):
 # --- Step 1 & 4: The Main Mutator Class and Pipeline ---
 
 class ASTMutator:
+    """
+    An engine for structurally modifying Python code at the AST level.
+
+    This class takes a string of valid Python code, parses it into an
+    Abstract Syntax Tree (AST), and then applies a randomized pipeline of
+    `ast.NodeTransformer` subclasses to it. Each transformer is responsible
+    for a specific kind of mutation, such as swapping operators, perturbing
+    constants, or duplicating statements.
+
+    The final, mutated AST is then unparsed back into a string of Python code,
+    which can be executed by the fuzzer. This allows for the creation of
+    novel and unpredictable variations of existing bug patterns.
+    """
     def __init__(self):
         self.transformers = [
             OperatorSwapper,

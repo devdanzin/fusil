@@ -30,10 +30,24 @@ if TYPE_CHECKING:
 
 class ASTPatternGenerator:
     """
-    Generates novel JIT-fuzzing patterns from scratch by programmatically
-    building an Abstract Syntax Tree.
-    """
+    Synthesizes novel JIT-fuzzing patterns from scratch.
 
+    This class programmatically builds a complete Python script as an
+    Abstract Syntax Tree (AST) from first principles, based on a weighted
+    grammar of Python statements and expressions. It is our most advanced
+    generative tool.
+
+    Its key architectural features include:
+    - A stateful, two-pass generation process: It first generates the main
+      logic of the code, discovering all variable names it uses. It then
+      prepends a block of initialization statements (`var = None`) to ensure
+      the generated code is free of `UnboundLocalError`.
+    - The ability to recursively generate complex and nested control flow,
+      including `if/else` blocks and `for` loops.
+    - JIT-specific awareness, allowing it to autonomously synthesize patterns
+      that are known to be stressful for the JIT, such as `__del__`
+      side-effect attacks and "Twin Execution" correctness tests.
+    """
     def __init__(self, parent: "WritePythonCode"):
         self.parent = parent
         self.arg_generator = parent.arg_generator
