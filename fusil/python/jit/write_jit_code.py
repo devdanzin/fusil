@@ -83,58 +83,44 @@ class WriteJITCode:
 
     def generate_scenario(self, prefix: str) -> None:
         """
-        Main entry point, now with an added check to run the new class
-        fuzzing scenario as a high-priority strategy.
+        (Final Version)
+        Main entry point for all JIT scenario generation.
+        It selects a target (function or method) and then dispatches to the
+        appropriate generation engine based on the --jit-mode flag.
         """
-        if not self.parent.module_functions:
-            fuzzed_func_name = None
-            fuzzed_func_obj = None
-        else:
-            fuzzed_func_name = choice(self.parent.module_functions)
-            try:
-                fuzzed_func_obj = getattr(self.parent.module, fuzzed_func_name)
-            except AttributeError:
-                fuzzed_func_obj = None
-
-        # --- NEW: Check for Class Fuzzing Mode ---
-        # With a 25% chance, prioritize the new class fuzzer if enabled.
-        if self.options.jit_fuzz_classes and random() < 0.25:
-            # This call will handle everything: discovery, instantiation, and the hot loop.
-            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: JIT Class Fuzzing"')
-            self._generate_class_fuzzing_scenario(prefix)
+        # 1. Select a target to be fuzzed. This can be a function or a method.
+        target = self._select_fuzzing_target(prefix)
+        if not target:
+            self.write_print_to_stderr(0, '"[-] No suitable functions or methods found to fuzz."')
             return
 
-        # --- The existing --jit-mode dispatch logic follows as the fallback ---
+        # 2. Dispatch to the main generation logic based on the chosen mode.
         mode = self.options.jit_mode
 
+        # This helper is now only used for `--jit-mode=all`
         if mode == 'all':
-            self._execute_randomized_strategy(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self._execute_randomized_strategy(prefix, target)
 
         elif mode == 'synthesize':
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
             body_code = self.ast_pattern_generator.generate_pattern()
-            params = self._generate_mutated_parameters(prefix)
+            params = self._generate_mutated_parameters(prefix, target)
             self._write_mutated_code_in_environment(prefix, "", body_code, params)
 
         elif mode == 'variational':
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
-            self._generate_variational_scenario(prefix, self.options.jit_pattern_name)
+            self._generate_variational_scenario(prefix, self.options.jit_pattern_name, target)
 
         elif mode == 'legacy':
             self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Legacy Scenario Generation"')
-            self._generate_legacy_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self._generate_legacy_scenario(prefix, target)
 
-    def _execute_randomized_strategy(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _execute_randomized_strategy(self, prefix: str, target: dict) -> None:
         """
         Called by --jit-mode=all. It now includes class fuzzing in its
         pool of random choices.
         """
-        # Add our new scenario to the list of possible strategies.
-        possible_modes = ['synthesize', 'variational', 'legacy']
-        if self.options.jit_fuzz_classes:
-            possible_modes.append('class_fuzzing')
-
-        chosen_mode = choice(possible_modes)
+        chosen_mode = choice(['synthesize', 'variational', 'legacy'])
         self.write_print_to_stderr(0, f'"[{prefix}] JIT-MODE=ALL: Randomly selected mode: {chosen_mode}"')
 
         # Store original values and set temporary random ones
@@ -146,22 +132,23 @@ class WriteJITCode:
             setattr(self.options, flag, choice([True, False]))
 
         # Dispatch to the chosen mode's logic
-        if chosen_mode == 'class_fuzzing':
-            self._generate_class_fuzzing_scenario(prefix)
-        elif chosen_mode == 'synthesize':
+        if chosen_mode == 'synthesize':
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: AST Pattern Synthesis"')
             body_code = self.ast_pattern_generator.generate_pattern()
-            params = self._generate_mutated_parameters(prefix)
+            params = self._generate_mutated_parameters(prefix, target)
             self._write_mutated_code_in_environment(prefix, "", body_code, params)
         elif chosen_mode == 'variational':
-            self._generate_variational_scenario(prefix, 'ALL')
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Variational Pattern Fuzzing"')
+            self._generate_variational_scenario(prefix, 'ALL', target)
         elif chosen_mode == 'legacy':
-            self._generate_legacy_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self.write_print_to_stderr(0, f'"[{prefix}] STRATEGY: Legacy Scenario Generation"')
+            self._generate_legacy_scenario(prefix, target)
 
         # Restore original flag values
         for flag, value in original_flag_values.items():
             setattr(self.options, flag, value)
 
-    def _generate_legacy_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_legacy_scenario(self, prefix: str, target: dict) -> None:
         """
         Executes the original "legacy" fuzzing logic. It chooses between
         correctness, hostile, or friendly scenarios based on the original
@@ -170,27 +157,27 @@ class WriteJITCode:
         # Handle specific re-discovery flag ---
         if self.options.rediscover_decref_crash:
             self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Re-discovery Scenario"')
-            self._generate_decref_escapes_scenario(prefix)
+            self._generate_decref_escapes_scenario(prefix, target)
             return
 
         # 1. First, check if we should run a correctness test.
         if self.options.jit_correctness_testing and random() < self.options.jit_correctness_prob:
             self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Correctness Scenario"')
-            self._generate_correctness_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+            # We can pick a random correctness pattern to run here.
+            corr_pattern = choice(list(BUG_PATTERNS.keys()))
+            self._generate_paired_ast_mutation_scenario(prefix, corr_pattern, BUG_PATTERNS[corr_pattern], {})
             return
 
-        # 2. If not, decide whether to generate a hostile scenario.
-        if random() < self.options.jit_hostile_prob:
+        # Decide whether to generate a hostile scenario.
+        hostile_prob = self.options.jit_hostile_prob
+        if random() < hostile_prob:
             self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Hostile Scenario"')
-            # Dispatch to the hostile scenario generator.
-            self._generate_hostile_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
-
-        # 3. As a final fallback, generate a simple "friendly" scenario.
+            self._generate_hostile_scenario(prefix, target)
         else:
             self.write_print_to_stderr(0, f'"[{prefix}] LEGACY MODE: Generating Friendly Scenario"')
-            self._generate_friendly_scenario(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self._generate_friendly_scenario(prefix, target)
 
-    def _generate_correctness_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_correctness_scenario(self, prefix: str, target: dict) -> None:
         """Chooses and generates one of the self-checking correctness scenarios."""
         generators = [
             self._generate_jit_pattern_block_with_check,
@@ -203,9 +190,9 @@ class WriteJITCode:
             self._generate_managed_dict_attack_scenario_with_check,
         ]
         chosen = choice(generators)
-        chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
+        chosen(prefix, target)
 
-    def _generate_hostile_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_hostile_scenario(self, prefix: str, target: dict) -> None:
         """
         (This method is preserved for legacy mode)
         Chooses and generates one of the hostile (crash-finding) scenarios.
@@ -236,20 +223,20 @@ class WriteJITCode:
             hostile_generators = basic_hostile_generators
         else:
             hostile_generators = mixed_hostile_generators
-        chosen = choice(hostile_generators)
-        chosen(prefix, fuzzed_func_name, fuzzed_func_obj)
+        chosen_generator = choice(hostile_generators)
+        chosen_generator(prefix, target)
 
-    def _generate_friendly_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_friendly_scenario(self, prefix: str, target: dict) -> None:
         """
         (This method is now simplified for legacy mode)
         Chooses and generates one of the JIT-friendly (warm-up) scenarios.
         """
         if random() < 0.0:
             # Use the simple polymorphic call block.
-            self._generate_polymorphic_call_block(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self._generate_polymorphic_call_block(prefix, target)
         else:
             # Use the JIT pattern block, which is now powered by the variational engine.
-            self._generate_jit_pattern_block(prefix, fuzzed_func_name, fuzzed_func_obj)
+            self._generate_jit_pattern_block(prefix, target)
 
     def generate_stateful_object_scenario(self, prefix: str, instance_var_name: str, class_name_str: str,
                                           class_type: type) -> None:
@@ -279,7 +266,7 @@ class WriteJITCode:
             )
         self.restoreLevel(self.parent.base_level - 2)  # exit for and if
 
-    def _generate_jit_pattern_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_jit_pattern_block(self, prefix: str, target: dict) -> None:
         """
         Generates a friendly block of code by feeding a general-purpose
         pattern into our advanced variational/AST mutation engine.
@@ -290,33 +277,39 @@ class WriteJITCode:
         # We now treat the "friendly" scenario as just another variational pattern.
         # This ensures even our simplest mode is powerful and diverse.
         # (This assumes a 'friendly_base' pattern is added to bug_patterns.py)
-        self._generate_variational_scenario(prefix, 'friendly_base')
+        self._generate_variational_scenario(prefix, 'friendly_base', target)
 
-    def _generate_polymorphic_call_block(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_polymorphic_call_block(self, prefix: str, target: dict) -> None:
         """
         Generates a hot loop with calls to one function using args of different types.
         This is now simplified using the hot loop helper.
         """
         self.write_print_to_stderr(
-            0, f'"[{prefix}] Generating polymorphic call block for: {fuzzed_func_name}"'
+            0, f'"[{prefix}] Generating polymorphic call block for: {target["name"]}"'
         )
 
-        poly_gens = [
-            self.arg_generator.genInt, self.arg_generator.genString,
-            self.arg_generator.genList, self.arg_generator.genBytes,
-        ]
-        gens_to_use = [choice(poly_gens) for _ in range(self.options.jit_polymorphic_degree)]
+        # Write the setup code for the target (e.g., instantiating the class).
+        self._write_target_setup(prefix, target)
+
+        # Warm up with one simple call.
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, f"{target['call_str']}(1)")
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except Exception: pass")
+        self.emptyLine()
 
         base_level = self.parent.base_level
-        # Use the new helper to create the loop structure
+        # Use the hot loop helper
         self._begin_hot_loop(prefix)
-        # self.addLevel(1)  # We are already inside the loop created by the helper
+        self.addLevel(1)
 
-        # Inside the loop, call the same function with different typed args
-        for gen_func in gens_to_use:
+        # Inside the loop, call the target with different typed args
+        poly_gens = [self.arg_generator.genInt, self.arg_generator.genString, self.arg_generator.genList]
+        for gen_func in poly_gens:
             arg_str = " ".join(gen_func())
-            self.write(1, f"try: callFunc('{prefix}', '{fuzzed_func_name}', {arg_str}, verbose=False)")
-            self.write(1, "except: pass")
+            self.write(1, f"try: {target['call_str']}({arg_str})")
+            self.write(1, "except Exception: pass")
 
         # Cleanly exit all levels opened by the helper
         self.restoreLevel(base_level)
@@ -459,7 +452,7 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-    def _generate_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
         Orchestrates the generation of a three-phase JIT invalidation scenario.
 
@@ -468,48 +461,73 @@ class WriteJITCode:
         2. Invalidate: Change a dependency of the compiled code.
         3. Re-execute: Call the target method again to check for crashes.
         """
-        self.write(0, f"# --- JIT Invalidation Scenario: {prefix} ---")
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Invalidation Scenario <<<"'
-        )
+        if target['type'] != 'method':
+            self.write_print_to_stderr(0,
+                                       f'"[{prefix}] Skipping standard Invalidation Scenario for non-method target."')
+            return
+
+        self.write_print_to_stderr(0,
+                                   f'"[{prefix}] >>> Starting JIT Invalidation Scenario targeting {target["name"]} <<<"')
         self.emptyLine()
 
         # --- Phase 1: Warm-up and JIT Compilation ---
-        # This call generates the code to get a method JIT-compiled and returns
-        # information about that target for the subsequent phases.
-        target_info = self._generate_phase1_warmup(prefix)
+        # The warmup phase now uses the target's setup code.
+        self.write(0, f"# Phase 1: Warming up the target method.")
+        instance_var = f"target_instance_{prefix}"
 
-        # --- Check if a suitable target was found ---
-        if target_info:
-            # If warmup was successful, proceed to the next phases.
-            self.emptyLine()
+        # 1. Pre-initialize the instance variable to None.
+        self.write(0, f"{instance_var} = None")
 
-            # --- Phase 2: Invalidate Dependency ---
-            # This call uses the info from phase 1 to generate code that
-            # maliciously alters a dependency of the JIT-compiled code.
-            self._generate_phase2_invalidate(prefix, target_info)
-            self.emptyLine()
-
-            # --- Phase 3: Re-execute and Check for Crash ---
-            # This call generates code to run the original target again. If the
-            # JIT cache was not correctly invalidated, this is where a crash
-            # or incorrect behavior would occur.
-            self._generate_phase3_reexecute(prefix, target_info)
-
-        else:
-            # If no suitable target was found in Phase 1, log it and abort this scenario.
-            self.write_print_to_stderr(
-                0, f'"[{prefix}] Could not find a suitable target for an invalidation scenario. Skipping."'
-            )
-
-        self.emptyLine()
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished JIT Invalidation Scenario >>>"'
-        )
-        self.write(0, f"# --- End Scenario: {prefix} ---")
+        # 2. Wrap the instantiation call in a try...except block.
+        self.write(0, "try:")
+        self.addLevel(1)
+        # The target['setup_code'] contains the `instance = Class()` line.
+        self._write_target_setup(prefix, target)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f'"[-] NOTE: Failed to instantiate for invalidation scenario: {{e.__class__.__name__}}"')
+        self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-    def _generate_deleter_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+        instance_var = f"target_instance_{prefix}"  # Assume instance is created in setup_code
+        self.write(0, f"if {instance_var}:")
+        # base_level = self.parent.base_level
+        self.addLevel(1)
+        self._begin_hot_loop(f"{prefix}_warmup", level=1)
+        self.write(1, f"try: {target['call_str']}()")
+        self.write(1, "except: pass")
+        # self.restoreLevel(base_level)  # Exit hot loop
+        # ... (end of hot loop boilerplate) ...
+        self.restoreLevel(self.parent.base_level - 2)  # Exit if
+        self.emptyLine()
+
+        # --- Phase 2: Invalidate Dependency ---
+        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating method on class."')
+        # We need to get the class name from the target's setup string. A bit fragile but works.
+        class_name = target['setup_code'].split('.')[-1].split('(')[0]
+        method_name = target['name'].split('.')[-1]
+
+        payloads = ["lambda *a, **kw: 'payload'", "123", "'a string'", "None"]
+        self.write(0, f"try: setattr({self.module_name}.{class_name}, '{method_name}', {choice(payloads)})")
+        self.write(0, "except: pass")
+        self.write(0, "collect()")
+        self.emptyLine()
+
+        # --- Phase 3: Re-execute ---
+        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."')
+        self.write(0, f"if {instance_var}:")
+        self.addLevel(1)
+        self.write(0, f"try: {target['call_str']}()")
+        self.write(0, "except Exception as e:")
+        self.write(1, f"print(f'[{prefix}] Caught expected exception: {{e.__class__.__name__}}', file=stderr)")
+        self.restoreLevel(self.parent.base_level - 1)
+
+        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Invalidation Scenario >>>"')
+        self.emptyLine()
+
+    def _generate_deleter_scenario(self, prefix: str, target: dict) -> None:
         """
         Generates a sophisticated scenario that uses a __del__ side effect
         to induce type confusion.
@@ -518,9 +536,9 @@ class WriteJITCode:
         engine using the 'decref_escapes' bug pattern.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] Delegating to variational engine for __del__ side effect scenario."')
-        self._generate_variational_scenario(prefix, 'decref_escapes')
+        self._generate_variational_scenario(prefix, 'decref_escapes', target)
 
-    def _generate_many_vars_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
         Generates a function with >256 local variables and a complex,
         AST-mutated body that operates on them.
@@ -550,13 +568,16 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)
         self.write(0, f"{func_name}()")  # Execute the function
 
-    def _generate_deep_calls_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
         Generates a deep call chain where each function contains a
         different, AST-mutated expression.
         """
         self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Generative Deep Calls" Scenario <<<"""')
-        depth = 15
+
+        self._write_target_setup(prefix, target)
+
+        depth = 20
 
         # 1. Generate the chain of functions.
         for i in range(depth):
@@ -643,7 +664,7 @@ class WriteJITCode:
         self.write(0, "collect()")
         self.restoreLevel(self.parent.base_level - 1)
 
-    def _generate_mixed_many_vars_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_mixed_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
         MIXED SCENARIO 1: Combines "Many Vars", `__del__` side effects, and
         JIT-friendly math/logic patterns into one hostile function.
@@ -725,7 +746,7 @@ class WriteJITCode:
         self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""')
         self.emptyLine()
 
-    def _generate_del_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_del_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
         MIXED SCENARIO 2: An invalidation scenario where the invalidation
         is performed indirectly via a __del__ side effect.
@@ -774,95 +795,89 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_mixed_deep_calls_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_mixed_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
-        MIXED SCENARIO 3: Combines "Deep Calls" with JIT-friendly patterns.
-        Each function in the deep call chain performs complex work, stressing
-        the JIT's ability to optimize across many active stack frames.
+        (Refactored)
+        Generates a deep call chain where each function performs complex work,
+        and the deepest function calls the selected fuzzing target (which can
+        be a function or a method).
         """
         self.write_print_to_stderr(
-            0, f'"""[{prefix}] >>> Starting "Mixed Deep Calls" Hostile Scenario <<<"""'
+            0, f'"""[{prefix}] >>> Starting "Mixed Deep Calls" targeting: {target["name"]} <<<"""'
         )
 
-        depth = 15  # A moderately deep chain is sufficient when each frame does work.
-        loop_iterations = self.options.jit_loop_iterations // 100  # A smaller loop is fine for this test
+        # 1. Write the setup code for the target.
+        #    If the target is a method, this will generate the `instance = ...` line.
+        self._write_target_setup(prefix, target)
+
+        depth = 15
+        loop_iterations = self.options.jit_loop_iterations // 100
 
         self.write(0, f"# Define a deep chain of {depth} functions, each with internal JIT-friendly patterns.")
 
-        # 1. Define the base case (the final function in the chain).
-        #    It performs some work instead of just returning a value.
+        # 2. Define the base case (the final function in the chain).
+        #    This is where we inject the call to our fuzzed target.
         self.write(0, f"def f_0_{prefix}(p):")
         self.addLevel(1)
         self.write(0, "x = len('base_case') + p")
         self.write(0, "y = x % 5")
-        self.write_print_to_stderr(0, f'''f"[{prefix}] Calling fuzzed function '{fuzzed_func_name}' from deep inside the call chain"''')
-        self.write(0, f"callFunc('{prefix}_fuzzed', '{fuzzed_func_name}', x)")
+        self.write_print_to_stderr(0,
+                                   f'''f"[{prefix}] Calling fuzzed target '{target["name"]}' from deep inside the call chain"''')
+        # Use the target's call string, which can be a function or method.
+        self.write(0, f"try: {target['call_str']}(x)")
+        self.write(0, "except Exception: pass")
         self.write(0, "return x - y")
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-        # 2. Generate the intermediate functions in the chain.
+        # 3. Generate the intermediate functions in the chain.
         for i in range(1, depth):
             self.write(0, f"def f_{i}_{prefix}(p):")
             self.addLevel(1)
-            # Each function performs its own JIT-friendly work.
             self.write(0, f"local_val = p * {i}")
             self.write(0, "s = 'abcdef'")
             self.write(0, f"if local_val > 10 and (s[{i} % len(s)]):")
+            self.addLevel(1)
             self.write(1, f"local_val += f_{i - 1}_{prefix}(p)")
+            self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "return local_val")
             self.restoreLevel(self.parent.base_level - 1)
             self.emptyLine()
 
         top_level_func = f"f_{depth - 1}_{prefix}"
 
-        # 3. Call the top-level function inside a hot loop to trigger the JIT.
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, "# Execute the top-level function of the complex chain in a hot loop.")
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
+        # 4. Call the top-level function inside a hot loop using our helper.
+        base_level = self.parent.base_level
+        self._begin_hot_loop(prefix)
         self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        self.write(0, "try:")
+        self.write(1, "try:")
         self.addLevel(1)
-        self.write(0, f"{top_level_func}(i_{prefix})")
+        self.write(1, f"{top_level_func}(i_{prefix})")
         self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except RecursionError:")
+        self.write(1, "except RecursionError:")
         self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected RecursionError."')
-        self.write(0, "break")
-        self.restoreLevel(self.parent.base_level - 2)  # Exit except and for loop
+        self.write_print_to_stderr(1, f'"[{prefix}] Caught expected RecursionError."')
+        self.write(1, "break")
+
+        # Cleanly exit all levels opened by the helper.
+        self.restoreLevel(base_level)
+        # self.restoreLevel(self.parent.base_level - 1)
         if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
             self.write(0, "except ValueError as e_val_err:")
             self.addLevel(1)
             self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
             self.addLevel(1)
             self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
+            self.restoreLevel(self.parent.base_level - 1)
             self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+            self.restoreLevel(self.parent.base_level - 1)
 
         self.write_print_to_stderr(
             0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""'
         )
         self.emptyLine()
 
-    def _generate_deep_call_invalidation_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_deep_call_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
         MIXED SCENARIO 4: Combines "Deep Calls" with an invalidation attack.
         A deep function call chain is JIT-compiled, then a function in the
@@ -959,9 +974,9 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_indirect_call_scenario(self, prefix, fuzzed_func_name: str, fuzzed_func_obj: Any):
+    def _generate_indirect_call_scenario(self, prefix, target: dict):
         harness_func_name = f"harness_{prefix}"
-        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Indirect Call Scenario ({fuzzed_func_name}) <<<"')
+        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Indirect Call Scenario ({target["name"]}) <<<"')
 
         # 1. Define a harness function that takes a callable.
         self.write(0, f"def {harness_func_name}(callable_arg):")
@@ -999,18 +1014,27 @@ class WriteJITCode:
 
         # 2. Call the harness, passing the fuzzed function to it.
         self.write(0, f"# Pass the real fuzzed function to the JIT-hot harness.")
-        fuzzed_func_path = f"{self.module_name}.{fuzzed_func_name}"
+        fuzzed_func_path = f"{self.module_name}.{target["name"]}"
         self.write(0, f"{harness_func_name}({fuzzed_func_path})")
 
-    def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, fuzzed_func_name: str,
-                                                    fuzzed_func_obj: Any) -> None:
+    def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        MIXED SCENARIO: A three-phase invalidation attack where the fuzzed
-        function itself is the dependency that gets invalidated.
+        (Refactored)
+        A three-phase invalidation attack where the fuzzed callable itself
+        is the dependency that gets invalidated.
+
+        This scenario is now only suitable for module-level functions, as invalidating
+        a method on a class has a different mechanism.
         """
+        # This attack is designed to redefine a function on a module,
+        # so we only run it if our target is a function.
+        if target['type'] != 'function':
+            self.write_print_to_stderr(0, f'"[{prefix}] Skipping Fuzzed Function Invalidation for method target."')
+            return
+
         wrapper_func_name = f"jit_wrapper_{prefix}"
         self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Fuzzed Function Invalidation Scenario ({fuzzed_func_name}) <<<"'
+            0, f'"[{prefix}] >>> Starting Fuzzed Function Invalidation Scenario ({target["name"]}) <<<"'
         )
         self.emptyLine()
 
@@ -1018,79 +1042,44 @@ class WriteJITCode:
         self.write(0, f"# Phase 1: Define a wrapper and JIT-compile it.")
         self.write(0, f"def {wrapper_func_name}():")
         self.addLevel(1)
-        # The wrapper simply calls our target fuzzed function.
-        self.write(0, f"try:")
-        self.addLevel(1)
-        self.write(0, f"{self.module_name}.{fuzzed_func_name}()")
-        self.restoreLevel(self.parent.base_level - 1)
+        # Use the unified target call string.
+        self.write(0, f"try: {target['call_str']}()")
         self.write(0, "except: pass")
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-        # Warm up the wrapper so the JIT compiles it and likely inlines the fuzzed function call.
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
+        # Use our hot loop helper to warm up the wrapper.
+        self._begin_hot_loop(prefix)
         self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if _ % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        self.write(0, f"{wrapper_func_name}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+        self.write(1, f"{wrapper_func_name}()")
+        self.restoreLevel(self.parent.base_level - 2)
+        # ... (end of hot loop boilerplate) ...
 
         # --- Phase 2: Invalidate the Fuzzed Function ---
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] Phase 2: Redefining {fuzzed_func_name} on the module..."'
-        )
+        self.write_print_to_stderr(0, f'"[{prefix}] Phase 2: Redefining {target["name"]} on the module..."')
         self.write(0, f"# Maliciously redefine the fuzzed function on its own module.")
-        # This change must be detected by the JIT, invalidating the optimized wrapper.
-        self.write(0, f"setattr({self.module_name}, '{fuzzed_func_name}', lambda *a, **kw: 'payload')")
+        # The 'name' field from the target dict gives us the function name.
+        self.write(0, f"setattr({self.module_name}, '{target['name']}', lambda *a, **kw: 'payload')")
         self.write(0, "collect()")
         self.emptyLine()
 
         # --- Phase 3: Re-execute the Wrapper ---
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] Phase 3: Re-executing the wrapper to check for crashes..."'
-        )
+        self.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the wrapper to check for crashes..."')
         self.write(0, f"try: {wrapper_func_name}()")
-        self.write(0, "except Exception as e:")
-        self.write(1, 'pass # Any exception is fine, a crash is the goal.')
+        self.write(0, "except Exception: pass")
         self.emptyLine()
 
         self.write_print_to_stderr(
             0, f'"[{prefix}] <<< Finished Fuzzed Function Invalidation Scenario >>>"'
         )
 
-    def _generate_polymorphic_call_block_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_polymorphic_call_block_scenario(self, prefix: str, target: dict) -> None:
         """
         Generates a hot loop that makes calls to different KINDS of callables
         (fuzzed function, lambda, instance method) to stress call-site caching.
         """
         self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Polymorphic Callable Set Scenario ({fuzzed_func_name}) <<<"'
+            0, f'"[{prefix}] >>> Starting Polymorphic Callable Set Scenario ({target["name"]}) <<<"'
         )
 
         # 1. Define the set of diverse callables.
@@ -1107,7 +1096,7 @@ class WriteJITCode:
         # List of callables to be used in the loop.
         # This prepares the paths for calling each one.
         callables_to_test = [
-            f"{self.module_name}.{fuzzed_func_name}",
+            f"{self.module_name}.{target["name"]}",
             lambda_name,
             f"{instance_name}.method",
         ]
@@ -1161,7 +1150,7 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_type_version_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_type_version_scenario(self, prefix: str, target: dict) -> None:
         """
         ADVANCED SCENARIO: Attacks the JIT's attribute caching by accessing an
         attribute with the same name across classes where its nature differs.
@@ -1234,7 +1223,7 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_concurrency_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_concurrency_scenario(self, prefix: str, target: dict) -> None:
         """
         ADVANCED SCENARIO: Creates a race condition between a "hammer" thread
         running JIT'd code and an "invalidator" thread modifying its dependencies.
@@ -1293,7 +1282,7 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_side_exit_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_side_exit_scenario(self, prefix: str, target: dict) -> None:
         """
         ADVANCED SCENARIO: Stresses the JIT's deoptimization mechanism by
         creating a hot loop with a guard that fails unpredictably, forcing
@@ -1371,7 +1360,7 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_isinstance_attack_scenario(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
+    def _generate_isinstance_attack_scenario(self, prefix: str, target: dict) -> None:
         """
         ADVANCED SCENARIO (UPGRADED): Attacks the JIT's `isinstance` elimination
         by using a class with a deep, randomized inheritance hierarchy and a
@@ -1419,14 +1408,18 @@ class WriteJITCode:
         self.write(0, f"def {check_func_name}(self, other):")
         self.addLevel(1)
         self.write_print_to_stderr(0, '"  [+] Patched __instancecheck__ called!"')
+
+        # Write the setup code for the target (if it's a method call).
+        self._write_target_setup(prefix, target)
+
         self.write(0, "try:")
         self.addLevel(1)
-        self.write_print_to_stderr(0, f"'    -> Calling fuzzed function: {fuzzed_func_name}'")
-        # Call the real fuzzed function!
-        self.write(0, f"{self.module_name}.{fuzzed_func_name}()")
+        self.write_print_to_stderr(0, f"'    -> Calling fuzzed target: {target['name']}'")
+        # Use the unified call string, which works for both functions and methods.
+        self.write(0, f"{target['call_str']}()")
         self.restoreLevel(self.parent.base_level - 1)
         self.write(0, "except: pass")
-        self.write(0, f"return True # Always return True after being patched")
+        self.write(0, f"return True")  # Always return True after being patched
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
@@ -1448,7 +1441,7 @@ class WriteJITCode:
 
         # --- UPGRADE: Polymorphic Target Object ---
         self.write(0, "# Create a list of diverse objects to check against.")
-        self.write(0, f"fuzzed_obj_instance = {self.module_name}.{fuzzed_func_name}")
+        self.write(0, f"fuzzed_obj_instance = {self.module_name}.{target["name"]}")
         self.write(0, f"objects_to_check = [1, 'a_string', 3.14, fuzzed_obj_instance]")
         self.emptyLine()
 
@@ -1515,102 +1508,55 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
         self.write(1, "return total")
 
-    def _generate_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                      fuzzed_func_obj: Any) -> None:
-        """
-        CORRECTNESS SCENARIO 1: Generates a 'Twin Execution' test for a
-        block of JIT-friendly patterns to check for silent correctness bugs.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'jit_friendly_math')
+    def _generate_jit_pattern_block_with_check(self, prefix: str, target: dict) -> None:
+        """Delegates to the unified engine with the 'jit_friendly_math' pattern."""
+        return self._generate_paired_ast_mutation_scenario(prefix, 'jit_friendly_math',
+                                                           BUG_PATTERNS['jit_friendly_math'], {})
 
-    def _generate_evil_jit_pattern_block_with_check(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
-        """
-        Now prepares the constants and delegates to the unified engine.
-        """
-        # Prepare the "evil" constants required by the pattern's setup_code
+    def _generate_evil_jit_pattern_block_with_check(self, prefix: str, target: dict) -> None:
+        """Prepares evil constants and delegates to the unified engine."""
         extra_mutations = {
             'val_a': self.arg_generator.genInterestingValues()[0],
             'val_b': self.arg_generator.genInterestingValues()[0],
             'val_c': self.arg_generator.genInterestingValues()[0],
             'str_d': self.arg_generator.genString()[0],
         }
-        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_boundary_math', extra_mutations)
+        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_boundary_math',
+                                                           BUG_PATTERNS['evil_boundary_math'], extra_mutations)
 
-    def _generate_deleter_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                      fuzzed_func_obj: Any) -> None:
-        """
-        CORRECTNESS SCENARIO 2: Generates a 'Twin Execution' test for the
-        __del__ side effect attack to check for silent state corruption.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'deleter_side_effect')
+    def _generate_deleter_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Delegates to the unified engine with the 'deleter_side_effect' pattern."""
+        return self._generate_paired_ast_mutation_scenario(prefix, 'deleter_side_effect',
+                                                           BUG_PATTERNS['deleter_side_effect'], {})
 
-    def _generate_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                      fuzzed_func_obj: Any) -> None:
-        """
-        CORRECTNESS SCENARIO 3: Generates a 'Twin Execution' test for the
-        'Mixed Deep Calls' scenario to verify its correctness.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'deep_calls_correctness')
+    def _generate_deep_calls_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Prepares deep call setup and delegates to the unified engine."""
+        mutations = self._get_mutations_for_deep_calls(prefix, {}, target, is_evil=False)
+        return self._generate_paired_ast_mutation_scenario(prefix, 'deep_calls_correctness',
+                                                           BUG_PATTERNS['deep_calls_correctness'], mutations)
 
-    def _generate_evil_deep_calls_scenario_with_check(self, prefix: str, fuzzed_func_name: str, fuzzed_func_obj: Any) -> None:
-        """
-        Prepares the complex setup for the evil deep call pattern and delegates
-        to the unified engine.
-        """
-        depth = 15
-        # Build the chain of function definitions for the pattern's setup_code
-        func_chain_lines = []
-        for i in range(1, depth):
-            func_def = (
-                f"def f_{i}_{prefix}(p_tuple):\n"
-                f"    try:\n"
-                f"        op = OPERATOR_SUITE[{i % 4}]\n"
-                f"        const = CONSTANTS[{i % 4}]\n"
-                f"        res = list(p_tuple)\n"
-                f"        res[1] = op(res[1], const)\n"
-                f"        if {i} == EXCEPTION_LEVEL: raise ValueError(('evil_deep_call_probe',))\n"
-                f"        return f_{i - 1}_{prefix}(tuple(res))\n"
-                f"    except Exception: return p_tuple"
-            )
-            func_chain_lines.append(dedent(func_def))
+    def _generate_evil_deep_calls_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Prepares evil deep call setup and delegates to the unified engine."""
+        mutations = self._get_mutations_for_deep_calls(prefix, {}, target, is_evil=True)
+        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_deep_calls_correctness',
+                                                           BUG_PATTERNS['evil_deep_calls_correctness'], mutations)
 
-        extra_mutations = {
-            'operator_suite': "['operator.add', 'operator.sub', 'operator.mul', 'operator.truediv']",
-            'constants': [self.arg_generator.genInterestingValues()[0] for _ in range(4)],
-            'exception_level': randint(5, 12),
-            'function_chain': "\n".join(func_chain_lines),
-            'depth': depth,
-            'depth_minus_1': depth - 1,
-            'module_name': self.module_name,
-            'fuzzed_func_name': fuzzed_func_name,
-        }
-        return self._generate_paired_ast_mutation_scenario(prefix, 'evil_deep_calls_correctness', extra_mutations)
+    def _generate_inplace_add_attack_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Delegates to the unified engine with the 'inplace_add_attack' pattern."""
+        return self._generate_paired_ast_mutation_scenario(prefix, 'inplace_add_attack',
+                                                           BUG_PATTERNS['inplace_add_attack'], {})
 
-    def _generate_inplace_add_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                         fuzzed_func_obj: Any) -> None:
-        """
-        GREY-BOX CORRECTNESS SCENARIO 1: Attacks the guard on the
-        _BINARY_OP_INPLACE_ADD_UNICODE specialization.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'inplace_add_attack')
+    def _generate_global_invalidation_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Delegates to the unified engine with the 'global_invalidation' pattern."""
+        return self._generate_paired_ast_mutation_scenario(prefix, 'global_invalidation',
+                                                           BUG_PATTERNS['global_invalidation'], {})
 
-    def _generate_global_invalidation_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                          fuzzed_func_obj: Any) -> None:
-        """
-        GREY-BOX CORRECTNESS SCENARIO 2: Attacks the dk_version guard
-        for LOAD_GLOBAL by invalidating the globals() dictionary.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'global_invalidation')
+    def _generate_managed_dict_attack_scenario_with_check(self, prefix: str, target: dict) -> None:
+        """Delegates to the unified engine with the 'managed_dict_attack' pattern."""
+        return self._generate_paired_ast_mutation_scenario(prefix, 'managed_dict_attack',
+                                                           BUG_PATTERNS['managed_dict_attack'], {})
 
-    def _generate_managed_dict_attack_scenario_with_check(self, prefix: str, fuzzed_func_name: str,
-                                                          fuzzed_func_obj: object) -> None:
-        """
-        GREY-BOX CORRECTNESS SCENARIO 3: Attacks the managed dictionary
-        guard for STORE_ATTR.
-        """
-        return self._generate_paired_ast_mutation_scenario(prefix, 'managed_dict_attack')
-
-    def _generate_decref_escapes_scenario(self, prefix: str) -> None:
+    def _generate_decref_escapes_scenario(self, prefix: str, target: dict) -> None:
         """
         RE-DISCOVERY SCENARIO: A highly targeted attack designed specifically
         to reproduce the crash from GH-124483 (test_decref_escapes).
@@ -1674,7 +1620,7 @@ class WriteJITCode:
         )
         self.emptyLine()
 
-    def _generate_variational_scenario(self, prefix: str, pattern_names: str) -> None:
+    def _generate_variational_scenario(self, prefix: str, pattern_names: str, target: dict) -> None:
         """
         Acts as a master dispatcher. It now ensures that parameter mutations are
         always generated before being passed to specialized helpers.
@@ -1698,19 +1644,22 @@ class WriteJITCode:
 
         # --- 2. ALWAYS Generate Base and Parameter Mutations First ---
         # This ensures 'def_str', 'call_str', etc. are always present.
-        params = self._generate_mutated_parameters(prefix)
+        params = self._generate_mutated_parameters(prefix, target)
         mutations = self._get_mutated_values_for_pattern(prefix, params['param_names'])
         mutations.update(params)
 
-        # --- 3. Dispatch to Specialized Helpers to ADD or OVERWRITE mutations ---
         if 'needs-many-vars-setup' in tags:
             mutations = self._get_mutations_for_many_vars(prefix, mutations)
         elif 'needs-evil-deep-calls-setup' in tags:
-            mutations = self._get_mutations_for_deep_calls(prefix, mutations, is_evil=True)
+            mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=True)
         elif 'needs-deep-calls-setup' in tags:
-            mutations = self._get_mutations_for_deep_calls(prefix, mutations, is_evil=False)
+            mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=False)
         elif 'needs-evil-math-setup' in tags:
             mutations = self._get_mutations_for_evil_math(prefix, mutations)
+
+        mutations['fuzzed_func_name'] = target['name']
+        mutations['fuzzed_func_call'] = target['call_str']
+        mutations['fuzzed_func_setup'] = target['setup_code']
 
         # --- 4. Code Generation (Dispatch based on tags) ---
         if 'correctness' in tags:
@@ -1761,23 +1710,50 @@ class WriteJITCode:
         })
         return mutations
 
-    def _get_mutations_for_deep_calls(self, prefix: str, mutations, is_evil: bool = False) -> dict:
+    def _get_mutations_for_deep_calls(self, prefix: str, mutations: dict, target: dict, is_evil: bool = False) -> dict:
         """
+        (Updated)
         Generates mutations for 'deep-calls' patterns. This includes dynamically
-        building a string that defines a chain of recursive functions.
+        building a string that defines a chain of recursive functions, which can
+        now call the provided 'target' callable.
         """
         generator_name = "evil_deep_calls" if is_evil else "deep_calls"
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: {generator_name}"')
-
-        fuzzed_func_name = choice(self.parent.module_functions) if self.parent.module_functions else "pass"
 
         depth = 15
         func_chain_lines = []
 
         # Build the string for the function chain that will be injected into the setup_code.
+
+        # First, define the base case (the deepest function)
+        base_case_body = ""
+        if is_evil:
+            # The "evil" version has more complex logic and calls the target.
+            base_case_body = dedent(f"""
+                res = list(p_tuple)
+                try:
+                    op = OPERATOR_SUITE[0]
+                    const = CONSTANTS[0]
+                    res[0] = op(res[0], const)
+                    # Use the provided target's call string here
+                    {target['call_str']}()
+                except Exception:
+                    pass
+                return tuple(res)
+            """)
+        else:
+            # The standard version is a simple recursive addition.
+            base_case_body = "return p + 1"
+
+        base_case_def = f"def f_0_{prefix}({'p_tuple' if is_evil else 'p'}):\n    {base_case_body.replace(chr(10), chr(10) + '    ')}"
+        func_chain_lines.append(dedent(base_case_def))
+
+        # Now, generate the intermediate functions in the chain.
         for i in range(1, depth):
+            func_name = f"f_{i}_{prefix}"
+            prev_func_name = f"f_{i - 1}_{prefix}"
+
             if is_evil:
-                # The "evil" version has more complex logic inside each function.
                 func_body = dedent(f"""
                     res = list(p_tuple)
                     try:
@@ -1785,24 +1761,21 @@ class WriteJITCode:
                         const = CONSTANTS[{i % 4}]
                         res[1] = op(res[1], const)
                         if {i} == EXCEPTION_LEVEL: raise ValueError(('evil_deep_call_probe',))
-                        return f_{i - 1}_{prefix}(tuple(res))
+                        return {prev_func_name}(tuple(res))
                     except Exception:
                         return p_tuple
                 """)
+                func_def = f"def {func_name}(p_tuple):\n    {func_body.replace(chr(10), chr(10) + '    ')}"
             else:
-                # The standard version is a simple recursive addition.
-                func_body = f"return f_{i - 1}_{prefix}(p) + 1"
+                func_def = f"def {func_name}(p): return {prev_func_name}(p) + 1"
 
-            func_def = f"def f_{i}_{prefix}({'p_tuple' if is_evil else 'p'}):\n    {func_body.replace(chr(10), chr(10) + '    ')}"
             func_chain_lines.append(dedent(func_def))
 
-        # Add the special keys needed by the 'deep_calls' patterns.
+        # Update the mutations dictionary with all the special keys needed by these patterns.
         mutations.update({
             'function_chain': "\n".join(func_chain_lines),
             'depth': depth,
-            'depth_minus_1': depth - 1,  # for the top-level call
-            'module_name': self.module_name,
-            'fuzzed_func_name': fuzzed_func_name,
+            'depth_minus_1': depth - 1,
         })
 
         if is_evil:
@@ -1816,62 +1789,48 @@ class WriteJITCode:
 
     def _get_mutated_values_for_pattern(self, prefix: str, param_names: list[str]) -> dict:
         """
-        Creates a dictionary of randomized values. Chooses one of three strategies
-        for the 'expression' value:
-        1. Simple Infix Operator (40% chance)
-        2. AST-Generated Complex Expression (40% chance)
-        3. Operator Module Function Call (20% chance)
+        (Corrected)
+        Creates a dictionary of randomized values to be injected into
+        a bug pattern template. It now includes all necessary static context.
         """
-        # --- Value & Type Mutation (Setup) ---
-        corruption_payload = self.arg_generator.genInterestingValues()[0]
+        # --- Hybrid Operator/Expression Mutation ---
+        operator_pairs = [
+            ('+', 'operator.add'), ('-', 'operator.sub'), ('*', 'operator.mul'),
+            ('/', 'operator.truediv'), ('//', 'operator.floordiv'), ('%', 'operator.mod'),
+            ('**', 'operator.pow'), ('<<', 'operator.lshift'), ('>>', 'operator.rshift'),
+            ('&', 'operator.and_'), ('|', 'operator.or_'), ('^', 'operator.xor'),
+            ('<', 'operator.lt'), ('<=', 'operator.le'), ('==', 'operator.eq'),
+            ('!=', 'operator.ne'), ('>', 'operator.gt'), ('>=', 'operator.ge'),
+        ]
+
+        chosen_infix, chosen_func = choice(operator_pairs)
         loop_var = f"i_{prefix}"
-        expression_str = ""
 
-        # --- Super-Hybrid Expression Mutation ---
-        strategy_roll = random()
-
-        if strategy_roll < 0.4:
-            # --- Strategy 1: Simple Infix Operator (40% probability) ---
-            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: Infix Operator"')
-            operator_list = [
-                '+', '-', '*', '/', '//', '%', '>>', '&', '|', '^',
-                '<', '<=', '==', '!=', '>', '>='
-            ]  # Remove  '**' and '<<' as they often result in OverflowErrors
-            chosen_op = choice(operator_list)
-            expression_str = f"{loop_var} {chosen_op} {loop_var}"
-
-        elif strategy_roll < 0.8:
-            # --- Strategy 2: AST-Generated Complex Expression (40% probability) ---
-            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: AST-Generated"')
-            available_vars = [f"i_{prefix}"] + param_names
+        if random() < 0.4:
+            expression_str = f"{loop_var} {chosen_infix} {loop_var}"
+        elif random() < 0.8:
+            # Use the AST generator, passing the available variables.
+            available_vars = [loop_var] + param_names
             expression_ast = self._generate_expression_ast(available_vars=available_vars)
             try:
                 expression_str = ast.unparse(expression_ast)
             except AttributeError:
-                expression_str = f"{loop_var} # AST unparsing failed"
-
+                expression_str = f"{loop_var} # unparse failed"
         else:
-            # --- Strategy 3: Operator Module Function Call (20% probability) ---
-            self.write_print_to_stderr(0, f'"[{prefix}] Expression Strategy: Functional Call"')
-            func_list = [
-                'operator.add', 'operator.sub', 'operator.mul', 'operator.truediv',
-                'operator.floordiv', 'operator.mod', 'operator.pow', 'operator.lshift',
-                'operator.rshift', 'operator.and_', 'operator.or_', 'operator.xor',
-                'operator.lt', 'operator.le', 'operator.eq', 'operator.ne',
-                'operator.gt', 'operator.ge'
-            ]
-            chosen_func = choice(func_list)
             expression_str = f"{chosen_func}({loop_var}, {loop_var})"
 
+        # --- Assemble the final dictionary ---
         return {
             'prefix': prefix,
             'loop_var': loop_var,
             'loop_iterations': randint(500, max(self.options.jit_loop_iterations, 550)),
             'trigger_iteration': randint(400, 498),
-            'corruption_payload': corruption_payload,
+            'corruption_payload': self.arg_generator.genInterestingValues()[0],
             'expression': expression_str,
             'inheritance_depth': randint(50, 500),
             'warmup_calls': self.options.jit_loop_iterations // 10,
+            # Always include module context for any pattern that might need it.
+            'module_name': self.module_name,
         }
 
     def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str,
@@ -2021,7 +1980,7 @@ class WriteJITCode:
 
         return ast.BinOp(left=left_operand, op=chosen_op, right=right_operand)
 
-    def _generate_mutated_parameters(self, prefix: str) -> dict:
+    def _generate_mutated_parameters(self, prefix: str, target: dict) -> dict:
         """
         Generates a dictionary containing parameter definitions and corresponding
         arguments for a function call, using various mutation strategies.
@@ -2130,14 +2089,27 @@ class WriteJITCode:
     def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict,
                                                mutations: dict) -> None:
         """
-        Generates a 'Twin Execution' correctness test.
-        This is now the single, unified engine for all correctness patterns.
+        (Corrected)
+        Generates a 'Twin Execution' correctness test, now ensuring that all
+        setup code, including instantiation, is guarded by a try...except block.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} <<<"')
 
-        # 1. Format the setup code. This part runs once.
+        # --- THE FIX ---
+        # The main 'try' block now wraps EVERYTHING, including setup code.
+        self.write(0, "try:")
+        self.addLevel(1)
+
+        # 1. Format and write the setup code for the pattern AND the target inside the try block.
+        fuzzed_func_setup = mutations.get('fuzzed_func_setup', '')
+        if fuzzed_func_setup:
+            self.write(0, fuzzed_func_setup)
+
         setup_code = dedent(pattern['setup_code']).format(**mutations)
-        self.write(0, setup_code)
+        if setup_code:
+            for line in setup_code.splitlines():
+                self.write(0, line)
+
         self.emptyLine()
 
         # 2. Get the core logic from the pattern's body.
@@ -2149,11 +2121,8 @@ class WriteJITCode:
         if not mutated_code.strip():
             mutated_code = "pass"
 
-        # 4. Define the JIT and Control functions, using the IDENTICAL mutated code.
-        #    We now get parameter definitions from the pattern if they exist.
+        # 4. Define the JIT and Control functions.
         param_def = pattern.get('param_def', "")
-        param_call = pattern.get('param_call', "")
-
         jit_func_name = f"jit_target_{prefix}"
         control_func_name = f"control_{prefix}"
 
@@ -2169,9 +2138,9 @@ class WriteJITCode:
         self.restoreLevel(self.parent.base_level - 1)
         self.emptyLine()
 
-        # 5. Generate the single, correct "Twin Execution" harness.
-        self.write(0, "try:")
-        self.addLevel(1)
+        # 5. Generate the "Twin Execution" harness.
+        param_call = mutations.get('param_call', pattern.get('param_call', ""))
+
         self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations}, {param_call})")
         self.write(0, f"jit_result = {jit_func_name}({param_call})")
         self.write(0, f"control_result = no_jit_harness({control_func_name}, {param_call})")
@@ -2180,10 +2149,16 @@ class WriteJITCode:
         self.addLevel(1)
         self.write(0,
                    '    raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}")')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)
+
+        # Close the main try...except block
+        self.restoreLevel(self.parent.base_level - 2)
         self.write(0, "except JITCorrectnessError: raise")
-        self.write(0, "except Exception: pass")
+        self.write(0, "except (Exception, SystemExit): pass")
+
+        self.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario ({pattern_name}) Passed >>>"'
+        )
+        self.emptyLine()
 
     def _discover_and_filter_classes(self) -> list:
         """
@@ -2368,5 +2343,62 @@ class WriteJITCode:
         self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"')
         self.emptyLine()
 
+    def _select_fuzzing_target(self, prefix: str) -> dict | None:
+        """
+        (Upgraded)
+        Selects a callable to be used as the "payload" for a JIT scenario.
+        It now explicitly returns the variable name for any created instance.
+        """
+        if self.parent.module_classes and random() < 0.2:
+            fuzzable_classes = self._discover_and_filter_classes()
+            if fuzzable_classes:
+                target_class = choice(fuzzable_classes)
+                methods = self.parent._get_object_methods(target_class, target_class.__name__)
+                if methods:
+                    method_name = choice(list(methods.keys()))
+                    instance_var = f"target_instance_{prefix}"  # Define the name here
 
+                    return {
+                        'type': 'method',
+                        'name': f"{target_class.__name__}.{method_name}",
+                        'instance_var': instance_var,  # <-- NEW: Add to dictionary
+                        'setup_code': f"{instance_var} = {self.module_name}.{target_class.__name__}()",
+                        'call_str': f"{instance_var}.{method_name}",
+                    }
+
+        # Fallback to module-level functions remains the same
+        if self.parent.module_functions:
+            func_name = choice(self.parent.module_functions)
+            return {
+                'type': 'function',
+                'name': func_name,
+                'instance_var': None,  # No instance for functions
+                'setup_code': "",
+                'call_str': f"{self.module_name}.{func_name}",
+            }
+        return None
+
+    def _write_target_setup(self, prefix: str, target: dict):
+        """
+        Safely writes the setup code for a fuzzing target, wrapping any
+        instantiation in a try...except block.
+        """
+        instance_var = target.get('instance_var')
+        setup_code = target.get('setup_code')
+
+        if not instance_var or not setup_code:
+            return  # Nothing to set up
+
+        self.write(0, f"# Safely instantiate the target for this scenario.")
+        self.write(0, f"{instance_var} = None")
+        self.write(0, "try:")
+        self.addLevel(1)
+        self.write(0, setup_code)
+        self.restoreLevel(self.parent.base_level - 1)
+        self.write(0, "except Exception as e:")
+        self.addLevel(1)
+        self.write_print_to_stderr(0,
+                                   f'"[-] NOTE: Instantiation failed for {target["name"]}: {{e.__class__.__name__}}"')
+        self.restoreLevel(self.parent.base_level - 1)
+        self.emptyLine()
 
