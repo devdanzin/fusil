@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-from textwrap import dedent
+from textwrap import dedent, indent
 from typing import Any
 from random import choice, randint, random
 from typing import TYPE_CHECKING
@@ -73,6 +73,8 @@ class WriteJITCode:
 
         # Bind the writing methods directly for convenience
         self.write = parent.write
+        self.write_block = parent.write_block
+        self.indent_block = parent.indent_block
         self.addLevel = parent.addLevel
         self.restoreLevel = parent.restoreLevel
         self.emptyLine = parent.emptyLine
@@ -240,31 +242,45 @@ class WriteJITCode:
 
     def generate_stateful_object_scenario(self, prefix: str, instance_var_name: str, class_name_str: str,
                                           class_type: type) -> None:
-        """Generates a stateful hot loop for a class instance."""
-        # This method is called from _fuzz_one_class in the main writer
-        self.write_print_to_stderr(0, f'"[{prefix}] JIT MODE: Stateful fuzzing for class: {class_name_str}"')
-        self.write(0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:")
-        self.addLevel(1)
-        self.write(0, f"for _ in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        self.write(0, '"INDENTED BLOCK"')
-
-        # ... logic to call random methods on the instance ...
+        """
+        (Refactored)
+        Generates a stateful hot loop for a class instance, designed to be
+        called from the main fusil class fuzzing logic.
+        """
+        # 1. Discover a suitable method on the class to target.
         methods_dict = self.parent._get_object_methods(class_type, class_name_str)
-        if methods_dict:
-            chosen_method_name = choice(list(methods_dict.keys()))
-            chosen_method_obj = methods_dict[chosen_method_name]
-            self.parent._generate_and_write_call(
-                prefix=f"{prefix}_{chosen_method_name}",
-                callable_name=chosen_method_name,
-                callable_obj=chosen_method_obj,
-                min_arg_count=0,
-                target_obj_expr=instance_var_name,
-                is_method_call=True,
-                generation_depth=0,
-                in_jit_loop=True,
-            )
-        self.restoreLevel(self.parent.base_level - 2)  # exit for and if
+        if not methods_dict:
+            # If no methods, we can't generate a meaningful scenario.
+            return
+
+        chosen_method_name = choice(list(methods_dict.keys()))
+        chosen_method_obj = methods_dict[chosen_method_name]
+
+        # 2. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] JIT MODE: Stateful fuzzing for class: {class_name_str}"',
+            return_str=True
+        )
+
+        # Get "smart" arguments for the chosen method.
+        args_str = self._generate_args_for_method(chosen_method_obj)
+
+        # Generate the hot loop and the guarded method call.
+        hot_loop_str = self._begin_hot_loop(prefix)
+        call_str = self._generate_guarded_call(f"{instance_var_name}.{chosen_method_name}({args_str})")
+
+        # 3. Assemble the final code block.
+        final_code = f"""
+{header_print}
+# Check that the instance was created successfully before starting the hot loop.
+if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:
+    {hot_loop_str}
+        # In the hot loop, repeatedly call a single method to warm it up for the JIT.
+        {self.indent_block(call_str, 8)}
+"""
+        # 4. Write the assembled block.
+        self.write_block(0, final_code)
+        self.emptyLine()
 
     def _generate_jit_pattern_block(self, prefix: str, target: dict) -> None:
         """
@@ -281,352 +297,277 @@ class WriteJITCode:
 
     def _generate_polymorphic_call_block(self, prefix: str, target: dict) -> None:
         """
-        Generates a hot loop with calls to one function using args of different types.
-        This is now simplified using the hot loop helper.
+        (Refactored)
+        Generates a hot loop that calls one function/method with arguments
+        of different types to stress call-site caching.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] Generating polymorphic call block for: {target["name"]}"'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Polymorphic Call Scenario for: {target["name"]} <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Polymorphic Call Scenario >>>"',
+            return_str=True
         )
 
-        # Write the setup code for the target (e.g., instantiating the class).
-        self._write_target_setup(prefix, target)
+        # Get the safe setup code for the target (e.g., guarded instantiation).
+        setup_str, instance_var = self._write_target_setup(prefix, target)
 
-        # Warm up with one simple call.
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"{target['call_str']}(1)")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception: pass")
-        self.emptyLine()
+        # Get the boilerplate for the hot loop.
+        hot_loop_str = self._begin_hot_loop(prefix)
 
-        base_level = self.parent.base_level
-        # Use the hot loop helper
-        self._begin_hot_loop(prefix)
-        self.addLevel(1)
+        # Generate the list of polymorphic calls that will go inside the loop.
+        poly_gens = [
+            self.arg_generator.genInt,
+            self.arg_generator.genString,
+            self.arg_generator.genList,
+            self.arg_generator.genBytes,
+        ]
 
-        # Inside the loop, call the target with different typed args
-        poly_gens = [self.arg_generator.genInt, self.arg_generator.genString, self.arg_generator.genList]
+        calls_in_loop = []
         for gen_func in poly_gens:
             arg_str = " ".join(gen_func())
-            self.write(1, f"try: {target['call_str']}({arg_str})")
-            self.write(1, "except Exception: pass")
+            # Generate a full, guarded call for each argument type.
+            call = self._generate_guarded_call(f"{target['call_str']}({arg_str})")
+            calls_in_loop.append(call)
 
-        # Cleanly exit all levels opened by the helper
-        self.restoreLevel(base_level)
-        if self.options.jit_raise_exceptions:
-            # Add the matching 'except' block for the 'try' in the helper
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)
+        # Join the calls into a single, indented block for the f-string.
+        calls_in_loop_str = "\n".join(calls_in_loop).replace("\n", "\n    ")
 
-    def _generate_phase1_warmup(self, prefix: str) -> dict | None:
-        if not self.parent.module_classes:
-            return None
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
 
-        class_name = choice(self.parent.module_classes)
-        class_obj = getattr(self.parent.module, class_name)
-        methods = self.parent._get_object_methods(class_obj, class_name)
-        if not methods:
-            return None
+{setup_str}
 
-        method_name = choice(list(methods.keys()))
-        method_obj = methods[method_name]
-        instance_var = f"instance_{prefix}"
+# Only proceed if the target was successfully set up (e.g., instantiated).
+if {instance_var if instance_var else 'True'}:
+    # Generate the JIT-warming hot loop.
+    {hot_loop_str}:
+        # Inside the loop, call the target with arguments of varying types.
+        {calls_in_loop_str}
 
-        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"')
-        self.write(0, f"{instance_var} = callFunc('{prefix}_init', '{class_name}')")
-
-        # Use the new helper to create the loop structure
-        self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
-        self.addLevel(1)
-        self._begin_hot_loop(prefix, level=0)  # Use the helper
-        # if self.options.jit_raise_exceptions:
-        self.addLevel(1)
-
-        # Generate the repeated call inside the loop
-        self.parent._generate_and_write_call(
-            prefix=f"{prefix}_warmup",
-            callable_name=method_name,
-            callable_obj=method_obj,
-            min_arg_count=0,
-            target_obj_expr=instance_var,
-            is_method_call=True,
-            generation_depth=0,
-            in_jit_loop=True,
-            verbose=False,
-        )
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)  # try
-
-        # Cleanly exit all levels opened by the helper
-        # self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            # Add the matching 'except' block for the 'try' in the helper
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-        self.restoreLevel(self.parent.base_level - 1)  # Exit if
-
-        # Store context for the next phases
-        target_info = {
-            'type': 'method_call',
-            'class_name': class_name,
-            'instance_var': instance_var,
-            'method_name': method_name,
-        }
-        self.jit_warmed_targets.append(target_info)
-        return target_info
-
-    def _generate_phase2_invalidate(self, prefix: str, target_info: dict) -> None:
-        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating dependency for {target_info["class_name"]}"')
-
-        class_name = target_info['class_name']
-        method_name = target_info['method_name']
-
-        # +++ NEW: Diversify the invalidation payload +++
-        payloads = [
-            "lambda *a, **kw: 'invalidation payload'",  # The original lambda
-            self.arg_generator.genInt()[0],              # An integer
-            self.arg_generator.genString()[0],           # A string
-            "None",                                      # None
-        ]
-        chosen_payload = choice(payloads)
-
-        self.write(0, "# Maliciously replacing the method on the class to invalidate JIT cache")
-        self.write(0, "try:")
-        self.write(1,
-                   f"setattr({self.module_name}.{class_name}, '{method_name}', {chosen_payload})")
-        self.write(1, "collect() # Encourage cleanup")
-        self.write(0, "except Exception as e:")
-        self.write_print_to_stderr(1, f'f"[{prefix}] PHASE 2: Exception invalidating {target_info["class_name"]}: {{ e }}"')
-        self.emptyLine()
-
-    def _generate_phase3_reexecute(self, prefix: str, target_info: dict) -> None:
-        self.write_print_to_stderr(0,
-                                   f'"[{prefix}] PHASE 3: Re-executing {target_info["method_name"]} to check for crash"')
-
-        instance_var = target_info['instance_var']
-        method_name = target_info['method_name']
-
-        # Use the new helper to create the loop structure
-        self.write(0, f"if {instance_var} is not None and {instance_var} is not SENTINEL_VALUE:")
-        self.addLevel(1)
-        base_level = self.parent.base_level
-        self._begin_hot_loop(prefix, level=0)
-
-        self.write(1, "try:")
-        self.addLevel(1)
-
-        # Re-execute the original call.
-        self.write(1, f"getattr({instance_var}, '{method_name}')()")
-
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(1, f'f"[{prefix}] Caught expected exception: {{e.__class__.__name__}}"')
-        self.write(1, "break")  # Exit loop if it fails
-
-        # Cleanly exit all levels
-        self.restoreLevel(base_level)
-        if self.options.jit_raise_exceptions:
-            # Add the matching 'except' block for the 'try' in the helper
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-        self.restoreLevel(self.parent.base_level - 1)
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        Orchestrates the generation of a three-phase JIT invalidation scenario.
-
-        This method calls helper methods to generate code for each phase:
-        1. Warm-up: JIT-compile a target method.
-        2. Invalidate: Change a dependency of the compiled code.
-        3. Re-execute: Call the target method again to check for crashes.
+        (Refactored)
+        Orchestrates a three-phase JIT invalidation scenario. This method is now
+        a single, readable block that uses our new string-returning helpers.
         """
+        # This scenario is specific to invalidating a method on a class.
         if target['type'] != 'method':
-            self.write_print_to_stderr(0,
-                                       f'"[{prefix}] Skipping standard Invalidation Scenario for non-method target."')
+            self.write_print_to_stderr(0, f'"[{prefix}] Skipping Invalidation Scenario for non-method target."')
             return
 
-        self.write_print_to_stderr(0,
-                                   f'"[{prefix}] >>> Starting JIT Invalidation Scenario targeting {target["name"]} <<<"')
-        self.emptyLine()
-
-        # --- Phase 1: Warm-up and JIT Compilation ---
-        # The warmup phase now uses the target's setup code.
-        self.write(0, f"# Phase 1: Warming up the target method.")
-        instance_var = f"target_instance_{prefix}"
-
-        # 1. Pre-initialize the instance variable to None.
-        self.write(0, f"{instance_var} = None")
-
-        # 2. Wrap the instantiation call in a try...except block.
-        self.write(0, "try:")
-        self.addLevel(1)
-        # The target['setup_code'] contains the `instance = Class()` line.
-        self._write_target_setup(prefix, target)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f'"[-] NOTE: Failed to instantiate for invalidation scenario: {{e.__class__.__name__}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        instance_var = f"target_instance_{prefix}"  # Assume instance is created in setup_code
-        self.write(0, f"if {instance_var}:")
-        # base_level = self.parent.base_level
-        self.addLevel(1)
-        self._begin_hot_loop(f"{prefix}_warmup", level=1)
-        self.write(1, f"try: {target['call_str']}()")
-        self.write(1, "except: pass")
-        # self.restoreLevel(base_level)  # Exit hot loop
-        # ... (end of hot loop boilerplate) ...
-        self.restoreLevel(self.parent.base_level - 2)  # Exit if
-        self.emptyLine()
-
-        # --- Phase 2: Invalidate Dependency ---
-        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating method on class."')
-        # We need to get the class name from the target's setup string. A bit fragile but works.
-        class_name = target['setup_code'].split('.')[-1].split('(')[0]
+        # 1. Get necessary info from the target dictionary.
+        instance_var = target['instance_var']
+        class_name = target['name'].split('.')[0]
         method_name = target['name'].split('.')[-1]
 
+        # 2. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Invalidation Scenario targeting {target["name"]} <<<"'
+        )
+        setup_str, _ = self._write_target_setup(prefix, target)
+
+        # Warmup Phase
+        warmup_loop_str = self._begin_hot_loop(f"{prefix}_warmup")
+        warmup_call_str = self._generate_guarded_call(f"{target['call_str']}()")
+
+        # Invalidation Phase
         payloads = ["lambda *a, **kw: 'payload'", "123", "'a string'", "None"]
-        self.write(0, f"try: setattr({self.module_name}.{class_name}, '{method_name}', {choice(payloads)})")
-        self.write(0, "except: pass")
-        self.write(0, "collect()")
-        self.emptyLine()
+        invalidation_str = self._generate_guarded_call(
+            f"setattr({self.module_name}.{class_name}, '{method_name}', {choice(payloads)})"
+        )
 
-        # --- Phase 3: Re-execute ---
-        self.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."')
-        self.write(0, f"if {instance_var}:")
-        self.addLevel(1)
-        self.write(0, f"try: {target['call_str']}()")
-        self.write(0, "except Exception as e:")
-        self.write(1, f"print(f'[{prefix}] Caught expected exception: {{e.__class__.__name__}}', file=stderr)")
-        self.restoreLevel(self.parent.base_level - 1)
+        # Re-execute Phase
+        reexecute_call_str = self._generate_guarded_call(f"{target['call_str']}()")
 
-        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished Invalidation Scenario >>>"')
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished JIT Invalidation Scenario >>>"'
+        )
+
+        # 3. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
+
+# Safely instantiate the target object for the invalidation test.
+{setup_str}
+
+# Only proceed if the object was successfully created.
+if {instance_var}:
+    # Phase 1: Warm-up the method to get it JIT-compiled.
+    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"')}
+    {warmup_loop_str}
+        {self.indent_block(warmup_call_str, 8)}
+
+    # Phase 2: Invalidate the dependency by replacing the method on the class.
+    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating method on class."')}
+    {invalidation_str}
+    collect()
+
+    # Phase 3: Re-execute the method to check for a crash.
+    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."')}
+    {reexecute_call_str}
+
+{footer_print}
+"""
+        # 4. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_deleter_scenario(self, prefix: str, target: dict) -> None:
         """
+        (Refactored for Legacy Mode)
         Generates a sophisticated scenario that uses a __del__ side effect
-        to induce type confusion.
-
-        This is now implemented by delegating to our more powerful variational
-        engine using the 'decref_escapes' bug pattern.
+        to induce type confusion for local, instance, and class variables.
+        The side effect is triggered only once, near the end of the hot loop.
         """
-        self.write_print_to_stderr(0, f'"[{prefix}] Delegating to variational engine for __del__ side effect scenario."')
-        self._generate_variational_scenario(prefix, 'decref_escapes', target)
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Advanced __del__ Side Effect Scenario <<<"', return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Advanced __del__ Side Effect Scenario >>>"', return_str=True
+        )
+
+        loop_iterations = self.options.jit_loop_iterations
+        trigger_iteration = loop_iterations - 2
+
+        # --- Generate setup strings ---
+        setup_str = dedent(f"""
+            # A. Create a local variable and its FrameModifier
+            target_{prefix} = 100
+            fm_target_{prefix} = FrameModifier('target_{prefix}', 'local-string')
+            fm_target_i_{prefix} = FrameModifier('i_{prefix}', 'local-string')
+
+            # B. Create a class with instance/class attributes and their FrameModifiers
+            class Dummy_{prefix}:
+                a = 200  # Class attribute
+                def __init__(self):
+                    self.b = 300  # Instance attribute
+            
+            dummy_instance_{prefix} = Dummy_{prefix}()
+            fm_dummy_class_attr = FrameModifier('dummy_instance_{prefix}.a', 'class-attr-string')
+            fm_dummy_instance_attr = FrameModifier('dummy_instance_{prefix}.b', 'instance-attr-string')
+        """)
+
+        # --- Generate hot loop body strings ---
+        warmup_str = self._generate_guarded_call(self.indent_block(dedent(f"""
+            _ = target_{prefix} + i_{prefix}
+            _ = dummy_instance_{prefix}.a + i_{prefix}
+            _ = dummy_instance_{prefix}.b + i_{prefix}
+        """), 8))
+
+        del_trigger_str = self.indent_block(dedent(f"""
+            if i_{prefix} == {trigger_iteration}:
+                print("[{prefix}] DELETING FRAME MODIFIERS...", file=stderr)
+                del fm_target_{prefix}
+                del fm_dummy_class_attr
+                del fm_dummy_instance_attr
+                del fm_target_i_{prefix}
+                collect()
+        """), 8)
+
+        reexecute_str = self._generate_guarded_call(self.indent_block(dedent(f"""
+            _ = i_{prefix} + i_{prefix}
+            _ = target_{prefix} + target_{prefix}
+            _ = dummy_instance_{prefix}.a + i_{prefix}
+            _ = dummy_instance_{prefix}.b + i_{prefix}
+        """), 8))
+
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+{setup_str}
+
+{self._begin_hot_loop(prefix)}
+    # Use all variables to warm up the JIT with their initial types
+    {self.indent_block(warmup_str, 8)}
+
+    # On the penultimate loop, delete the FrameModifiers to trigger __del__
+    {del_trigger_str}
+
+    # Use the variables again, which may hit a corrupted JIT state
+    {reexecute_str}
+
+{footer_print}
+"""
+        # 3. Write the assembled block.
+        self.write_block(0, final_code)
+        self.emptyLine()
 
     def _generate_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
-        Generates a function with >256 local variables and a complex,
-        AST-mutated body that operates on them.
+        (Refactored)
+        Generates a function with >256 local variables by delegating to the
+        variational engine with the 'many_vars_base' pattern. This leverages
+        the AST mutator to create complex expressions using the large set
+        of local variables.
         """
-        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Generative Scenario <<<"""')
+        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Generative Scenario via Pattern <<<"""')
 
-        # 1. Generate the variable definitions.
-        num_vars = 260
-        var_names = [f"var_{i}_{prefix}" for i in range(num_vars)]
-        var_defs = "\n".join([f"{name} = {i}" for i, name in enumerate(var_names)])
-
-        # 2. Get the 'many_vars_base' pattern.
-        pattern = BUG_PATTERNS['many_vars_base']
-
-        # 3. Get a complex expression from the AST mutator, giving it ALL the variables.
-        mutations = self._get_mutated_values_for_pattern(prefix, var_names)
-        mutations['var_definitions'] = var_defs
-
-        # 4. Format and write the complete, powerful scenario.
-        setup_code = dedent(pattern['setup_code']).format(**mutations)
-        body_code = dedent(pattern['body_code']).format(**mutations)
-
-        func_name = f"many_vars_func_{prefix}"
-        self.write(0, f"def {func_name}():")
-        self.addLevel(1)
-        self.write_pattern(setup_code, body_code)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, f"{func_name}()")  # Execute the function
+        self._generate_variational_scenario(prefix, 'many_vars_base', target)
 
     def _generate_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
-        Generates a deep call chain where each function contains a
-        different, AST-mutated expression.
+        (Refactored)
+        Generates a deep chain of function calls to stress the JIT's
+        stack analysis and trace stack limits.
         """
-        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Generative Deep Calls" Scenario <<<"""')
-
-        self._write_target_setup(prefix, target)
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Deep Calls" Resource Limit Scenario <<<"""',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Deep Calls" Scenario >>>"""',
+            return_str=True
+        )
 
         depth = 20
 
-        # 1. Generate the chain of functions.
-        for i in range(depth):
-            func_name = f"f_{i}_{prefix}"
-            # At each level, generate a NEW mutated expression.
-            mutations = self._get_mutated_values_for_pattern(prefix, [f'p_{prefix}'])
-            expression = mutations['expression']
+        # --- Generate the recursive function chain as a single string block ---
+        func_chain_lines = [f"# Define a deep chain of {depth} nested function calls."]
+        func_chain_lines.append(f"def f_0_{prefix}(): return 1")
+        for i in range(1, depth):
+            func_chain_lines.append(f"def f_{i}_{prefix}(): return 1 + f_{i-1}_{prefix}()")
 
-            self.write(0, f"def {func_name}(p_{prefix}):")
-            self.addLevel(1)
-            self.write(0, "try:")
-            self.addLevel(1)
-            # The next call is embedded inside the expression.
-            if i > 0:
-                next_call = f"f_{i - 1}_{prefix}(p_{prefix})"
-                self.write(0, f"res = {expression} + {next_call}")
-            else:  # Base case
-                self.write(0, f"res = {expression}")
-            self.write(0, "return res")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "except Exception: return 1")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        # 2. Use our hot loop helper to call the top-level function.
+        func_chain_str = "\n".join(func_chain_lines)
         top_level_func = f"f_{depth - 1}_{prefix}"
-        self._begin_hot_loop(prefix)
-        self.addLevel(1)
-        self.write(1, "try:")
-        self.addLevel(1)
-        self.write(1, f"{top_level_func}({self.arg_generator.genSmallUint()[0]})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except RecursionError: break")
-        self.restoreLevel(self.parent.base_level - 1)
 
-        # Finalize the hot loop block
-        self.restoreLevel(self.parent.base_level - 1)
+        # --- Generate the hot loop using our helper ---
+        # The body of the loop will be a guarded call to the top of the chain.
+        # We specifically catch RecursionError here, as it's an expected outcome.
+        hot_loop_call_str = dedent(f"""
+            try:
+                {top_level_func}()
+            except RecursionError:
+                print(f"[{prefix}] Caught expected RecursionError.", file=stderr)
+                break
+        """)
 
-        if self.options.jit_raise_exceptions:
-            # self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Deep Calls" Scenario >>>"""')
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+{func_chain_str}
+
+# Execute the top-level function of the chain in a hot loop.
+{self._begin_hot_loop(prefix)}
+{hot_loop_call_str.replace(chr(10), chr(10)+'    ')}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _define_frame_modifier_instances(self, prefix: str, targets_and_payloads: dict) -> list[str]:
@@ -666,815 +607,791 @@ class WriteJITCode:
 
     def _generate_mixed_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
-        MIXED SCENARIO 1: Combines "Many Vars", `__del__` side effects, and
+        (Refactored)
+        MIXED SCENARIO: Combines "Many Vars", `__del__` side effects, and
         JIT-friendly math/logic patterns into one hostile function.
         """
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Mixed Many Vars" Hostile Scenario <<<"""',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""',
+            return_str=True
+        )
+
         func_name = f"mixed_many_vars_func_{prefix}"
         loop_var = f"i_{prefix}"
         num_vars = 260
         loop_iterations = self.options.jit_loop_iterations
 
-        self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Mixed Many Vars" Hostile Scenario <<<"""')
-        self.write(0, f"def {func_name}():")
-        self.addLevel(1)
+        # --- Generate setup code strings ---
+        var_defs = "\n".join([f"    var_{i} = {i}" for i in range(num_vars)])
 
-        # 1. Define 260+ local variables to stress EXTENDED_ARG.
-        self.write(0, f"# Define {num_vars} local variables.")
-        for i in range(num_vars):
-            self.write(0, f"var_{i} = {i}")
-        self.emptyLine()
-
-        # 2. Arm the __del__ side effect using our new helper.
-        #    We will target a high-index variable that is used in the hot loop.
+        # The __del__ attack now targets a high-index variable.
         target_variable_path = f'var_{num_vars - 1}'
-        fm_vars = self._define_frame_modifier_instances(
-            prefix, {target_variable_path: "'corrupted-by-del'"}
+        fm_var_name = f"fm_{prefix}"
+        fm_setup_str = self._generate_guarded_call(
+            f"{fm_var_name} = FrameModifier('{target_variable_path}', 'corrupted-by-del')"
         )
 
-        # 3. Add a hot loop.
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for {loop_var} in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if {loop_var} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
+        # --- Generate hot loop body strings ---
+        hot_loop_body_warmup = self._generate_guarded_call(self.indent_block(
+            f"res = var_0 + {loop_var}\nres += var_{num_vars - 1}", 0
+        ))
 
-        # 4. Inside the loop, generate JIT-friendly patterns that use the variables.
-        self.write(0, "# Use variables in JIT-friendly patterns.")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"res = var_0 + {loop_var}")
-        self.write(0, f"res += var_{num_vars - 1} # This is the variable we will corrupt.")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except TypeError: pass")
-        self.emptyLine()
+        del_trigger_str = self.indent_block(dedent(f"""
+            if {loop_var} == {loop_iterations - 2}:
+                print("[{prefix}] DELETING FRAME MODIFIER...", file=stderr)
+                del {fm_var_name}
+                collect()
+        """), 4)
 
-        # 5. Inside the loop, plant the time bomb using our new helper.
-        self._generate_del_trigger(loop_var, loop_iterations, fm_vars)
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
 
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        self.emptyLine()
+def {func_name}():
+    # Define {num_vars} local variables.
+{var_defs}
 
-        # 6. Call the master function we just created.
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-        self.restoreLevel(self.parent.base_level - 1)  # Exit def
+    # Arm the __del__ side effect.
+    {self.indent_block(fm_setup_str, 4)}
+    
+    # Run the hot loop.
+    {self._begin_hot_loop(prefix)}
+        # Use variables in JIT-friendly patterns.
+        {self.indent_block(hot_loop_body_warmup, 8)}
+        
+        # Plant the time bomb to trigger the __del__ side effect.
+        {self.indent_block(del_trigger_str, 8)}
 
-        self.write(0, f"# Execute the composed hostile function.")
-        self.write(0, f"{func_name}()")
+# Execute the composed hostile function.
+{self._generate_guarded_call(f'{func_name}()')}
 
-        self.write_print_to_stderr(0, f'"""[{prefix}] <<< Finished "Mixed Many Vars" Scenario >>>"""')
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_del_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        MIXED SCENARIO 2: An invalidation scenario where the invalidation
+        (Refactored)
+        MIXED SCENARIO: An invalidation scenario where the invalidation
         is performed indirectly via a __del__ side effect.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting __del__ Invalidation Scenario <<<"'
-        )
-        self.emptyLine()
-
-        # --- Phase 1: Warm-up ---
-        target_info = self._generate_phase1_warmup(prefix)
-
-        if not target_info:
-            self.write_print_to_stderr(
-                0, f'"[{prefix}] Could not find a suitable target. Aborting scenario."'
-            )
-            self.emptyLine()
+        if target['type'] != 'method':
+            self.write_print_to_stderr(0, f'"[{prefix}] Skipping __del__ Invalidation for non-method target."')
             return
 
-        self.emptyLine()
+        # 1. Generate the component code blocks as strings.
+        instance_var = target['instance_var']
+        class_name = target['name'].split('.')[0]
+        method_name = target['name'].split('.')[-1]
 
-        # --- Phase 2: Invalidate via __del__ ---
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] PHASE 2: Arming FrameModifier to invalidate via __del__."'
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting __del__ Invalidation Scenario <<<"', return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished __del__ Invalidation Scenario >>>"', return_str=True
         )
 
-        # The target path is the method on the class, e.g., 'MyTargetClass.target_method'
-        target_path = f'{self.module_name}.{target_info["class_name"]}.{target_info["method_name"]}'
+        # --- Phase 1: Warm-up ---
+        setup_str, _ = self._write_target_setup(prefix, target)
+        phase1_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {target["name"]}"', return_str=True)
+        warmup_loop_str = self._begin_hot_loop(f"{prefix}_warmup")
+        warmup_call_str = self._generate_guarded_call(f"{target['call_str']}()")
 
-        fm_vars = self._define_frame_modifier_instances(
-            prefix, {target_path: "lambda *a, **kw: 'invalidated by __del__'"}
-        )
-
-        # Immediately delete the instance to trigger the __del__ method.
-        self.write(0, "# Immediately delete the FrameModifier to trigger the side effect.")
-        for fm_var in fm_vars:
-            self.write(0, f"del {fm_var}")
-        self.write(0, "collect()")
-        self.emptyLine()
+        # --- Phase 2: Invalidation via __del__ ---
+        phase2_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Arming FrameModifier to invalidate via __del__."', return_str=True)
+        target_path = f'{self.module_name}.{class_name}.{method_name}'
+        fm_var_name = f"fm_{prefix}"
+        # Create the FrameModifier instance and immediately delete it to trigger __del__.
+        invalidation_str = dedent(f"""
+            # Define the FrameModifier and immediately delete it to trigger the side effect.
+{self.indent_block(self._generate_guarded_call(f"{fm_var_name} = FrameModifier('{target_path}', lambda *a, **kw: 'invalidated')"), 8)}
+            if '{fm_var_name}' in locals():
+                del {fm_var_name}
+            collect()
+        """)
 
         # --- Phase 3: Re-execute ---
-        self._generate_phase3_reexecute(prefix, target_info)
+        phase3_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."', return_str=True)
+        reexecute_call_str = self._generate_guarded_call(f"{target['call_str']}()")
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished __del__ Invalidation Scenario >>>"'
-        )
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+# Safely instantiate the target object.
+{setup_str}
+
+# Only proceed if the object was successfully created.
+if {instance_var}:
+    # Phase 1: Warm-up the method.
+    {phase1_print}
+    {warmup_loop_str}
+    {self.indent_block(warmup_call_str, 8)}
+
+    # Phase 2: Invalidate the method using a __del__ side effect.
+    {phase2_print}
+    {invalidation_str}
+
+    # Phase 3: Re-execute the now-invalidated method.
+    {phase3_print}
+    {reexecute_call_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_mixed_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
         (Refactored)
-        Generates a deep call chain where each function performs complex work,
-        and the deepest function calls the selected fuzzing target (which can
-        be a function or a method).
+        MIXED SCENARIO: Combines "Deep Calls" with JIT-friendly patterns.
+        Each function in the deep call chain performs complex work and the
+        deepest function calls the fuzzed target.
         """
-        self.write_print_to_stderr(
-            0, f'"""[{prefix}] >>> Starting "Mixed Deep Calls" targeting: {target["name"]} <<<"""'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Mixed Deep Calls" Hostile Scenario targeting: {target["name"]} <<<"""',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""',
+            return_str=True
         )
 
-        # 1. Write the setup code for the target.
-        #    If the target is a method, this will generate the `instance = ...` line.
-        self._write_target_setup(prefix, target)
-
+        setup_str, instance_var = self._write_target_setup(prefix, target)
         depth = 15
-        loop_iterations = self.options.jit_loop_iterations // 100
 
-        self.write(0, f"# Define a deep chain of {depth} functions, each with internal JIT-friendly patterns.")
+        # --- Generate the recursive function chain as a single string block ---
+        func_chain_lines = [f"# Define a deep chain of {depth} functions, each with internal JIT-friendly patterns."]
 
-        # 2. Define the base case (the final function in the chain).
-        #    This is where we inject the call to our fuzzed target.
-        self.write(0, f"def f_0_{prefix}(p):")
-        self.addLevel(1)
-        self.write(0, "x = len('base_case') + p")
-        self.write(0, "y = x % 5")
-        self.write_print_to_stderr(0,
-                                   f'''f"[{prefix}] Calling fuzzed target '{target["name"]}' from deep inside the call chain"''')
-        # Use the target's call string, which can be a function or method.
-        self.write(0, f"try: {target['call_str']}(x)")
-        self.write(0, "except Exception: pass")
-        self.write(0, "return x - y")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        # Define the base case (deepest function), which calls the fuzzed target.
+        base_case_body = dedent(f"""
+            x = len('base_case') + p
+            y = x % 5
+            print(f"[{prefix}] Calling fuzzed target '{target['name']}' from deep inside the call chain", file=stderr)
+            {self.indent_block(self._generate_guarded_call(f"{target['call_str']}(x)"), 12)}
+            return x - y
+        """)
+        func_chain_lines.append(f"def f_0_{prefix}(p):\n    {self.indent_block(base_case_body, 4)}")
 
-        # 3. Generate the intermediate functions in the chain.
+        # Define the intermediate functions in the chain.
         for i in range(1, depth):
-            self.write(0, f"def f_{i}_{prefix}(p):")
-            self.addLevel(1)
-            self.write(0, f"local_val = p * {i}")
-            self.write(0, "s = 'abcdef'")
-            self.write(0, f"if local_val > 10 and (s[{i} % len(s)]):")
-            self.addLevel(1)
-            self.write(1, f"local_val += f_{i - 1}_{prefix}(p)")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "return local_val")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.emptyLine()
+            intermediate_body = dedent(f"""
+                local_val = p * {i}
+                s = 'abcdef'
+                if local_val > 10 and (s[{i} % len(s)]):
+                    local_val += f_{i - 1}_{prefix}(p)
+                return local_val
+            """)
+            func_chain_lines.append(f"def f_{i}_{prefix}(p):\n    {self.indent_block(intermediate_body, 4)}")
 
+        func_chain_str = "\n\n".join(func_chain_lines)
         top_level_func = f"f_{depth - 1}_{prefix}"
 
-        # 4. Call the top-level function inside a hot loop using our helper.
-        base_level = self.parent.base_level
-        self._begin_hot_loop(prefix)
-        self.addLevel(1)
-        self.write(1, "try:")
-        self.addLevel(1)
-        self.write(1, f"{top_level_func}(i_{prefix})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except RecursionError:")
-        self.addLevel(1)
-        self.write_print_to_stderr(1, f'"[{prefix}] Caught expected RecursionError."')
-        self.write(1, "break")
+        # --- Generate the hot loop using our helper ---
+        hot_loop_call_str = dedent(f"""
+            try:
+                {top_level_func}(i_{prefix})
+            except RecursionError:
+                print(f"[{prefix}] Caught expected RecursionError.", file=stderr)
+                break
+        """)
 
-        # Cleanly exit all levels opened by the helper.
-        self.restoreLevel(base_level)
-        # self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
 
-        self.write_print_to_stderr(
-            0, f'"""[{prefix}] <<< Finished "Mixed Deep Calls" Scenario >>>"""'
-        )
+# Setup the target for the scenario (if it's a method).
+{setup_str}
+
+# Define the deep call chain.
+{func_chain_str}
+
+# Execute the top-level function of the complex chain in a hot loop.
+{self._begin_hot_loop(prefix)}
+    {self.indent_block(hot_loop_call_str, 4)}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_deep_call_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        MIXED SCENARIO 4: Combines "Deep Calls" with an invalidation attack.
+        (Refactored)
+        MIXED SCENARIO: Combines "Deep Calls" with an invalidation attack.
         A deep function call chain is JIT-compiled, then a function in the
-        middle of the chain is redefined, testing the JIT's ability to
-        invalidate the entire dependent trace.
+        middle of the chain is redefined to test trace invalidation.
         """
-        self.write_print_to_stderr(
-            0, f'"""[{prefix}] >>> Starting "Deep Call Invalidation" Hostile Scenario <<<"""'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] >>> Starting "Deep Call Invalidation" Hostile Scenario <<<"""',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"""[{prefix}] <<< Finished "Deep Call Invalidation" Scenario >>>"""',
+            return_str=True
         )
 
-        depth = 20  # A deep chain to create a long dependency graph.
-        loop_iterations = self.options.jit_loop_iterations // 100
-
-        # --- Phase 1: Define and Warm-up the Call Chain ---
-        self.write(0, f"# Phase 1: Define a deep chain of {depth} functions.")
-
-        # Define the base case.
-        self.write(0, f"def f_0_{prefix}(p): return p + 1")
-
-        # Define the recursive chain.
-        for i in range(1, depth):
-            self.write(0, f"def f_{i}_{prefix}(p): return f_{i - 1}_{prefix}(p) + 1")
-
-        top_level_func = f"f_{depth - 1}_{prefix}"
-        self.emptyLine()
-
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."')
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, f"{top_level_func}(i_{prefix})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-
-        # --- Phase 2: Invalidate a Middle Link ---
-        # We will redefine a function right in the middle of the chain.
+        depth = 20
         invalidation_index = depth // 2
+
+        # --- Generate the recursive function chain ---
+        func_chain_lines = [f"# Phase 1: Define a deep chain of {depth} functions."]
+        func_chain_lines.append(f"def f_0_{prefix}(p): return p + 1")
+        for i in range(1, depth):
+            func_chain_lines.append(f"def f_{i}_{prefix}(p): return f_{i-1}_{prefix}(p) + 1")
+
+        func_chain_str = "\n".join(func_chain_lines)
+        top_level_func = f"f_{depth - 1}_{prefix}"
         invalidation_func_name = f"f_{invalidation_index}_{prefix}"
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] Phase 2: Invalidating the middle of the call chain ({invalidation_func_name})..."'
-        )
-        self.write(0, "# Redefine the middle function to return a completely different type.")
-        self.write(0, f"def {invalidation_func_name}(p):")
-        self.addLevel(1)
-        self.write(0, "return '<< JIT-INVALIDATED >>'")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "collect()")
+        # --- Generate the warm-up loop ---
+        warmup_loop_str = self._begin_hot_loop(prefix)
+        # warmup_call_str = self._generate_guarded_call(f"{top_level_func}(i_{prefix})", catch_recursion_error=True)
+        warmup_call_str = self._generate_guarded_call(f"{top_level_func}(i_{prefix})")
+
+        # --- Generate the invalidation logic ---
+        invalidation_str = dedent(f"""
+            # Redefine the middle function to return a completely different type.
+            def {invalidation_func_name}(p):
+                return '<< JIT-INVALIDATED >>'
+            collect()
+        """)
+
+        # --- Generate the re-execution logic ---
+        reexecute_str = self._generate_guarded_call(f"{top_level_func}(1)")
+
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+{func_chain_str}
+
+# Phase 1: Warm up the deep call chain to get it JIT-compiled.
+{self.parent.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."', return_str=True)}
+{warmup_loop_str}
+    {self.indent_block(warmup_call_str, 4)}
+
+# Phase 2: Invalidate a function in the middle of the chain.
+{self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 2: Invalidating {invalidation_func_name}..."', return_str=True)}
+{invalidation_str}
+
+# Phase 3: Re-executing the chain to check for crashes. A TypeError is expected.
+{self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the chain..."', return_str=True)}
+{reexecute_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
-        # --- Phase 3: Re-execute the Chain ---
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] Phase 3: Re-executing the chain to check for crashes..."'
-        )
-        self.write(0, "# The function now called by f_{invalidation_index+1} has changed.")
-        self.write(0, "# This should raise a TypeError if the JIT de-optimizes correctly.")
-        self.write(0, "# A segfault indicates a successful fuzzing attack.")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"{top_level_func}(1)")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except TypeError:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Caught expected TypeError after invalidation."')
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.write_print_to_stderr(
-            0, f'"""[{prefix}] <<< Finished "Deep Call Invalidation" Scenario >>>"""'
-        )
-        self.emptyLine()
-
-    def _generate_indirect_call_scenario(self, prefix, target: dict):
+    def _generate_indirect_call_scenario(self, prefix: str, target: dict) -> None:
+        """
+        (Refactored)
+        Stresses the JIT by passing the fuzzed target (function or method)
+        as an argument to a JIT-hot harness function, forcing an indirect call.
+        """
+        # 1. Generate the component code blocks as strings.
         harness_func_name = f"harness_{prefix}"
-        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting Indirect Call Scenario ({target["name"]}) <<<"')
 
-        # 1. Define a harness function that takes a callable.
-        self.write(0, f"def {harness_func_name}(callable_arg):")
-        self.addLevel(1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "try: callable_arg(i)")  # Call the argument
-        self.restoreLevel(self.parent.base_level - 2)  # Exit loop and def
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Indirect Call Scenario ({target["name"]}) <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Indirect Call Scenario >>>"',
+            return_str=True
+        )
 
-        # 2. Call the harness, passing the fuzzed function to it.
-        self.write(0, f"# Pass the real fuzzed function to the JIT-hot harness.")
-        fuzzed_func_path = f"{self.module_name}.{target["name"]}"
-        self.write(0, f"{harness_func_name}({fuzzed_func_path})")
+        # --- Generate the harness function definition ---
+        # This function takes a callable argument and runs it in a hot loop.
+        hot_loop_body = self._generate_guarded_call(f"callable_arg(i_{prefix})")
+        harness_def_str = dedent(f"""
+            def {harness_func_name}(callable_arg):
+                {self._begin_hot_loop(prefix)}
+                    {hot_loop_body}
+        """)
+
+        # --- Generate the main execution logic ---
+        setup_str, _ = self._write_target_setup(prefix, target)
+        # The fuzzed callable itself is passed as the argument to the harness.
+        execution_str = self._generate_guarded_call(f"{harness_func_name}({target['call_str']})")
+
+
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+# First, define the harness function that will become JIT-hot.
+{harness_def_str}
+
+# Next, set up the target callable (e.g., instantiate a class).
+{setup_str}
+
+# Finally, call the harness and pass the fuzzed target to it as an argument.
+{execution_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
+        self.emptyLine()
 
     def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
         (Refactored)
         A three-phase invalidation attack where the fuzzed callable itself
-        is the dependency that gets invalidated.
-
-        This scenario is now only suitable for module-level functions, as invalidating
-        a method on a class has a different mechanism.
+        is the dependency that gets invalidated. This scenario is specific
+        to module-level functions.
         """
-        # This attack is designed to redefine a function on a module,
-        # so we only run it if our target is a function.
+        # This attack redefines a function on a module, so we only run it
+        # if our target is a function.
         if target['type'] != 'function':
             self.write_print_to_stderr(0, f'"[{prefix}] Skipping Fuzzed Function Invalidation for method target."')
             return
 
+        # 1. Generate the component code blocks as strings.
         wrapper_func_name = f"jit_wrapper_{prefix}"
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Fuzzed Function Invalidation Scenario ({target["name"]}) <<<"'
+
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Fuzzed Function Invalidation Scenario ({target["name"]}) <<<"',
+            return_str=True
         )
-        self.emptyLine()
 
-        # --- Phase 1: Define a Wrapper and Warm It Up ---
-        self.write(0, f"# Phase 1: Define a wrapper and JIT-compile it.")
-        self.write(0, f"def {wrapper_func_name}():")
-        self.addLevel(1)
-        # Use the unified target call string.
-        self.write(0, f"try: {target['call_str']}()")
-        self.write(0, "except: pass")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        # Phase 1: Wrapper definition and Warmup
+        phase1_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 1: Warming up wrapper function."', return_str=True)
+        # The wrapper simply calls our target fuzzed function.
+        wrapper_def_str = dedent(f"""
+            def {wrapper_func_name}():
+                {self.indent_block(self._generate_guarded_call(f"{target['call_str']}()"), 16)}
+        """)
+        warmup_loop_str = self._begin_hot_loop(f"{prefix}_warmup")
+        warmup_call_str = f"{wrapper_func_name}()"
 
-        # Use our hot loop helper to warm up the wrapper.
-        self._begin_hot_loop(prefix)
-        self.addLevel(1)
-        self.write(1, f"{wrapper_func_name}()")
-        self.restoreLevel(self.parent.base_level - 2)
-        # ... (end of hot loop boilerplate) ...
-
-        # --- Phase 2: Invalidate the Fuzzed Function ---
-        self.write_print_to_stderr(0, f'"[{prefix}] Phase 2: Redefining {target["name"]} on the module..."')
-        self.write(0, f"# Maliciously redefine the fuzzed function on its own module.")
-        # The 'name' field from the target dict gives us the function name.
-        self.write(0, f"setattr({self.module_name}, '{target['name']}', lambda *a, **kw: 'payload')")
-        self.write(0, "collect()")
-        self.emptyLine()
-
-        # --- Phase 3: Re-execute the Wrapper ---
-        self.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the wrapper to check for crashes..."')
-        self.write(0, f"try: {wrapper_func_name}()")
-        self.write(0, "except Exception: pass")
-        self.emptyLine()
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Fuzzed Function Invalidation Scenario >>>"'
+        # Phase 2: Invalidation
+        phase2_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 2: Redefining {target["name"]} on the module..."', return_str=True)
+        invalidation_str = self._generate_guarded_call(
+            f"setattr({self.module_name}, '{target['name']}', lambda *a, **kw: 'payload')"
         )
+
+        # Phase 3: Re-execution
+        phase3_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the wrapper to check for crashes..."', return_str=True)
+        reexecute_call_str = self._generate_guarded_call(f"{wrapper_func_name}()")
+
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Fuzzed Function Invalidation Scenario >>>"',
+            return_str=True
+        )
+
+        # 2. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
+
+# Phase 1: Define a wrapper and JIT-compile it.
+{wrapper_def_str}
+
+{phase1_print}
+{warmup_loop_str}
+    {warmup_call_str}
+
+# Phase 2: Invalidate the original fuzzed function.
+{phase2_print}
+{invalidation_str}
+collect()
+
+# Phase 3: Re-execute the wrapper to see if it crashes.
+{phase3_print}
+{reexecute_call_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
+        self.emptyLine()
 
     def _generate_polymorphic_call_block_scenario(self, prefix: str, target: dict) -> None:
         """
+        (Refactored)
         Generates a hot loop that makes calls to different KINDS of callables
-        (fuzzed function, lambda, instance method) to stress call-site caching.
+        (the fuzzed target, a lambda, a new instance method) to stress
+        call-site caching and polymorphism handling in the JIT.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Polymorphic Callable Set Scenario ({target["name"]}) <<<"'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Polymorphic Callable Set Scenario <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Polymorphic Callable Set Scenario >>>"',
+            return_str=True
         )
 
-        # 1. Define the set of diverse callables.
+        # --- Generate the setup code: define the diverse callables ---
         lambda_name = f"lambda_{prefix}"
-        self.write(0, f"{lambda_name} = lambda x: x + 1")
-
         class_name = f"CallableClass_{prefix}"
-        instance_name = f"instance_{prefix}"
-        self.write(0, f"class {class_name}:")
-        self.write(1, "def method(self, x): return x * 2")
-        self.write(0, f"{instance_name} = {class_name}()")
-        self.emptyLine()
+        instance_name = f"poly_instance_{prefix}"
+        guarded_setup_code = ""
+        if target['setup_code']:
+            guarded_setup_code = self.indent_block(self._generate_guarded_call(target['setup_code']), 12)
 
-        # List of callables to be used in the loop.
-        # This prepares the paths for calling each one.
-        callables_to_test = [
-            f"{self.module_name}.{target["name"]}",
-            lambda_name,
-            f"{instance_name}.method",
+        setup_str = dedent(f"""
+            # Define a set of diverse callables for the test.
+            {lambda_name} = lambda x: x + 1
+
+            class {class_name}:
+                def method(self, x):
+                    return x * 2
+            {instance_name} = {class_name}()
+
+            # Set up the main fuzzed target as well.
+            {guarded_setup_code}
+        """)
+
+        # --- Generate the list of calls for the loop body ---
+        # The list includes the fuzzed target, the lambda, and the new method.
+        # We need to guard the main target call in case its setup failed.
+        if target.get('instance_var'):
+            main_target_call = f"if {target['instance_var']}: {target['call_str']}(i_{prefix})"
+        else:
+            main_target_call = f"{target['call_str']}(i_{prefix})"
+
+        calls_to_make = [
+            main_target_call,
+            f"{lambda_name}(i_{prefix})",
+            f"{instance_name}.method(i_{prefix})",
         ]
 
-        # 2. Create the hot loop.
-        # Divide iterations among the callables.
-        loop_iterations = self.options.jit_loop_iterations // len(callables_to_test)
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
+        hot_loop_body_calls = []
+        for call in calls_to_make:
+            hot_loop_body_calls.append(self._generate_guarded_call(call))
 
-        # 3. Inside the loop, call each of the different callables.
-        self.write(0, "# Call different types of callables to stress the JIT's call-site caches.")
-        for i, callable_path in enumerate(callables_to_test):
-            self.write(0, "try:")
-            self.addLevel(1)
-            # Pass a simple argument that should work for most.
-            self.write(0, f"{callable_path}(i_{prefix})")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "except: pass")
+        hot_loop_body = "\n".join(hot_loop_body_calls)
 
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Polymorphic Callable Set Scenario >>>"'
-        )
+{setup_str}
+
+# Call each of the different callables inside a hot loop.
+{self._begin_hot_loop(prefix)}
+    # The JIT must handle calls to the main fuzzed target, a lambda,
+    # and a newly defined instance method in quick succession.
+    {self.indent_block(hot_loop_body, 4)}
+
+{footer_print}
+"""
+        # 3. Write the assembled block.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_type_version_scenario(self, prefix: str, target: dict) -> None:
         """
-        ADVANCED SCENARIO: Attacks the JIT's attribute caching by accessing an
-        attribute with the same name across classes where its nature differs.
+        (Refactored)
+        Attacks the JIT's attribute caching by accessing an attribute with the
+        same name across classes where its nature differs.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Type Version Fuzzing Scenario <<<"'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Type Version Fuzzing Scenario <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Type Version Fuzzing Scenario >>>"',
+            return_str=True
         )
 
-        # 1. Define several classes with the same attribute name ('payload')
-        #    but different kinds of attributes.
-        self.write(0, "# Define classes with conflicting 'payload' attributes.")
-        self.write(0, f"class ShapeA_{prefix}: payload = 123  # Data attribute (int)")
-        self.write(0, f"class ShapeB_{prefix}: payload = 'abc' # Data attribute (str)")
-        self.write(0, f"class ShapeC_{prefix}:")
-        self.write(1, "@property")
-        self.write(1, "def payload(self): return 3.14  # Property")
-        self.write(0, f"class ShapeD_{prefix}:")
-        self.write(1, "def payload(self): return len # Method that returns a builtin")
-        self.emptyLine()
+        # --- Generate the setup code (class definitions) as a single block ---
+        setup_str = dedent(f"""
+            # Define classes with conflicting 'payload' attributes.
+            class ShapeA_{prefix}: payload = 123
+            class ShapeB_{prefix}:
+                @property
+                def payload(self): return 'property_payload'
+            class ShapeC_{prefix}:
+                def payload(self): return id(self)
+            class ShapeD_{prefix}:
+                __slots__ = ['payload']
+                def __init__(self): self.payload = 'slot_payload'
+            
+            # Create a list of instances to iterate over.
+            shapes_{prefix} = [ShapeA_{prefix}(), ShapeB_{prefix}(), ShapeC_{prefix}(), ShapeD_{prefix}()]
+        """)
 
-        # 2. Create a list of instances of these classes.
-        self.write(0, "# Create a list of instances to iterate over.")
-        self.write(0, f"shapes = [ShapeA_{prefix}(), ShapeB_{prefix}(), ShapeC_{prefix}(), ShapeD_{prefix}()]")
-        self.emptyLine()
+        # --- Generate the hot loop body ---
+        # This logic will be placed inside the loop generated by our helper.
+        hot_loop_body = dedent(f"""
+            obj = shapes_{prefix}[i_{prefix} % len(shapes_{prefix})]
+            try:
+                # This polymorphic access forces the JIT to constantly check
+                # the object's type and the version of its attribute cache.
+                payload_val = obj.payload
+                # If the payload is a method, call it to make the access meaningful.
+                if callable(payload_val):
+                    payload_val()
+            except Exception:
+                pass
+        """)
 
-        # 3. In a hot loop, polymorphically access the 'payload' attribute.
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
+        # 2. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
 
-        self.write(0, f"obj = shapes[i_{prefix} % len(shapes)]")
-        self.write(0, "try:")
-        self.addLevel(1)
-        # This access forces the JIT to constantly check the object's type
-        # and the version of its attribute cache.
-        self.write(0, "payload_val = obj.payload")
-        # If the payload is a method, call it.
-        self.write(0, "if callable(payload_val): payload_val()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception: pass")
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
+{setup_str}
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Type Version Fuzzing Scenario >>>"'
-        )
+# In a hot loop, polymorphically access the 'payload' attribute.
+{self._begin_hot_loop(prefix)}
+{hot_loop_body.replace(chr(10), chr(10)+'    ')}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_concurrency_scenario(self, prefix: str, target: dict) -> None:
         """
-        ADVANCED SCENARIO: Creates a race condition between a "hammer" thread
-        running JIT'd code and an "invalidator" thread modifying its dependencies.
+        (Refactored)
+        Creates a race condition between a "hammer" thread running JIT'd
+        code and an "invalidator" thread modifying its dependencies.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Concurrency (Race Condition) Scenario <<<"'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Concurrency (Race Condition) Scenario <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished JIT Concurrency Scenario >>>"',
+            return_str=True
         )
 
-        # 1. Setup shared state: a target class and a stop flag.
-        self.write(0, "# Shared state for the threads.")
-        self.write(0, f"class JITTarget_{prefix}: attr = 100")
-        self.write(0, f"stop_flag_{prefix} = False")
-        self.emptyLine()
+        # --- Generate the setup and thread definitions as a single block ---
+        # This makes the relationship between the shared state and the threads very clear.
+        setup_and_threads_str = dedent(f"""
+            # Shared state for the threads.
+            class JITTarget_{prefix}:
+                attr = 100
+            stop_flag_{prefix} = False
 
-        # 2. Define Thread 1: The "JIT Hammer"
-        self.write(0, f"def hammer_thread_{prefix}():")
-        self.addLevel(1)
-        self.write(0, f"target = JITTarget_{prefix}()")
-        self.write_print_to_stderr(0, f'"[{prefix}] Hammer thread starting..."')
-        self.write(0, f"while not stop_flag_{prefix}:")
-        self.addLevel(1)
-        self.write(0, "try: _ = target.attr + 1 # This line will be JIT-compiled")
-        self.write(0, "except: pass")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Hammer thread stopping."')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+            # Thread 1: The "JIT Hammer"
+            # This thread runs a tight loop to get its code JIT-compiled.
+            def hammer_thread_{prefix}():
+                target = JITTarget_{prefix}()
+                print("[{prefix}] Hammer thread starting...", file=stderr)
+                while not stop_flag_{prefix}:
+                    try:
+                        # This simple attribute access will be heavily optimized.
+                        _ = target.attr + 1
+                    except:
+                        pass # Ignore TypeErrors if the attribute is changed.
+                print("[{prefix}] Hammer thread stopping.", file=stderr)
 
-        # 3. Define Thread 2: The "Invalidator"
-        self.write(0, f"def invalidator_thread_{prefix}():")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Invalidator thread starting..."')
-        self.write(0, f"while not stop_flag_{prefix}:")
-        self.addLevel(1)
-        # Repeatedly change the attribute that the hammer thread depends on.
-        self.write(0, f"JITTarget_{prefix}.attr = randint(1, 1000)")
-        self.write(0, "time.sleep(0.00001) # Sleep briefly to allow hammer to run")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Invalidator thread stopping."')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+            # Thread 2: The "Invalidator"
+            # This thread creates a race condition by modifying the attribute
+            # that the hammer thread depends on.
+            def invalidator_thread_{prefix}():
+                print("[{prefix}] Invalidator thread starting...", file=stderr)
+                while not stop_flag_{prefix}:
+                    JITTarget_{prefix}.attr = randint(1, 1000)
+                    time.sleep(0.00001) # Sleep briefly to yield control.
+                print("[{prefix}] Invalidator thread stopping.", file=stderr)
+        """)
 
-        # 4. Main execution logic to run and manage the threads.
-        self.write(0, "# Create and start the competing threads.")
-        self.write(0, f"hammer = Thread(target=hammer_thread_{prefix})")
-        self.write(0, f"invalidator = Thread(target=invalidator_thread_{prefix})")
-        self.write(0, "hammer.start()")
-        self.write(0, "invalidator.start()")
-        self.write(0, "time.sleep(0.1) # Let the race condition run for a moment")
-        self.write(0, f"stop_flag_{prefix} = True # Signal threads to stop")
-        self.write(0, "hammer.join()")
-        self.write(0, "invalidator.join()")
+        # --- Generate the main execution logic that runs the threads ---
+        execution_str = dedent(f"""
+            # Create and start the competing threads.
+            hammer = Thread(target=hammer_thread_{prefix})
+            invalidator = Thread(target=invalidator_thread_{prefix})
+            hammer.start()
+            invalidator.start()
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished JIT Concurrency Scenario >>>"'
-        )
+            # Let the race condition run for a moment.
+            time.sleep(0.1)
+            
+            # Signal threads to stop and wait for them to finish.
+            stop_flag_{prefix} = True
+            hammer.join()
+            invalidator.join()
+        """)
+
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
+
+{setup_and_threads_str}
+
+# Main execution logic to run and manage the threads.
+{execution_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_side_exit_scenario(self, prefix: str, target: dict) -> None:
         """
-        ADVANCED SCENARIO: Stresses the JIT's deoptimization mechanism by
-        creating a hot loop with a guard that fails unpredictably, forcing
-        frequent "side exits" from the optimized trace.
+        (Refactored)
+        Stresses the JIT's deoptimization mechanism by creating a hot loop
+        with a guard that fails unpredictably, forcing frequent "side exits".
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Frequent Side Exit Scenario <<<"'
-        )
-
+        # 1. Generate the component code blocks as strings.
         target_var = f"side_exit_var_{prefix}"
 
-        # 1. Initialize a variable with a known, stable type.
-        self.write(0, f"{target_var} = 0  # Start with a known type (int)")
-        self.emptyLine()
-
-        # 2. Start a hot loop.
-        if self.options.jit_raise_exceptions:
-            self.write(0, "try:")
-            self.addLevel(1)
-        self.write(0, f"for i_{prefix} in range({self.options.jit_loop_iterations}):")
-        self.addLevel(1)
-        if self.options.jit_aggressive_gc:
-            self.write(0, f"if i_{prefix} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(0, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            self.write(0, f"# Check if we should raise an exception on this iteration.")
-            self.write(0, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(0, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        # 3. Create an unpredictable guard condition. The JIT will optimize
-        #    the 'else' path but must correctly handle when this guard fails.
-        self.write(0, "# This guard is designed to fail unpredictably (10% chance).")
-        self.write(0, "if random() < 0.1:")
-        self.addLevel(1)
-        # Inside the failing guard, change the variable's type.
-        self.write_print_to_stderr(0, f'"[{prefix}] Side exit triggered! Changing variable type."')
-        self.write(0, f"{target_var} = 'corrupted-by-side-exit'")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # 4. Perform an operation on the variable. This will be JIT-optimized
-        #    assuming the variable is an integer.
-        self.write(0, "# This operation is optimized assuming the variable is an int.")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"_ = {target_var} + 1")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except TypeError:")
-        self.addLevel(1)
-        # 5. CRITICAL: After a side exit causes a TypeError, we must reset
-        #    the variable's type so the loop can become hot again.
-        self.write(0, f"# Reset the variable's type to allow re-optimization.")
-        self.write(0, f"{target_var} = i_{prefix}")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        if self.options.jit_raise_exceptions:
-            self.restoreLevel(self.parent.base_level - 1)  # try
-            self.write(0, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(0, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)  # if
-            self.write(0, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)  # except
-            self.emptyLine()
-
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Frequent Side Exit Scenario >>>"'
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Frequent Side Exit Scenario <<<"',
+            return_str=True
         )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Frequent Side Exit Scenario >>>"',
+            return_str=True
+        )
+
+        # Generate the main hot loop body as a single, readable block.
+        # This contains the core logic of the scenario.
+        hot_loop_body = dedent(f"""
+            # This guard is designed to fail unpredictably (10% chance).
+            if random() < 0.1:
+                # Inside the failing guard, change the variable's type.
+                print(f"[{prefix}] Side exit triggered! Changing variable type.", file=stderr)
+                {target_var} = 'corrupted-by-side-exit'
+
+            # This operation is optimized assuming the variable is an int.
+            try:
+                _ = {target_var} + 1
+            except TypeError:
+                # After a side exit causes a TypeError, we must reset
+                # the variable's type so the loop can become hot again.
+                # This allows us to trigger the side exit multiple times.
+                {target_var} = i_{prefix}
+        """)
+
+        # 2. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
+
+# Initialize a variable with a known, stable type.
+{target_var} = 0
+
+# Start the hot loop that will be JIT-compiled.
+{self._begin_hot_loop(prefix)}
+{hot_loop_body.replace(chr(10), chr(10) + '    ')}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_isinstance_attack_scenario(self, prefix: str, target: dict) -> None:
         """
-        ADVANCED SCENARIO (UPGRADED): Attacks the JIT's `isinstance` elimination
-        by using a class with a deep, randomized inheritance hierarchy and a
-        polymorphic target object.
+        (Refactored)
+        Attacks the JIT's `isinstance` elimination by using a class with a
+        deep inheritance hierarchy and injecting a call to the fuzzed target
+        into a patched __instancecheck__.
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting Upgraded `isinstance` JIT Attack Scenario <<<"'
+        # 1. Generate the component code blocks as strings.
+
+        # --- Logging and setup strings ---
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting Upgraded `isinstance` Attack targeting {target["name"]} <<<"',
+            return_str=True
         )
-        loop_iterations = self.options.jit_loop_iterations
-        trigger_iteration = loop_iterations // 2
-        inheritance_depth = randint(100, 500)  # Randomize the depth
-
-        # 1. SETUP - Define all the components for the attack.
-        self.write(0, "# 1. Define the components for the attack.")
-        self.write(0, "from abc import ABCMeta")
-        self.emptyLine()
-
-        # Define the metaclass that we will later modify.
-        meta_name = f"EditableMeta_{prefix}"
-        self.write(0, f"class {meta_name}(ABCMeta):")
-        self.write(1, "instance_counter = 0")
-        self.emptyLine()
-
-        # --- UPGRADE: Deep Inheritance Tree ---
-        self.write(0, f"# Create a deep inheritance tree of depth {inheritance_depth}.")
-        self.write(0, f"class Base_{prefix}(metaclass={meta_name}): pass")
-        self.write(0, f"last_class_{prefix} = Base_{prefix}")
-        self.write(0, f"for _ in range({inheritance_depth}):")
-        self.addLevel(1)
-        # We create a uniquely named class each time to avoid name clashes.
-        self.write(0, f"class ClassStepDeeper(last_class_{prefix}): pass")
-        self.write(0, f"last_class_{prefix} = ClassStepDeeper")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # The final class inherits from the end of our long chain.
-        class_name = f"EditableClass_{prefix}"
-        self.write(0, f"class {class_name}(last_class_{prefix}): pass")
-        self.emptyLine()
-
-        # --- UPGRADE: Injected Fuzzed Function Call ---
-        # Define the __instancecheck__ method that we will inject later.
-        # It now calls a real fuzzed function.
-        check_func_name = f"new__instancecheck_{prefix}"
-        self.write(0, f"def {check_func_name}(self, other):")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, '"  [+] Patched __instancecheck__ called!"')
-
-        # Write the setup code for the target (if it's a method call).
-        self._write_target_setup(prefix, target)
-
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f"'    -> Calling fuzzed target: {target['name']}'")
-        # Use the unified call string, which works for both functions and methods.
-        self.write(0, f"{target['call_str']}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except: pass")
-        self.write(0, f"return True")  # Always return True after being patched
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # Define the Deletable class with the __del__ payload.
-        deletable_name = f"Deletable_{prefix}"
-        # ... (The Deletable class definition remains the same as before) ...
-        self.write(0, f"class {deletable_name}:")
-        self.addLevel(1)
-        self.write(0, "def __del__(self):")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, '"  [+] __del__ triggered! Patching __instancecheck__ onto metaclass."')
-        self.write(0, f"{meta_name}.__instancecheck__ = {check_func_name}")
-        self.restoreLevel(self.parent.base_level - 2)
-        self.emptyLine()
-
-        # Arm the trigger.
-        self.write(0, f"trigger_obj = {deletable_name}()")
-        self.emptyLine()
-
-        # --- UPGRADE: Polymorphic Target Object ---
-        self.write(0, "# Create a list of diverse objects to check against.")
-        self.write(0, f"fuzzed_obj_instance = {self.module_name}.{target["name"]}")
-        self.write(0, f"objects_to_check = [1, 'a_string', 3.14, fuzzed_obj_instance]")
-        self.emptyLine()
-
-        # 2. HOT LOOP - The Bait, Trigger, and Trap
-        self.write(0, "# 2. Run the hot loop to bait, trigger, and trap the JIT.")
-        self.write(0, f"for i_{prefix} in range({loop_iterations}):")
-        self.addLevel(1)
-
-        # Pick a different object to check on each iteration.
-        self.write(0, f"target_obj = objects_to_check[i_{prefix} % len(objects_to_check)]")
-
-        # The Bait: This check now has a polymorphic target.
-        self.write(0, f"is_instance_result = isinstance(target_obj, {class_name})")
-
-        # The Trigger
-        self.write(0, f"if i_{prefix} == {trigger_iteration}:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[{prefix}] Deleting trigger object..."')
-        self.write(0, f"del trigger_obj")
-        self.write(0, "collect()")
-        self.restoreLevel(self.parent.base_level - 1)
-
-        # The Trap (logging)
-        self.write(0, f"if i_{prefix} % 100 == 0:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f'f"[{prefix}][Iter {{ i_{prefix} }} ] `isinstance({{target_obj!r}}, {class_name})` is now: {{is_instance_result}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Upgraded `isinstance` JIT Attack Scenario >>>"'
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished `isinstance` Attack Scenario >>>"',
+            return_str=True
         )
+
+        # --- Generate the complex setup code as a single block ---
+        # This block defines all the necessary classes and functions for the attack.
+        inheritance_depth = randint(100, 500)
+        trigger_iteration = self.options.jit_loop_iterations // 2
+
+        # The fuzzed call is now safely guarded inside the __instancecheck__ patch.
+        fuzzed_call_str = self._generate_guarded_call(f"{target['call_str']}()")
+        guarded_setup_code = ""
+        if target["setup_code"]:
+            guarded_setup_code = self.indent_block(self._generate_guarded_call(target['setup_code']), 16)
+
+        setup_str = dedent(f"""
+            # 1. Define the components for the attack.
+            from abc import ABCMeta
+            
+            # Define the metaclass that we will later modify.
+            class EditableMeta_{prefix}(ABCMeta):
+                instance_counter = 0
+            
+            # Create a deep inheritance tree of depth {inheritance_depth}.
+            class Base_{prefix}(metaclass=EditableMeta_{prefix}): pass
+            last_class_{prefix} = Base_{prefix}
+            for _ in range({inheritance_depth}):
+                class ClassStepDeeper(last_class_{prefix}): pass
+                last_class_{prefix} = ClassStepDeeper
+            
+            class EditableClass_{prefix}(last_class_{prefix}): pass
+            
+            # Define the __instancecheck__ method that we will inject later.
+            # It now safely calls the fuzzed target.
+            def new__instancecheck_{prefix}(self, other):
+                print("  [+] Patched __instancecheck__ called!", file=stderr)
+                {guarded_setup_code}
+                {self.indent_block(fuzzed_call_str, 16)}
+                return True
+            
+            # Define the Deletable class with the __del__ payload.
+            class Deletable_{prefix}:
+                def __del__(self):
+                    try:
+                        print("  [+] __del__ triggered! Patching __instancecheck__ onto metaclass.", file=stderr)
+                        EditableMeta_{prefix}.__instancecheck__ = new__instancecheck_{prefix}
+                    except Exception:
+                        pass
+            
+            # Arm the trigger and create objects for checking.
+            trigger_obj_{prefix} = Deletable_{prefix}()
+            objects_to_check_{prefix} = [1, 'a_string', 3.14, Base_{prefix}()]
+        """)
+
+        # --- Generate the hot loop using our helper ---
+        hot_loop_str = self._begin_hot_loop(prefix)
+
+        # 2. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
+
+{setup_str}
+
+# 2. Run the hot loop to bait, trigger, and trap the JIT.
+{hot_loop_str}
+    # The Bait: This check has a polymorphic target.
+    target_obj = objects_to_check_{prefix}[i_{prefix} % len(objects_to_check_{prefix})]
+    is_instance_result = isinstance(target_obj, EditableClass_{prefix})
+
+    # The Trigger: Halfway through, delete the object to fire __del__.
+    if i_{prefix} == {trigger_iteration}:
+        print("[{prefix}] Deleting trigger object...", file=stderr)
+        del trigger_obj_{prefix}
+        collect()
+
+    # The Trap: Log the result around the trigger point to observe the change.
+    if i_{prefix} > {trigger_iteration} - 5 and i_{prefix} < {trigger_iteration} + 5:
+        print(f"[{prefix}][Iter {{i_{prefix}}}] `isinstance(...)` is now: {{is_instance_result}}", file=stderr)
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_math_logic_body(self, prefix: str, const_a_str: str, const_b_str: str) -> None:
@@ -1558,66 +1475,70 @@ class WriteJITCode:
 
     def _generate_decref_escapes_scenario(self, prefix: str, target: dict) -> None:
         """
+        (Refactored)
         RE-DISCOVERY SCENARIO: A highly targeted attack designed specifically
         to reproduce the crash from GH-124483 (test_decref_escapes).
         """
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting `test_decref_escapes` Re-discovery Scenario <<<"'
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting `test_decref_escapes` Re-discovery Scenario <<<"', return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished `test_decref_escapes` Re-discovery Scenario >>>"', return_str=True
         )
 
         loop_var = f"i_{prefix}"
-        loop_iterations = 500  # Use a smaller, specific number of iterations
-        trigger_iteration = loop_iterations - 2  # The value to check for in __del__
+        loop_iterations = 500
+        trigger_iteration = loop_iterations - 2
 
-        # 1. Define a minimal FrameModifier with NO __init__
-        fm_class_name = f"FrameModifier_{prefix}"
-        self.write(0, f"class {fm_class_name}:")
-        self.addLevel(1)
-        self.write(0, "def __del__(self):")
-        self.addLevel(1)
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, "frame = sys._getframe(1)")
-        # 2. Hardcode the check inside __del__ as you discovered
-        self.write(0, f"if frame.f_locals.get('{loop_var}') == {trigger_iteration}:")
-        self.addLevel(1)
-        self.write_print_to_stderr(1, f'"  [Side Effect] Triggered! Modifying `{loop_var}` to None"')
-        self.write(1, f"frame.f_locals['{loop_var}'] = None")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception: pass")
-        self.restoreLevel(self.parent.base_level - 2)
-        self.emptyLine()
+        # --- Generate the FrameModifier class definition ---
+        # This is the minimal version with no __init__ that we discovered was necessary.
+        frame_modifier_def = dedent(f"""
+            class FrameModifier_{prefix}:
+                def __del__(self):
+                    try:
+                        frame = sys._getframe(1)
+                        # Hardcoded check for the trigger iteration
+                        if frame.f_locals.get('{loop_var}') == {trigger_iteration}:
+                            print("  [Side Effect] Triggered! Modifying `{loop_var}` to None", file=stderr)
+                            frame.f_locals['{loop_var}'] = None
+                    except Exception:
+                        pass
+        """)
 
-        # 3. Define the main function harness. All logic is INSIDE this function.
+        # --- Generate the harness function that contains the attack ---
         harness_func_name = f"harness_{prefix}"
-        self.write(0, f"def {harness_func_name}():")
-        self.addLevel(1)
+        harness_def_str = dedent(f"""
+            def {harness_func_name}():
+                # The hot loop
+                try:
+                    for {loop_var} in range({loop_iterations}):
+                        # Instantiate and destroy the FrameModifier on EACH iteration.
+                        FrameModifier_{prefix}()
+                        # Perform the operation that gets optimized.
+                        _ = {loop_var} + {loop_var}
+                except Exception:
+                    # Catch potential TypeErrors after the corruption.
+                    pass
+        """)
 
-        # 4. The hot loop
-        self.write(1, f"try:")
-        self.addLevel(1)
-        self.write(1, f"for {loop_var} in range({loop_iterations}):")
-        self.addLevel(1)
+        # 2. Assemble the final code block.
+        final_code = f"""
+{header_print}
 
-        # 5. Instantiate and destroy the FrameModifier on EACH iteration.
-        self.write(1, f"{fm_class_name}()")
+# 1. Define the minimal FrameModifier class.
+{frame_modifier_def}
 
-        # 6. Perform the operation that gets optimized.
-        self.write(1, f"{loop_var} + {loop_var}")
+# 2. Define the main function harness containing the attack logic.
+{harness_def_str}
 
-        self.restoreLevel(self.parent.base_level - 1)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except Exception: pass # Catch potential TypeErrors")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+# 3. Execute the test harness.
+{self._generate_guarded_call(f'{harness_func_name}()')}
 
-        # 7. Call the harness function.
-        self.write(0, f"# Execute the test harness.")
-        self.write(0, f"{harness_func_name}()")
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished `test_decref_escapes` Re-discovery Scenario >>>"'
-        )
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _generate_variational_scenario(self, prefix: str, pattern_names: str, target: dict) -> None:
@@ -2057,107 +1978,127 @@ class WriteJITCode:
             return None
         return None
 
-    def _begin_hot_loop(self, prefix: str, level: int = 0) -> None:
+    def _generate_guarded_call(self, call_str: str) -> str:
         """
-        Writes the standard boilerplate for a JIT-warming hot loop, including
-        optional aggressive GC and exception raising.
+        Takes a string representing a function call and wraps it in a
+        robust try...except Exception: pass block.
+        """
+        return dedent(f"""
+            try:
+                {self.indent_block(call_str, 16)}
+            except Exception:
+                pass
+        """)
+
+    def _begin_hot_loop(self, prefix: str) -> str:
+        """
+        Returns the standard boilerplate for a JIT-warming hot loop as a string.
         """
         loop_var = f"i_{prefix}"
         loop_iterations = self.options.jit_loop_iterations
 
+        lines = []
         if self.options.jit_raise_exceptions:
-            self.write(level, "try:")
-            self.addLevel(1)
+            lines.append("try:")
+            lines.append(f"    for {loop_var} in range({loop_iterations}):")
+            if self.options.jit_aggressive_gc:
+                lines.append(f"        if {loop_var} % {self.options.jit_gc_frequency} == 0:")
+                lines.append(f"            collect()")
+            if self.options.jit_raise_exceptions:
+                lines.append(f"        if random() < {self.options.jit_exception_prob}:")
+                lines.append(f"            raise ValueError('JIT fuzzing probe')")
+        else:
+            lines.append(f"for {loop_var} in range({loop_iterations}):")
+            if self.options.jit_aggressive_gc:
+                lines.append(f"    if {loop_var} % {self.options.jit_gc_frequency} == 0:")
+                lines.append(f"        collect()")
 
-        self.write(level, f"for {loop_var} in range({loop_iterations}):")
-        self.addLevel(1)
+        return "\n".join(lines)
 
-        if self.options.jit_aggressive_gc:
-            self.write(level, f"if {loop_var} % {self.options.jit_gc_frequency} == 0:")
-            self.addLevel(1)
-            self.write(level, "collect()")
-            self.restoreLevel(self.parent.base_level - 1)
-
-        if self.options.jit_raise_exceptions:
-            self.write(level, f"if random() < {self.options.jit_exception_prob}:")
-            self.addLevel(1)
-            self.write_print_to_stderr(level, f'"[{prefix}] Intentionally raising exception in hot loop!"')
-            self.write(level, "raise ValueError('JIT fuzzing probe')")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.restoreLevel(self.parent.base_level - 1)
-
-    def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict,
-                                               mutations: dict) -> None:
+    def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict, mutations: dict) -> None:
         """
-        (Corrected)
-        Generates a 'Twin Execution' correctness test, now ensuring that all
-        setup code, including instantiation, is guarded by a try...except block.
+        (Refactored)
+        Generates a 'Twin Execution' correctness test using the new block-based API.
+        This is the single, unified engine for all 'body-based' correctness patterns.
         """
-        self.write_print_to_stderr(0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} <<<"')
+        # 1. Generate the component code blocks as strings.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> JIT Correctness Scenario: {pattern_name} <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< JIT Correctness Scenario ({pattern_name}) Passed >>>"',
+            return_str=True
+        )
 
-        # --- THE FIX ---
-        # The main 'try' block now wraps EVERYTHING, including setup code.
-        self.write(0, "try:")
-        self.addLevel(1)
+        # Get setup code for the target callable (e.g., class instantiation).
+        target_setup_str, _ = self._write_target_setup(prefix, mutations)
 
-        # 1. Format and write the setup code for the pattern AND the target inside the try block.
-        fuzzed_func_setup = mutations.get('fuzzed_func_setup', '')
-        if fuzzed_func_setup:
-            self.write(0, fuzzed_func_setup)
+        # Get setup code from the pattern itself.
+        pattern_setup_str = dedent(pattern['setup_code']).format(**mutations)
 
-        setup_code = dedent(pattern['setup_code']).format(**mutations)
-        if setup_code:
-            for line in setup_code.splitlines():
-                self.write(0, line)
-
-        self.emptyLine()
-
-        # 2. Get the core logic from the pattern's body.
+        # Get the core logic from the pattern's body and mutate it.
         initial_body_code = dedent(pattern['body_code']).format(**mutations)
-
-        # 3. Use a single seed to create one mutated version of the logic.
-        mutation_seed = randint(0, 2 ** 32 - 1)
+        mutation_seed = randint(0, 2**32 - 1)
         mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
         if not mutated_code.strip():
             mutated_code = "pass"
 
-        # 4. Define the JIT and Control functions.
+        # --- Generate the JIT and Control function definitions as strings ---
         param_def = pattern.get('param_def', "")
         jit_func_name = f"jit_target_{prefix}"
         control_func_name = f"control_{prefix}"
 
-        self.write(0, f"def {jit_func_name}({param_def}):")
-        self.addLevel(1)
-        for line in mutated_code.splitlines(): self.write(1, line)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        jit_func_def = dedent(f"""\
+            def {jit_func_name}({param_def}):
+                {self.indent_block(mutated_code, 16)}
+            """)
 
-        self.write(0, f"def {control_func_name}({param_def}):")
-        self.addLevel(1)
-        for line in mutated_code.splitlines(): self.write(1, line)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        control_func_def = dedent(f"""\
+            def {control_func_name}({param_def}):
+                {self.indent_block(mutated_code, 16)}
+            """)
 
-        # 5. Generate the "Twin Execution" harness.
+        # --- Generate the harness logic as a string ---
         param_call = mutations.get('param_call', pattern.get('param_call', ""))
+        harness_str = dedent(f"""
+            # 1. Warm up the JIT target function so it gets compiled.
+            jit_harness({jit_func_name}, {self.options.jit_loop_iterations}, {param_call})
 
-        self.write(0, f"jit_harness({jit_func_name}, {self.options.jit_loop_iterations}, {param_call})")
-        self.write(0, f"jit_result = {jit_func_name}({param_call})")
-        self.write(0, f"control_result = no_jit_harness({control_func_name}, {param_call})")
-        self.emptyLine()
-        self.write(0, "if not compare_results(jit_result, control_result):")
-        self.addLevel(1)
-        self.write(0,
-                   '    raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}")')
+            # 2. Get the final result from both versions.
+            jit_result = {jit_func_name}({param_call})
+            control_result = no_jit_harness({control_func_name}, {param_call})
 
-        # Close the main try...except block
-        self.restoreLevel(self.parent.base_level - 2)
-        self.write(0, "except JITCorrectnessError: raise")
-        self.write(0, "except (Exception, SystemExit): pass")
+            # 3. The crucial assertion.
+            if not compare_results(jit_result, control_result):
+                raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}")
+        """)
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< JIT Correctness Scenario ({pattern_name}) Passed >>>"'
-        )
+        guarded_harness_str = self._generate_guarded_call(self.indent_block(harness_str, 8))
+
+        # 2. Assemble the final code block using a single, large f-string.
+        final_code = f"""
+{header_print}
+
+# Define a custom exception for our correctness check.
+class JITCorrectnessError(AssertionError): pass
+
+# Run all setup code.
+{target_setup_str}
+{pattern_setup_str}
+
+# Define the JIT and Control functions with identical (mutated) logic.
+{jit_func_def}  
+
+{control_func_def}
+
+# Execute the 'Twin Execution' harness.
+{guarded_harness_str}
+
+{footer_print}
+"""
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _discover_and_filter_classes(self) -> list:
@@ -2270,9 +2211,12 @@ class WriteJITCode:
 
     def _generate_class_fuzzing_scenario(self, prefix: str) -> None:
         """
-        Selects a class, instantiates it safely, and calls one of its methods
-        repeatedly in a JIT-warming hot loop with "smart" arguments.
+        (Refactored)
+        Selects a class, instantiates it, and calls one of its methods
+        repeatedly in a JIT-warming hot loop. This method now uses the
+        new block-based, string-returning generation API for improved clarity.
         """
+        # 1. Discover and select a target class.
         fuzzable_classes = self._discover_and_filter_classes()
         if not fuzzable_classes:
             self.write_print_to_stderr(0, '"[-] No suitable classes found for JIT fuzzing in this module."')
@@ -2280,28 +2224,8 @@ class WriteJITCode:
 
         target_class = choice(fuzzable_classes)
         class_name = target_class.__name__
-        self.write_print_to_stderr(0, f'"[{prefix}] >>> Starting JIT Class Fuzzing for: {class_name} <<<"')
 
-        # --- THE FIX ---
-        instance_var = f"instance_{prefix}"
-
-        # 1. Pre-initialize the instance variable to None. This prevents
-        #    UnboundLocalError if instantiation fails.
-        self.write(0, f"{instance_var} = None")
-
-        # 2. Wrap the instantiation call in a try...except block.
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"# Instantiate a target class from the module.")
-        self.write(0, f"{instance_var} = {self.module_name}.{class_name}()")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[-] NOTE: Failed to instantiate {class_name}: {{e.__class__.__name__}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
-
-        # Discover a suitable method on the class to call.
+        # 2. Discover a suitable method on the class to call.
         methods = self.parent._get_object_methods(target_class, class_name)
         if not methods:
             self.write_print_to_stderr(0, f'"[-] No suitable methods found on class {class_name}."')
@@ -2310,37 +2234,55 @@ class WriteJITCode:
         method_name = choice(list(methods.keys()))
         method_obj = methods[method_name]
 
-        # Generate "smart" arguments for the chosen method.
+        # 3. Generate the component code blocks as strings using our new helpers.
+
+        # Create a dummy target dict for the setup helper.
+        instance_var = f"instance_{prefix}"
+        setup_target = {
+            'instance_var': instance_var,
+            'name': class_name,
+            'setup_code': f"{instance_var} = {self.module_name}.{class_name}()"
+        }
+        setup_str, _ = self._write_target_setup(prefix, setup_target)
+
+        # Get arguments and the guarded method call.
         args_str = self._generate_args_for_method(method_obj)
-        self.write_print_to_stderr(0, f'"[{prefix}] Targeting method: {class_name}.{method_name}"')
+        call_str = self._generate_guarded_call(f"{instance_var}.{method_name}({args_str})")
 
-        # Generate the JIT-warming hot loop. The `if instance_var:` check
-        # now safely handles instantiation failures.
-        self.write(0, f"if {instance_var}:")
-        self.addLevel(1)
-        self._begin_hot_loop(prefix, level=1)
+        # Get the hot loop boilerplate.
+        hot_loop_str = self._begin_hot_loop(prefix)
 
-        self.write(1, "try:")
-        self.addLevel(1)
-        self.write(1, f"getattr({instance_var}, '{method_name}')({args_str})")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "except Exception: pass")
+        # Get the header and footer prints.
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Starting JIT Class Fuzzing for: {class_name} <<<"'
+        )
+        target_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] Targeting method: {class_name}.{method_name}"'
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"'
+        )
 
-        # Cleanly exit the levels opened by the helper.
-        self.restoreLevel(self.parent.base_level - 1)
-        if self.options.jit_raise_exceptions:
-            # Add the matching 'except' block for the 'try' in the helper
-            self.write(1, "except ValueError as e_val_err:")
-            self.addLevel(1)
-            self.write(1, "if e_val_err.args == ('JIT fuzzing probe',):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"[{prefix}] Intentionally raised ValueError in hot loop caught!"')
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(1, "else: raise")
-            self.restoreLevel(self.parent.base_level - 1)
+        # 4. Assemble the final code block using a multi-line f-string.
+        final_code = f"""
+{header_print}
 
-        self.restoreLevel(self.parent.base_level - 1)  # Closes the initial `if instance_var:`
-        self.write_print_to_stderr(0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"')
+# Safely instantiate the target class.
+{setup_str}
+
+# If instantiation was successful, proceed to fuzz the method.
+if {instance_var}:
+    {target_print}
+    
+    # Generate the JIT-warming hot loop.
+    {hot_loop_str}
+        # Call the method inside the loop.
+        {call_str}
+
+{footer_print}
+"""
+        # 5. Write the entire assembled block at once.
+        self.write_block(0, final_code)
         self.emptyLine()
 
     def _select_fuzzing_target(self, prefix: str) -> dict | None:
@@ -2378,27 +2320,25 @@ class WriteJITCode:
             }
         return None
 
-    def _write_target_setup(self, prefix: str, target: dict):
+    def _write_target_setup(self, prefix: str, target: dict) -> tuple[str, str | None]:
         """
-        Safely writes the setup code for a fuzzing target, wrapping any
-        instantiation in a try...except block.
+        Safely generates the setup code for a fuzzing target, returning it
+        as a string along with the instance variable name.
         """
         instance_var = target.get('instance_var')
         setup_code = target.get('setup_code')
 
         if not instance_var or not setup_code:
-            return  # Nothing to set up
+            return "", None
 
-        self.write(0, f"# Safely instantiate the target for this scenario.")
-        self.write(0, f"{instance_var} = None")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, setup_code)
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(0, "except Exception as e:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0,
-                                   f'"[-] NOTE: Instantiation failed for {target["name"]}: {{e.__class__.__name__}}"')
-        self.restoreLevel(self.parent.base_level - 1)
-        self.emptyLine()
+        # Generate the full, guarded instantiation block as a string.
+        code = dedent(f"""
+            # Safely instantiate the target for this scenario.
+            {instance_var} = None
+            try:
+                {setup_code}
+            except Exception as e:
+                print(f"[-] NOTE: Instantiation failed for {target['name']}: {{e.__class__.__name__}}", file=stderr)
+        """)
+        return code, instance_var
 
