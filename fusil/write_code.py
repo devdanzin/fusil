@@ -1,4 +1,5 @@
 from os import chmod
+from textwrap import dedent
 
 
 class WriteCode:
@@ -43,3 +44,11 @@ class WriteCode:
     def write(self, level, text):
         line = self.indentLine(level, text)
         self.output.write(line + "\n")
+
+    def write_block(self, level: int, code_block: str):
+        """
+        Writes a multi-line block of code at a specific indentation level.
+        Correctly handles indentation for the entire block.
+        """
+        for line in dedent(code_block).strip().splitlines():
+            self.write(level, line)
