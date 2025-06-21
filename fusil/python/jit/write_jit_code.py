@@ -1041,6 +1041,7 @@ collect()
         lambda_name = f"lambda_{prefix}"
         class_name = f"CallableClass_{prefix}"
         instance_name = f"poly_instance_{prefix}"
+        target_instance_name = f"target_instance_{prefix}"
         guarded_setup_code = ""
         if target['setup_code']:
             guarded_setup_code = self.indent_block(self._generate_guarded_call(target['setup_code']), 12)
@@ -1055,6 +1056,7 @@ collect()
             {instance_name} = {class_name}()
 
             # Set up the main fuzzed target as well.
+            {target_instance_name} = None
             {guarded_setup_code}
         """)
 
