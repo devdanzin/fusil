@@ -1394,37 +1394,6 @@ collect()
         self.write_block(0, final_code)
         self.emptyLine()
 
-    def _generate_math_logic_body(self, prefix: str, const_a_str: str, const_b_str: str) -> None:
-        """
-        Generates the body of a function containing a hot loop filled with
-        JIT-friendly math and logic patterns. It uses pre-generated constant values.
-        """
-        # 1. Initialize variables for the block to use, using the passed-in constants.
-        self.write(1, f"var_int_a = {const_a_str}")
-        self.write(1, f"var_int_b = {const_b_str}")
-        self.write(1, "total = 0")
-        self.emptyLine()
-
-        # 2. Create the hot loop.
-        loop_iterations = self.options.jit_loop_iterations // 10
-        loop_var = f"i_{prefix}"
-        self.write(1, f"for {loop_var} in range({loop_iterations}):")
-        self.addLevel(1)
-
-        # 3. Weave in the JIT-friendly patterns inside the loop.
-        self.write(1, f"if {loop_var} > var_int_b:")
-        self.addLevel(1)
-        self.write(1, f"temp_val = (var_int_a + {loop_var}) % 1000")
-        self.write(1, f"total += temp_val")
-        self.restoreLevel(self.parent.base_level - 1)
-        self.write(1, "else:")
-        self.addLevel(1)
-        self.write(1, "total -= 1")
-        self.restoreLevel(self.parent.base_level - 1)
-
-        self.restoreLevel(self.parent.base_level - 1)  # Exit for loop
-        self.write(1, "return total")
-
     def _generate_jit_pattern_block_with_check(self, prefix: str, target: dict) -> None:
         """Delegates to the unified engine with the 'jit_friendly_math' pattern."""
         return self._generate_paired_ast_mutation_scenario(prefix, 'jit_friendly_math',
