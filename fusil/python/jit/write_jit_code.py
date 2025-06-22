@@ -87,7 +87,7 @@ class WriteJITCode:
         (a module-level function or a class method) using the
         _select_fuzzing_target() helper. It then dispatches to the
         appropriate generation engine based on the user's --jit-mode and
-        other command-line flags.
+        other command-line flags. It then writes the result to the output buffer.
         """
         # 1. Select a target to be fuzzed. This can be a function or a method.
         target = self._select_fuzzing_target(prefix)
@@ -1751,8 +1751,7 @@ collect()
             if self.options.jit_fuzz_ast_mutation:
                 body_code = self.ast_mutator.mutate(body_code)
 
-            env_code = self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations,
-                                                               return_str=True)
+            env_code = self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations)
             final_code_blocks.append(env_code)
 
         final_code_blocks.append(footer_print)
@@ -2010,11 +2009,7 @@ collect()
         if param_setup:
             final_code = f"{param_setup}\n{final_code}\n"
 
-        if return_str:
-            return final_code
-
-        self.write_block(0, final_code)
-        return ""
+        return final_code
 
     def write_pattern(self, setup_code: str, body_code: str, level: int = 0, return_str: bool = False) -> str:
         """
@@ -2176,23 +2171,7 @@ collect()
         loop_var = f"i_{prefix}"
         loop_iterations = self.options.jit_loop_iterations
 
-        lines = []
-        if self.options.jit_raise_exceptions:
-            lines.append("try:")
-            lines.append(f"    for {loop_var} in range({loop_iterations}):")
-            if self.options.jit_aggressive_gc:
-                lines.append(f"        if {loop_var} % {self.options.jit_gc_frequency} == 0:")
-                lines.append(f"            collect()")
-            if self.options.jit_raise_exceptions:
-                lines.append(f"        if random() < {self.options.jit_exception_prob}:")
-                lines.append(f"            raise ValueError('JIT fuzzing probe')")
-        else:
-            lines.append(f"for {loop_var} in range({loop_iterations}):")
-            if self.options.jit_aggressive_gc:
-                lines.append(f"    if {loop_var} % {self.options.jit_gc_frequency} == 0:")
-                lines.append(f"        collect()")
-
-        return "\n".join(lines)
+        return f"for {loop_var} in range({loop_iterations}):\n"
 
     def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict, mutations: dict) -> str:
         """
@@ -2232,12 +2211,12 @@ collect()
         jit_func_name = f"jit_target_{prefix}"
         control_func_name = f"control_{prefix}"
 
-        jit_func_def = CT(dedent(f"""\
+        jit_func_def = CT(dedent("""\
             def {jit_func_name}({param_def}):
                 {mutated_code}
             """)).render(**locals())
 
-        control_func_def = CT(dedent(f"""\
+        control_func_def = CT(dedent("""\
             def {control_func_name}({param_def}):
                 {mutated_code}
             """)).render(**locals())

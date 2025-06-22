@@ -266,30 +266,6 @@ class Fuzzer(Application):
             default=500,
             help="Number of iterations for JIT-warming hot loops.",
         )
-        jit_options.add_option(
-            "--jit-aggressive-gc",
-            action="store_true",
-            default=False,
-            help="Inject gc.collect() calls inside hot loops to stress memory management.",
-        )
-        jit_options.add_option(
-            "--jit-gc-frequency",
-            type="int",
-            default=100,
-            help="Frequency of gc.collect() calls when aggressive GC is enabled (e.g., 100 means every 100 iterations)."
-        )
-        jit_options.add_option(
-            "--jit-raise-exceptions",
-            action="store_true",
-            default=False,
-            help="Inject random exceptions inside hot loops to stress the JIT's error handling paths.",
-        )
-        jit_options.add_option(
-            "--jit-exception-prob",
-            type="float",
-            default=0.001,
-            help="Probability (0.0-1.0) of raising an exception on any given loop iteration."
-        )
 
         # --- Special-purpose legacy flag ---
         jit_options.add_option(
