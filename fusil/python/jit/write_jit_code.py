@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-from textwrap import dedent, indent
+from textwrap import dedent
 from typing import Any
 from random import choice, randint, random
 from typing import TYPE_CHECKING
@@ -33,6 +33,7 @@ import fusil.python.values
 from fusil.python.jit.ast_mutator import ASTMutator
 from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
+from fusil.write_code import CodeTemplate as CT
 
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
@@ -75,9 +76,6 @@ class WriteJITCode:
         self.write = parent.write
         self.write_block = parent.write_block
         self.indent_block = parent.indent_block
-        self.addLevel = parent.addLevel
-        self.restoreLevel = parent.restoreLevel
-        self.emptyLine = parent.emptyLine
         self.write_print_to_stderr = parent.write_print_to_stderr
 
         self.jit_warmed_targets = []
@@ -270,17 +268,17 @@ class WriteJITCode:
         call_str = self._generate_guarded_call(f"{instance_var_name}.{chosen_method_name}({args_str})")
 
         # 3. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 # Check that the instance was created successfully before starting the hot loop.
 if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:
     {hot_loop_str}
         # In the hot loop, repeatedly call a single method to warm it up for the JIT.
-        {self.indent_block(call_str, 8)}
-"""
+        {call_str}
+
+""")
         # 4. Write the assembled block.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_jit_pattern_block(self, prefix: str, target: dict) -> None:
         """
@@ -349,10 +347,10 @@ if {instance_var if instance_var else 'True'}:
         {calls_in_loop_str}
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _generate_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -394,7 +392,10 @@ if {instance_var if instance_var else 'True'}:
         )
 
         # 3. Assemble the final code block using a multi-line f-string.
-        final_code = f"""
+        phase_1_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"', return_str=True)
+        phase_2_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating method on class."', return_str=True)
+        phase_3_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."', return_str=True)
+        final_code = CT("""
 {header_print}
 
 # Safely instantiate the target object for the invalidation test.
@@ -403,24 +404,24 @@ if {instance_var if instance_var else 'True'}:
 # Only proceed if the object was successfully created.
 if {instance_var}:
     # Phase 1: Warm-up the method to get it JIT-compiled.
-    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 1: Warming up {class_name}.{method_name}"')}
+    {phase_1_print}
     {warmup_loop_str}
-        {self.indent_block(warmup_call_str, 8)}
+        {warmup_call_str}
 
     # Phase 2: Invalidate the dependency by replacing the method on the class.
-    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 2: Invalidating method on class."')}
+    {phase_2_print}
     {invalidation_str}
     collect()
 
     # Phase 3: Re-execute the method to check for a crash.
-    {self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."')}
+    {phase_3_print}
     {reexecute_call_str}
 
 {footer_print}
-"""
+
+""")
         # 4. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_deleter_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -458,14 +459,15 @@ if {instance_var}:
             fm_dummy_instance_attr = FrameModifier('dummy_instance_{prefix}.b', 'instance-attr-string')
         """)
 
+        hot_loop_header_str = self._begin_hot_loop(prefix)
         # --- Generate hot loop body strings ---
-        warmup_str = self._generate_guarded_call(self.indent_block(dedent(f"""
+        warmup_str = self._generate_guarded_call(dedent(f"""
             _ = target_{prefix} + i_{prefix}
             _ = dummy_instance_{prefix}.a + i_{prefix}
             _ = dummy_instance_{prefix}.b + i_{prefix}
-        """), 8))
+        """))
 
-        del_trigger_str = self.indent_block(dedent(f"""
+        del_trigger_str = dedent(f"""
             if i_{prefix} == {trigger_iteration}:
                 print("[{prefix}] DELETING FRAME MODIFIERS...", file=stderr)
                 del fm_target_{prefix}
@@ -473,24 +475,24 @@ if {instance_var}:
                 del fm_dummy_instance_attr
                 del fm_target_i_{prefix}
                 collect()
-        """), 8)
+        """)
 
-        reexecute_str = self._generate_guarded_call(self.indent_block(dedent(f"""
+        reexecute_str = self._generate_guarded_call(dedent(f"""
             _ = i_{prefix} + i_{prefix}
             _ = target_{prefix} + target_{prefix}
             _ = dummy_instance_{prefix}.a + i_{prefix}
             _ = dummy_instance_{prefix}.b + i_{prefix}
-        """), 8))
+        """))
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 {setup_str}
 
-{self._begin_hot_loop(prefix)}
+{hot_loop_header_str}
     # Use all variables to warm up the JIT with their initial types
-    {self.indent_block(warmup_str, 8)}
+    {warmup_str}
 
     # On the penultimate loop, delete the FrameModifiers to trigger __del__
     {del_trigger_str}
@@ -499,10 +501,10 @@ if {instance_var}:
     {reexecute_str}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the assembled block.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -544,6 +546,7 @@ if {instance_var}:
         top_level_func = f"f_{depth - 1}_{prefix}"
 
         # --- Generate the hot loop using our helper ---
+        hot_loop_str = self._begin_hot_loop(prefix)
         # The body of the loop will be a guarded call to the top of the chain.
         # We specifically catch RecursionError here, as it's an expected outcome.
         hot_loop_call_str = dedent(f"""
@@ -555,55 +558,41 @@ if {instance_var}:
         """)
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 {func_chain_str}
 
 # Execute the top-level function of the chain in a hot loop.
-{self._begin_hot_loop(prefix)}
-{hot_loop_call_str.replace(chr(10), chr(10)+'    ')}
+{hot_loop_str}
+    {hot_loop_call_str}
 
 {footer_print}
-"""
-        # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
 
-    def _define_frame_modifier_instances(self, prefix: str, targets_and_payloads: dict) -> list[str]:
+""")
+        # 3. Write the entire assembled block at once.
+        self.write_block(0, final_code.render(**locals()))
+
+    def _define_frame_modifier_instances(self, prefix: str, targets_and_payloads: dict) -> tuple[str, list[str]]:
         """
+        (Refactored)
         Generates the 'fm_... = FrameModifier(...)' lines for a set of targets.
 
-        Args:
-            prefix: The unique prefix for this scenario.
-            targets_and_payloads: A dictionary mapping target variable paths
-                                  (e.g., 'var_250') to their malicious payload.
-
-        Returns:
-            A list of the variable names created for the FrameModifier instances.
+        This method now returns the generated code as a string, along with
+        a list of the variable names created for the FrameModifier instances.
         """
         fm_vars = []
-        self.write(0, "# Define FrameModifier instances to arm the __del__ side effects.")
+        code_lines = ["# Define FrameModifier instances to arm the __del__ side effects."]
+
         for i, (target_path, payload) in enumerate(targets_and_payloads.items()):
             fm_var_name = f"fm_{prefix}_{i}"
-            self.write(0, f"{fm_var_name} = FrameModifier('{target_path}', {payload})")
+            code_lines.append(f"{fm_var_name} = FrameModifier('{target_path}', {payload})")
             fm_vars.append(fm_var_name)
-        self.emptyLine()
-        return fm_vars
 
-    def _generate_del_trigger(self, loop_var: str, loop_iterations: int, fm_vars_to_del: list[str]) -> None:
-        """
-        Generates the 'if ...: del ...' block to trigger the __del__ methods
-        on the penultimate iteration of a loop.
-        """
-        self.write(0, f"# Trigger the __del__ side effect on the penultimate iteration.")
-        self.write(0, f"if {loop_var} == {loop_iterations - 2}:")
-        self.addLevel(1)
-        self.write_print_to_stderr(0, f'"[+] Deleting FrameModifiers to trigger side effects..."')
-        for fm_var in fm_vars_to_del:
-            self.write(0, f"del {fm_var}")
-        self.write(0, "collect()")
-        self.restoreLevel(self.parent.base_level - 1)
+        # Join the generated lines into a single string block.
+        code_block = "\n".join(code_lines)
+
+        return code_block, fm_vars
 
     def _generate_mixed_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -627,7 +616,7 @@ if {instance_var}:
         loop_iterations = self.options.jit_loop_iterations
 
         # --- Generate setup code strings ---
-        var_defs = "\n".join([f"    var_{i} = {i}" for i in range(num_vars)])
+        var_defs = "\n".join([f"var_{i} = {i}" for i in range(num_vars)])
 
         # The __del__ attack now targets a high-index variable.
         target_variable_path = f'var_{num_vars - 1}'
@@ -636,45 +625,48 @@ if {instance_var}:
             f"{fm_var_name} = FrameModifier('{target_variable_path}', 'corrupted-by-del')"
         )
 
+        hot_loop_header_str = self._begin_hot_loop(prefix)
         # --- Generate hot loop body strings ---
-        hot_loop_body_warmup = self._generate_guarded_call(self.indent_block(
-            f"res = var_0 + {loop_var}\nres += var_{num_vars - 1}", 0
-        ))
+        hot_loop_body_warmup = self._generate_guarded_call(
+            f"res = var_0 + {loop_var}\nres += var_{num_vars - 1}"
+        )
 
-        del_trigger_str = self.indent_block(dedent(f"""
+        del_trigger_str = dedent(f"""
             if {loop_var} == {loop_iterations - 2}:
                 print("[{prefix}] DELETING FRAME MODIFIER...", file=stderr)
                 del {fm_var_name}
                 collect()
-        """), 4)
+        """)
+
+        composed_hostile_call = self._generate_guarded_call(f'{func_name}()')
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 def {func_name}():
     # Define {num_vars} local variables.
-{var_defs}
+    {var_defs}
 
     # Arm the __del__ side effect.
-    {self.indent_block(fm_setup_str, 4)}
+    {fm_setup_str}
     
     # Run the hot loop.
-    {self._begin_hot_loop(prefix)}
+    {hot_loop_header_str}
         # Use variables in JIT-friendly patterns.
-        {self.indent_block(hot_loop_body_warmup, 8)}
+        {hot_loop_body_warmup}
         
         # Plant the time bomb to trigger the __del__ side effect.
-        {self.indent_block(del_trigger_str, 8)}
+        {del_trigger_str}
 
 # Execute the composed hostile function.
-{self._generate_guarded_call(f'{func_name}()')}
+{composed_hostile_call}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_del_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -709,20 +701,21 @@ def {func_name}():
         target_path = f'{self.module_name}.{class_name}.{method_name}'
         fm_var_name = f"fm_{prefix}"
         # Create the FrameModifier instance and immediately delete it to trigger __del__.
-        invalidation_str = dedent(f"""
+        fm_guarded_call_str = self._generate_guarded_call(f"{fm_var_name} = FrameModifier('{target_path}', lambda *a, **kw: 'invalidated')")
+        invalidation_str = CT("""
             # Define the FrameModifier and immediately delete it to trigger the side effect.
-{self.indent_block(self._generate_guarded_call(f"{fm_var_name} = FrameModifier('{target_path}', lambda *a, **kw: 'invalidated')"), 8)}
+            {fm_guarded_call_str}
             if '{fm_var_name}' in locals():
                 del {fm_var_name}
             collect()
-        """)
+        """).render(**locals())
 
         # --- Phase 3: Re-execute ---
         phase3_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] PHASE 3: Re-executing to check for crash."', return_str=True)
         reexecute_call_str = self._generate_guarded_call(f"{target['call_str']}()")
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 # Safely instantiate the target object.
@@ -733,7 +726,7 @@ if {instance_var}:
     # Phase 1: Warm-up the method.
     {phase1_print}
     {warmup_loop_str}
-    {self.indent_block(warmup_call_str, 8)}
+        {warmup_call_str}
 
     # Phase 2: Invalidate the method using a __del__ side effect.
     {phase2_print}
@@ -744,10 +737,10 @@ if {instance_var}:
     {reexecute_call_str}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_mixed_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -773,14 +766,16 @@ if {instance_var}:
         func_chain_lines = [f"# Define a deep chain of {depth} functions, each with internal JIT-friendly patterns."]
 
         # Define the base case (deepest function), which calls the fuzzed target.
-        base_case_body = dedent(f"""
+        base_case_call = self._generate_guarded_call(f"{target['call_str']}(x)")
+        target_name = target['name']
+        base_case_body = CT(dedent("""
             x = len('base_case') + p
             y = x % 5
-            print(f"[{prefix}] Calling fuzzed target '{target['name']}' from deep inside the call chain", file=stderr)
-            {self.indent_block(self._generate_guarded_call(f"{target['call_str']}(x)"), 12)}
+            print(f"[{prefix}] Calling fuzzed target '{target_name}' from deep inside the call chain", file=stderr)
+            {base_case_call}
             return x - y
-        """)
-        func_chain_lines.append(f"def f_0_{prefix}(p):\n    {self.indent_block(base_case_body, 4)}")
+        """)).render(**locals())
+        func_chain_lines.append(CT("def f_0_{prefix}(p):\n    {base_case_body}").render(**locals()))
 
         # Define the intermediate functions in the chain.
         for i in range(1, depth):
@@ -791,12 +786,13 @@ if {instance_var}:
                     local_val += f_{i - 1}_{prefix}(p)
                 return local_val
             """)
-            func_chain_lines.append(f"def f_{i}_{prefix}(p):\n    {self.indent_block(intermediate_body, 4)}")
+            func_chain_lines.append(CT("def f_{i}_{prefix}(p):\n    {intermediate_body}").render(**locals()))
 
         func_chain_str = "\n\n".join(func_chain_lines)
         top_level_func = f"f_{depth - 1}_{prefix}"
 
         # --- Generate the hot loop using our helper ---
+        hot_loop_header_str = self._begin_hot_loop(prefix)
         hot_loop_call_str = dedent(f"""
             try:
                 {top_level_func}(i_{prefix})
@@ -806,7 +802,7 @@ if {instance_var}:
         """)
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 # Setup the target for the scenario (if it's a method).
@@ -816,14 +812,14 @@ if {instance_var}:
 {func_chain_str}
 
 # Execute the top-level function of the complex chain in a hot loop.
-{self._begin_hot_loop(prefix)}
-    {self.indent_block(hot_loop_call_str, 4)}
+{hot_loop_header_str}
+    {hot_loop_call_str}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_deep_call_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -871,30 +867,38 @@ if {instance_var}:
         # --- Generate the re-execution logic ---
         reexecute_str = self._generate_guarded_call(f"{top_level_func}(1)")
 
+        phase_1_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."',
+                                                          return_str=True)
+        phase_2_print = self.parent.write_print_to_stderr(0,
+                                                          f'"[{prefix}] Phase 2: Invalidating {invalidation_func_name}..."',
+                                                          return_str=True)
+        phase_3_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the chain..."',
+                                                           return_str=True)
+
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 {func_chain_str}
 
 # Phase 1: Warm up the deep call chain to get it JIT-compiled.
-{self.parent.write_print_to_stderr(0, f'"[{prefix}] Warming up the deep call chain..."', return_str=True)}
+{phase_1_print}
 {warmup_loop_str}
-    {self.indent_block(warmup_call_str, 4)}
+    {warmup_call_str}
 
 # Phase 2: Invalidate a function in the middle of the chain.
-{self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 2: Invalidating {invalidation_func_name}..."', return_str=True)}
+{phase_2_print}
 {invalidation_str}
 
 # Phase 3: Re-executing the chain to check for crashes. A TypeError is expected.
-{self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 3: Re-executing the chain..."', return_str=True)}
+{phase_3_print}
 {reexecute_str}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_indirect_call_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -943,10 +947,10 @@ if {instance_var}:
 {execution_str}
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -972,10 +976,11 @@ if {instance_var}:
         # Phase 1: Wrapper definition and Warmup
         phase1_print = self.parent.write_print_to_stderr(0, f'"[{prefix}] Phase 1: Warming up wrapper function."', return_str=True)
         # The wrapper simply calls our target fuzzed function.
-        wrapper_def_str = dedent(f"""
+        wrapper_call = self._generate_guarded_call(f"{target['call_str']}()")
+        wrapper_def_str = CT(dedent("""
             def {wrapper_func_name}():
-                {self.indent_block(self._generate_guarded_call(f"{target['call_str']}()"), 16)}
-        """)
+                {wrapper_call}
+        """)).render(**locals())
         warmup_loop_str = self._begin_hot_loop(f"{prefix}_warmup")
         warmup_call_str = f"{wrapper_func_name}()"
 
@@ -995,7 +1000,7 @@ if {instance_var}:
         )
 
         # 2. Assemble the final code block using a multi-line f-string.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 # Phase 1: Define a wrapper and JIT-compile it.
@@ -1015,10 +1020,10 @@ collect()
 {reexecute_call_str}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_polymorphic_call_block_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -1044,9 +1049,9 @@ collect()
         target_instance_name = f"target_instance_{prefix}"
         guarded_setup_code = ""
         if target['setup_code']:
-            guarded_setup_code = self.indent_block(self._generate_guarded_call(target['setup_code']), 12)
+            guarded_setup_code = self._generate_guarded_call(target['setup_code'])
 
-        setup_str = dedent(f"""
+        setup_str = CT(dedent("""
             # Define a set of diverse callables for the test.
             {lambda_name} = lambda x: x + 1
 
@@ -1058,7 +1063,7 @@ collect()
             # Set up the main fuzzed target as well.
             {target_instance_name} = None
             {guarded_setup_code}
-        """)
+        """)).render(**locals())
 
         # --- Generate the list of calls for the loop body ---
         # The list includes the fuzzed target, the lambda, and the new method.
@@ -1078,25 +1083,26 @@ collect()
         for call in calls_to_make:
             hot_loop_body_calls.append(self._generate_guarded_call(call))
 
+        hot_loop_header = self._begin_hot_loop(prefix)
         hot_loop_body = "\n".join(hot_loop_body_calls)
 
         # 2. Assemble the final code block.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 {setup_str}
 
 # Call each of the different callables inside a hot loop.
-{self._begin_hot_loop(prefix)}
+{hot_loop_header}
     # The JIT must handle calls to the main fuzzed target, a lambda,
     # and a newly defined instance method in quick succession.
-    {self.indent_block(hot_loop_body, 4)}
+    {hot_loop_body}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the assembled block.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_type_version_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -1131,6 +1137,7 @@ collect()
             shapes_{prefix} = [ShapeA_{prefix}(), ShapeB_{prefix}(), ShapeC_{prefix}(), ShapeD_{prefix}()]
         """)
 
+        hot_loop_header_str = self._begin_hot_loop(prefix)
         # --- Generate the hot loop body ---
         # This logic will be placed inside the loop generated by our helper.
         hot_loop_body = dedent(f"""
@@ -1147,20 +1154,20 @@ collect()
         """)
 
         # 2. Assemble the final code block using a multi-line f-string.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 {setup_str}
 
 # In a hot loop, polymorphically access the 'payload' attribute.
-{self._begin_hot_loop(prefix)}
-{hot_loop_body.replace(chr(10), chr(10)+'    ')}
+{hot_loop_header_str}
+    {hot_loop_body}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_concurrency_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -1237,10 +1244,10 @@ collect()
 {execution_str}
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _generate_side_exit_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -1260,6 +1267,7 @@ collect()
             return_str=True
         )
 
+        hot_loop_header_str = self._begin_hot_loop(prefix)
         # Generate the main hot loop body as a single, readable block.
         # This contains the core logic of the scenario.
         hot_loop_body = dedent(f"""
@@ -1280,21 +1288,21 @@ collect()
         """)
 
         # 2. Assemble the final code block using a multi-line f-string.
-        final_code = f"""
+        final_code = CT("""
 {header_print}
 
 # Initialize a variable with a known, stable type.
 {target_var} = 0
 
 # Start the hot loop that will be JIT-compiled.
-{self._begin_hot_loop(prefix)}
-{hot_loop_body.replace(chr(10), chr(10) + '    ')}
+{hot_loop_header_str}
+    {hot_loop_body}
 
 {footer_print}
-"""
+
+""")
         # 3. Write the entire assembled block at once.
-        self.write_block(0, final_code)
-        self.emptyLine()
+        self.write_block(0, final_code.render(**locals()))
 
     def _generate_isinstance_attack_scenario(self, prefix: str, target: dict) -> None:
         """
@@ -1324,9 +1332,9 @@ collect()
         fuzzed_call_str = self._generate_guarded_call(f"{target['call_str']}()")
         guarded_setup_code = ""
         if target["setup_code"]:
-            guarded_setup_code = self.indent_block(self._generate_guarded_call(target['setup_code']), 16)
+            guarded_setup_code = self._generate_guarded_call(target['setup_code'])
 
-        setup_str = dedent(f"""
+        setup_str = CT(dedent("""
             # 1. Define the components for the attack.
             from abc import ABCMeta
             
@@ -1348,7 +1356,7 @@ collect()
             def new__instancecheck_{prefix}(self, other):
                 print("  [+] Patched __instancecheck__ called!", file=stderr)
                 {guarded_setup_code}
-                {self.indent_block(fuzzed_call_str, 16)}
+                {fuzzed_call_str}
                 return True
             
             # Define the Deletable class with the __del__ payload.
@@ -1363,7 +1371,7 @@ collect()
             # Arm the trigger and create objects for checking.
             trigger_obj_{prefix} = Deletable_{prefix}()
             objects_to_check_{prefix} = [1, 'a_string', 3.14, Base_{prefix}()]
-        """)
+        """)).render(**locals())
 
         # --- Generate the hot loop using our helper ---
         hot_loop_str = self._begin_hot_loop(prefix)
@@ -1391,10 +1399,10 @@ collect()
         print(f"[{prefix}][Iter {{i_{prefix}}}] `isinstance(...)` is now: {{is_instance_result}}", file=stderr)
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _generate_jit_pattern_block_with_check(self, prefix: str, target: dict) -> None:
         """Delegates to the unified engine with the 'jit_friendly_math' pattern."""
@@ -1507,15 +1515,16 @@ collect()
 {self._generate_guarded_call(f'{harness_func_name}()')}
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _generate_variational_scenario(self, prefix: str, pattern_names: str, target: dict) -> None:
         """
-        Acts as a master dispatcher. It now ensures that parameter mutations are
-        always generated before being passed to specialized helpers.
+        (Final Refactored Version)
+        Acts as the master dispatcher for the variational engine. This final
+        version now fully uses the block-based generation API for all strategies.
         """
         # --- 1. Pattern Selection ---
         if pattern_names == "ALL":
@@ -1530,68 +1539,148 @@ collect()
             return
 
         tags = pattern.get('tags', {'standard'})
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Fuzzing Pattern: {pattern_name} (Tags: {", ".join(tags)}) <<<<"'
+        has_payload_placeholder = '{corruption_payload}' in pattern['setup_code'] or \
+                                  '{corruption_payload}' in pattern['body_code']
+
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] >>> Fuzzing Pattern: {pattern_name} (Tags: {", ".join(tags)}) <<<"',
+            return_str=True
+        )
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"',
+            return_str=True
         )
 
-        # --- 2. ALWAYS Generate Base and Parameter Mutations First ---
-        # This ensures 'def_str', 'call_str', etc. are always present.
-        params = self._generate_mutated_parameters(prefix, target)
-        mutations = self._get_mutated_values_for_pattern(prefix, params['param_names'])
-        mutations.update(params)
+        final_code_blocks = [header_print]
 
-        if 'needs-many-vars-setup' in tags:
-            mutations = self._get_mutations_for_many_vars(prefix, mutations)
-        elif 'needs-evil-deep-calls-setup' in tags:
-            mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=True)
-        elif 'needs-deep-calls-setup' in tags:
-            mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=False)
-        elif 'needs-evil-math-setup' in tags:
-            mutations = self._get_mutations_for_evil_math(prefix, mutations)
+        # --- 2. Dispatch to Generation Strategy ---
 
-        mutations['fuzzed_func_name'] = target['name']
-        mutations['fuzzed_func_call'] = target['call_str']
-        mutations['fuzzed_func_setup'] = target['setup_code']
+        # --- STRATEGY: Systematic Value Iteration ---
+        if self.options.jit_fuzz_systematic_values and has_payload_placeholder:
+            iter_header = self.parent.write_print_to_stderr(0,
+                                                            f'"[{prefix}] Core Strategy: Systematic Value Iteration"',
+                                                            return_str=True)
+            final_code_blocks.append(iter_header)
 
-        # --- 4. Code Generation (Dispatch based on tags) ---
-        if 'correctness' in tags:
-            self._generate_paired_ast_mutation_scenario(prefix, pattern_name, pattern, mutations)
+            for i, payload in enumerate(fusil.python.values.INTERESTING):
+                iter_prefix = f"{prefix}_{i}"
+                mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
+                mutations['corruption_payload'] = payload
+
+                setup_code = dedent(pattern['setup_code']).format(**mutations)
+                body_code = dedent(pattern['body_code']).format(**mutations)
+
+                iter_print = self.parent.write_print_to_stderr(0,
+                                                               f'"""--- Iteration {i}: Corrupting with payload = {payload} ---"""',
+                                                               return_str=True)
+                pattern_block = self.write_pattern(setup_code, body_code, return_str=True)
+                final_code_blocks.extend([iter_print, pattern_block])
+
+        # --- STRATEGY: Type-Aware Iteration ---
+        elif self.options.jit_fuzz_type_aware and has_payload_placeholder:
+            iter_header = self.parent.write_print_to_stderr(0, f'"[{prefix}] Core Strategy: Type-Aware Iteration"',
+                                                            return_str=True)
+            final_code_blocks.append(iter_header)
+
+            original_type = pattern.get('payload_variable_type')
+            if not original_type:
+                error_print = self.parent.write_print_to_stderr(0,
+                                                                f'"[!] Pattern {pattern_name} is missing "payload_variable_type" metadata."',
+                                                                return_str=True)
+                final_code_blocks.append(error_print)
+            else:
+                type_generators = {
+                    'str': self.arg_generator.genString,
+                    'bytes': self.arg_generator.genBytes,
+                    'float': self.arg_generator.genFloat,
+                    'list': self.arg_generator.genList,
+                    'NoneType': lambda: ['None'],
+                    'tricky': self.arg_generator.genTrickyObjects,
+                }
+                if original_type in type_generators: del type_generators[original_type]
+
+                for type_name, generator_func in type_generators.items():
+                    iter_prefix = f"{prefix}_{type_name}"
+                    payload_str = " ".join(generator_func())
+                    mutations = self._get_mutated_values_for_pattern(iter_prefix, [])
+                    mutations['corruption_payload'] = payload_str
+
+                    setup_code = dedent(pattern['setup_code']).format(**mutations)
+                    body_code = dedent(pattern['body_code']).format(**mutations)
+
+                    iter_print = self.parent.write_print_to_stderr(0,
+                                                                   f'"""--- Corrupting with type {type_name}: Payload = {payload_str} ---"""',
+                                                                   return_str=True)
+                    pattern_block = self.write_pattern(setup_code, body_code, return_str=True)
+                    final_code_blocks.extend([iter_print, pattern_block])
+
+        # --- STRATEGY: Default Single-Shot (AST or Random) ---
         else:
-            setup_code = dedent(pattern['setup_code']).format(**mutations)
-            body_code = dedent(pattern['body_code']).format(**mutations)
+            # --- 2. ALWAYS Generate Base and Parameter Mutations First ---
+            params = self._generate_mutated_parameters(prefix, target)
+            mutations = self._get_mutated_values_for_pattern(prefix, params['param_names'])
+            mutations.update(params)
+
+            # --- 3. Dispatch to Specialized Helpers to ADD or OVERWRITE mutations ---
+            if 'needs-many-vars-setup' in tags:
+                # The helper now receives the base 'mutations' dict to modify.
+                mutations = self._get_mutations_for_many_vars(prefix, mutations)
+            elif 'needs-evil-deep-calls-setup' in tags:
+                mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=True)
+            elif 'needs-deep-calls-setup' in tags:
+                mutations = self._get_mutations_for_deep_calls(prefix, mutations, target, is_evil=False)
+            elif 'needs-evil-math-setup' in tags:
+                mutations = self._get_mutations_for_evil_math(prefix, mutations)
+            else:  # Default path
+                params = self._generate_mutated_parameters(prefix, target)
+                mutations = self._get_mutated_values_for_pattern(prefix, params['param_names'])
+                mutations.update(params)
+
+            mutations['fuzzed_func_name'] = target['name']
+            mutations['fuzzed_func_setup'] = target['setup_code']
+            mutations['fuzzed_func_call'] = target['call_str']
+
+            setup_code = pattern['setup_code'].format(**mutations)
+            body_code = pattern['body_code'].format(**mutations)
 
             if self.options.jit_fuzz_ast_mutation:
-                self.write_print_to_stderr(0, f'"[{prefix}] Applying AST structural mutations."')
                 body_code = self.ast_mutator.mutate(body_code)
 
-            self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations)
+            env_code = self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations,
+                                                               return_str=True)
+            final_code_blocks.append(env_code)
 
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished Fuzzing Pattern: {pattern_name} >>>"'
-        )
-        self.emptyLine()
+        final_code_blocks.append(footer_print)
+
+        # 3. Write the entire assembled code at once.
+        self.write_block(0, "\n\n".join(final_code_blocks))
 
     def _get_mutations_for_many_vars(self, prefix: str, mutations: dict) -> dict:
         """
-        Generates mutations specifically for patterns tagged with 'many-vars'.
-        This includes the variable definitions and a complex expression using them.
+        (Updated)
+        Receives the base mutation dictionary and adds keys specific to the
+        'many-vars' pattern.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: many_vars"')
+
         num_vars = 260
         var_names = [f"var_{i}_{prefix}" for i in range(num_vars)]
         mutations['var_definitions'] = "\n".join([f"{name} = {i}" for i, name in enumerate(var_names)])
 
+        # Regenerate the expression to use these new variables.
         expression_ast = self._generate_expression_ast(available_vars=var_names)
         try:
             mutations['expression'] = ast.unparse(expression_ast)
         except AttributeError:
-            mutations['expression'] = " # AST unparsing failed"
-        return mutations
+            mutations['expression'] = "# AST unparsing failed"
+
+        return mutations  # Return the modified dictionary
 
     def _get_mutations_for_evil_math(self, prefix: str, mutations: dict) -> dict:
         """
-        Generates mutations for patterns tagged with 'boundary-values'.
-        This involves selecting several "interesting" values from our list.
+        (Updated)
+        Receives the base mutation dictionary and adds keys specific to the
+        'evil_boundary_math' pattern.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: evil_math"')
         mutations.update({
@@ -1637,7 +1726,8 @@ collect()
             # The standard version is a simple recursive addition.
             base_case_body = "return p + 1"
 
-        base_case_def = f"def f_0_{prefix}({'p_tuple' if is_evil else 'p'}):\n    {base_case_body.replace(chr(10), chr(10) + '    ')}"
+        param_name = 'p_tuple' if is_evil else 'p'
+        base_case_def = CT("def f_0_{prefix}({param_name}):\n    {base_case_body}").render(**locals())
         func_chain_lines.append(dedent(base_case_def))
 
         # Now, generate the intermediate functions in the chain.
@@ -1657,7 +1747,7 @@ collect()
                     except Exception:
                         return p_tuple
                 """)
-                func_def = f"def {func_name}(p_tuple):\n    {func_body.replace(chr(10), chr(10) + '    ')}"
+                func_def = CT("def {func_name}(p_tuple):\n    {func_body}").render(**locals())
             else:
                 func_def = f"def {func_name}(p): return {prev_func_name}(p) + 1"
 
@@ -1725,14 +1815,14 @@ collect()
             'module_name': self.module_name,
         }
 
-    def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str,
-                                           params: dict = None) -> None:
+    def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str, params: dict = None,
+                                           return_str: bool = False) -> str:
         """
+        (Refactored)
         Takes the final generated code and wraps it in a randomly chosen
-        execution environment, correctly applying mutated parameters.
+        execution environment using the new block-based API. Can optionally
+        return the generated block as a string instead of writing it.
         """
-        # If no specific parameters were generated (e.g., for simple iterative modes),
-        # use empty defaults.
         if params is None:
             params = {'def_str': '', 'call_str': '', 'setup_code': ''}
 
@@ -1740,103 +1830,103 @@ collect()
         param_call = params['call_str']
         param_setup = params['setup_code']
 
-        # Prepend any setup code needed for the parameters (e.g., defining an aliased list).
-        if param_setup:
-            self.write(0, param_setup)
+        # First, get the guarded body of the harness function as a string.
+        guarded_body = self.write_pattern(setup_code, body_code, return_str=True)
 
+        # Choose an environment template.
         env_choice = randint(0, 5)
-        env_map = {
-            0: "Top-Level Function", 1: "Nested Function", 2: "Class Method",
-            3: "Async Function", 4: "Generator Function", 5: "Lambda-called Function"
-        }
-        self.write_print_to_stderr(0, f'"[{prefix}] Environment Strategy: {env_map[env_choice]}"')
 
-        # --- Environment 1: Simple top-level function ---
-        if env_choice == 0:
-            self.write(0, f"def harness_{prefix}({param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"harness_{prefix}({param_call})")
+        # Assemble the final code block using the chosen template.
+        final_code = ""
+        if env_choice == 0:  # Top-Level Function
+            final_code = CT(dedent("""
+                def harness_{prefix}({param_def}):
+                    {guarded_body}
 
-        # --- Environment 2: Nested function ---
-        elif env_choice == 1:
-            self.write(0, f"def outer_{prefix}():")
-            self.addLevel(1)
-            self.write(0, f"def harness_{prefix}({param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"harness_{prefix}({param_call})")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"outer_{prefix}()")
+                harness_{prefix}({param_call})
+            """)).render(**locals())
+        elif env_choice == 1:  # Nested Function
+            final_code = CT(dedent("""
+                def outer_{prefix}():
+                    def harness_{prefix}({param_def}):
+                        {guarded_body}
+                    harness_{prefix}({param_call})
 
-        # --- Environment 3: Class method ---
-        elif env_choice == 2:
-            self.write(0, f"class Runner_{prefix}:")
-            self.addLevel(1)
-            # Add 'self' to the parameter definition for the method.
+                outer_{prefix}()
+            """)).render(**locals())
+        elif env_choice == 2:  # Class Method
             method_param_def = f"self, {param_def}" if param_def else "self"
-            self.write(0, f"def harness(self, {param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.restoreLevel(self.parent.base_level - 2)
-            self.write(0, f"Runner_{prefix}().harness({param_call})")
+            final_code = CT(dedent("""
+                class Runner_{prefix}:
+                    def harness({method_param_def}):
+                        {guarded_body}
 
-        # --- Environment 4: Asynchronous Function ---
-        elif env_choice == 3:
-            self.write(0, "import asyncio")
-            self.write(0, f"async def harness_{prefix}({param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"asyncio.run(harness_{prefix}({param_call}))")
+                Runner_{prefix}().harness({param_call})
+            """)).render(**locals())
+        elif env_choice == 3:  # Async Function
+            final_code = CT(dedent("""
+                import asyncio
+                async def harness_{prefix}({param_def}):
+                    {guarded_body}
 
-        # --- Environment 5: Generator Function ---
-        elif env_choice == 4:
-            self.write(0, f"def harness_{prefix}({param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.write(0, "yield # Make this a generator")
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, "# We must consume the generator for its code to execute.")
-            self.write(0, f"for _ in harness_{prefix}({param_call}): pass")
+                asyncio.run(harness_{prefix}({param_call}))
+            """)).render(**locals())
+        elif env_choice == 4:  # Generator Function
+            generator_body = f"{guarded_body}\n    yield"
+            final_code = CT(dedent("""
+                def harness_{prefix}({param_def}):
+                    {generator_body}
 
-        # --- Environment 6: Lambda-called Function ---
-        else:  # env_choice == 5
-            self.write(0, f"def harness_{prefix}({param_def}):")
-            self.addLevel(1)
-            self.write_pattern(setup_code, body_code)
-            self.restoreLevel(self.parent.base_level - 1)
-            self.write(0, f"caller = lambda: harness_{prefix}({param_call})")
-            self.write(0, "caller()")
+                # Consume the generator for its code to execute.
+                for _ in harness_{prefix}({param_call}):
+                    pass
+            """)).render(**locals())
+        else:  # Lambda-called Function
+            final_code = CT(dedent("""
+                def harness_{prefix}({param_def}):
+                    {guarded_body}
 
-    def write_pattern(self, setup_code: str, body_code: str, level=0):
+                caller = lambda: harness_{prefix}({param_call})
+                caller()
+            """)).render(**locals())
+
+        # Prepend any parameter setup code.
+        if param_setup:
+            final_code = f"{param_setup}\n{final_code}\n"
+
+        if return_str:
+            return final_code
+
+        self.write_block(0, final_code)
+        return ""
+
+    def write_pattern(self, setup_code: str, body_code: str, level: int = 0, return_str: bool = False) -> str:
         """
-        Writes the setup and body code for a pattern, wrapped in a
-        try...except block to handle benign exceptions from mutated code.
+        (Refactored)
+        Takes setup and body code, wraps it in a robust try...except block,
+        and writes the final result using the new block-based API.
+        Can optionally return the generated block as a string.
         """
-        self.write(level, "try:")
-        self.addLevel(1)
+        # Assemble the final try...except structure as a single f-string.
+        final_code_block = CT(dedent("""
+            try:
+            # setup_code
+                {setup_code}
+            
+            # body_code
+                {body_code}
+            except JITCorrectnessError:
+                raise
+            except (Exception, SystemExit):
+                pass
+        """)).render(**locals())
 
-        # Write the actual pattern code inside the try block
-        for line in dedent(setup_code).splitlines():
-            self.write(level, line)
-        self.emptyLine()
-        for line in dedent(body_code).splitlines():
-            self.write(level, line)
+        if return_str:
+            return final_code_block
 
-        self.restoreLevel(self.parent.base_level - 1)
-        # Catch our specific signal and let it bubble up.
-        self.write(level, "except JITCorrectnessError:")
-        self.addLevel(1)
-        self.write(level, "raise")
-        self.restoreLevel(self.parent.base_level - 1)
-        # Catch all other exceptions, INCLUDING normal AssertionErrors, and ignore them.
-        self.write(level, "except (Exception, SystemExit):")
-        self.addLevel(1)
-        self.write(level, "pass")
-        self.restoreLevel(self.parent.base_level - 1)
+        # Write the assembled block to the output at the specified level.
+        self.write_block(level, final_code_block)
+        return ""
 
     def _generate_expression_ast(self, available_vars: list[str], depth: int = 0) -> ast.expr:
         """
@@ -1954,12 +2044,12 @@ collect()
         Takes a string representing a function call and wraps it in a
         robust try...except Exception: pass block.
         """
-        return dedent(f"""
+        return CT(dedent("""
             try:
-                {self.indent_block(call_str, 16)}
+                {call_str}
             except Exception:
                 pass
-        """)
+        """)).render(**locals())
 
     def _begin_hot_loop(self, prefix: str) -> str:
         """
@@ -2020,15 +2110,15 @@ collect()
         jit_func_name = f"jit_target_{prefix}"
         control_func_name = f"control_{prefix}"
 
-        jit_func_def = dedent(f"""\
+        jit_func_def = CT(dedent(f"""\
             def {jit_func_name}({param_def}):
-                {self.indent_block(mutated_code, 16)}
-            """)
+                {mutated_code}
+            """)).render(**locals())
 
-        control_func_def = dedent(f"""\
+        control_func_def = CT(dedent(f"""\
             def {control_func_name}({param_def}):
-                {self.indent_block(mutated_code, 16)}
-            """)
+                {mutated_code}
+            """)).render(**locals())
 
         # --- Generate the harness logic as a string ---
         param_call = mutations.get('param_call', pattern.get('param_call', ""))
@@ -2045,7 +2135,7 @@ collect()
                 raise JITCorrectnessError(f"JIT CORRECTNESS BUG ({pattern_name})! JIT: {{jit_result}}, Control: {{control_result}}")
         """)
 
-        guarded_harness_str = self._generate_guarded_call(self.indent_block(harness_str, 8))
+        guarded_harness_str = self._generate_guarded_call(harness_str)
 
         # 2. Assemble the final code block using a single, large f-string.
         final_code = f"""
@@ -2067,10 +2157,10 @@ class JITCorrectnessError(AssertionError): pass
 {guarded_harness_str}
 
 {footer_print}
+
 """
         # 3. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _discover_and_filter_classes(self) -> list:
         """
@@ -2135,7 +2225,7 @@ class JITCorrectnessError(AssertionError): pass
         self.fuzzable_classes = discovered_classes
         return self.fuzzable_classes
 
-    def _generate_args_for_method(self, method_obj: object) -> str:
+    def _generate_args_for_method(self, method_obj: Any) -> str:
         """
         Inspects a method's signature and generates a string of plausible
         arguments for calling it. Implements a "mostly smart, sometimes chaotic"
@@ -2225,13 +2315,13 @@ class JITCorrectnessError(AssertionError): pass
 
         # Get the header and footer prints.
         header_print = self.parent.write_print_to_stderr(
-            0, f'"[{prefix}] >>> Starting JIT Class Fuzzing for: {class_name} <<<"'
+            0, f'"[{prefix}] >>> Starting JIT Class Fuzzing for: {class_name} <<<"', return_str=True
         )
         target_print = self.parent.write_print_to_stderr(
-            0, f'"[{prefix}] Targeting method: {class_name}.{method_name}"'
+            0, f'"[{prefix}] Targeting method: {class_name}.{method_name}"', return_str=True
         )
         footer_print = self.parent.write_print_to_stderr(
-            0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"'
+            0, f'"[{prefix}] <<< Finished JIT Class Fuzzing for: {class_name} >>>"', return_str=True
         )
 
         # 4. Assemble the final code block using a multi-line f-string.
@@ -2251,10 +2341,10 @@ if {instance_var}:
         {call_str}
 
 {footer_print}
+
 """
         # 5. Write the entire assembled block at once.
         self.write_block(0, final_code)
-        self.emptyLine()
 
     def _select_fuzzing_target(self, prefix: str) -> dict | None:
         """

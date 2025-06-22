@@ -1,5 +1,45 @@
+import re
+import textwrap
 from os import chmod
-from textwrap import dedent
+from textwrap import dedent, indent
+
+
+class CodeTemplate:
+    def __init__(self, template_text: str):
+        # Dedent the template to handle templates defined in indented code
+        self.template = textwrap.dedent(template_text)
+
+    def render(self_, **kwargs) -> str:
+        """
+        Renders the template by substituting placeholders, handling both
+        multi-line indented blocks and single-line inline values.
+        """
+        output = self_.template
+
+        # For each key-value pair, perform both block and inline substitutions.
+        for key, value in kwargs.items():
+            placeholder = f"{{{key}}}"
+
+            # 1. BLOCK SUBSTITUTION:
+            # First, find and replace all occurrences of the placeholder that are
+            # at the beginning of a line (i.e., need indentation).
+            block_pattern = re.compile(f"^(?P<indent>\\s*){re.escape(placeholder)}", re.MULTILINE)
+
+            def replacer(match):
+                """A replacer function for re.sub that indents the value."""
+                indent_str = match.group('indent')
+                # Dedent the value to normalize it, then re-indent it to match the placeholder.
+                return textwrap.indent(textwrap.dedent(str(value)).strip(), indent_str)
+
+            # Perform the substitution for all block-style placeholders.
+            output = block_pattern.sub(replacer, output)
+
+            # 2. INLINE SUBSTITUTION:
+            # After handling the blocks, any remaining placeholders must be inline.
+            # Perform a simple, global string replacement for them.
+            output = output.replace(placeholder, str(value))
+
+        return output
 
 
 class WriteCode:

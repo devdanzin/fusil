@@ -122,23 +122,17 @@ class WritePythonCode(WriteCode):
                 f"Module {self.module_name} has no function, no class, and no object to fuzz!"
             )
 
-    def write_print_to_stderr(self, level: int, arguments_str: str, return_str: bool = True) -> str:
+    def write_print_to_stderr(self, level: int, arguments_str: str, return_str: bool = False) -> str:
         """
         Writes a print statement to stderr and now also returns the
         statement as a string.
         """
         code = f"print({arguments_str}, file=stderr)"
-        self.write(level, code)
         if return_str:
             return code
-
-    def indent_block(self, block, spaces):
-        block = dedent(block)
-        block = indent(block, ' ' * spaces)
-        lines = block.splitlines()
-        # Remove leading spaces from first line, so the block aligns
-        lines[0] = lines[0].strip()
-        return "\n".join(lines)
+        else:
+            self.write(level, code)
+        return ""
 
     def _get_module_members(self) -> tuple[list[str], list[str], list[str]]:
         """Extracts fuzzable functions, classes, and objects from the current module."""
