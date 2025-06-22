@@ -193,9 +193,20 @@ class ASTMutator:
 
     def mutate(self, code_string: str, seed: int = None) -> str:
         """
-        Parses code, applies a random pipeline of AST mutations,
-        and unparses it back to a string.
-        If a seed is provided, the mutations will be deterministic.
+        Parses code, applies a random pipeline of AST mutations, and unparses
+        it back into a string.
+
+        This is the main public method of the mutator. It takes a string of
+        Python code and applies a randomized sequence of 1 to 3 different
+        NodeTransformer subclasses to its AST, structurally altering the code.
+
+        Args:
+            code_string: The Python code to be mutated.
+            seed: An optional integer to seed the random number generator,
+                  ensuring a deterministic (reproducible) mutation pipeline.
+
+        Returns:
+            A string containing the new, mutated Python code.
         """
         # +++ NEW +++
         if seed is not None:

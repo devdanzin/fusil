@@ -62,10 +62,13 @@ class ASTPatternGenerator:
 
     def _generate_expression_ast(self, depth: int = 0) -> ast.expr:
         """
-        Recursively builds an AST for an expression, now ensuring it only uses
-        variables that have been previously defined in the current scope.
+        Recursively builds an AST for a random expression.
+
+        This method probabilistically chooses between generating a simple,
+        non-recursive expression (e.g., 'var + 5') or a complex, deeply
+        nested expression. It ensures that it only uses variables that are
+        guaranteed to be in scope to avoid UnboundLocalError.
         """
-        # --- THE FIX: Check if we have any variables to work with ---
         # If no variables are known, we MUST return a constant.
         if not self.scope_variables:
             return ast.Constant(value=int(self.arg_generator.genSmallUint()[0]))
@@ -250,7 +253,13 @@ class ASTPatternGenerator:
         return statements
 
     def _synthesize_del_attack(self) -> List[ast.stmt]:
-        """Synthesizes a full __del__ side-effect attack from scratch."""
+        """
+        Synthesizes a full __del__ side-effect attack from scratch.
+
+        This method programmatically constructs the AST for the FrameModifier
+        class, a target loop, and the del trigger, recreating the logic of
+        our `decref_escapes` pattern generatively.
+        """
         # 1. Define the FrameModifier class programmatically.
         fm_class_def_str = dedent("""
             class FrameModifier:
@@ -304,7 +313,13 @@ class ASTPatternGenerator:
         return [*fm_class_nodes, fm_instance_creation, loop]
 
     def _synthesize_correctness_test(self) -> List[ast.stmt]:
-        """Synthesizes a full 'Twin Execution' correctness test."""
+        """
+        Synthesizes a full 'Twin Execution' correctness test harness.
+
+        This method generates a random block of code, creates two copies of it,
+        wraps them in 'jit_target' and 'control' functions, and appends the
+        necessary harness code to warm up the JIT and assert the results.
+        """
         # 1. Generate a random block of code to be the test subject.
         test_body_ast = self.generate_statement_list(num_statements=random.randint(4, 8))
 
@@ -407,8 +422,14 @@ class ASTPatternGenerator:
 
     def generate_pattern(self) -> str:
         """
-        Main public method. Generates a full pattern as a string, now with
-        a two-pass process to pre-initialize all variables.
+        Main public method. Synthesizes a full, novel fuzzing pattern from
+        scratch and returns it as a string of Python code.
+
+        This method orchestrates the entire synthesis process. It makes a
+        high-level strategic choice (e.g., generate a crash test or a
+        correctness test) and then calls the appropriate synthesizer to
+        build the pattern's AST. It also manages the two-pass generation
+        process to prevent UnboundLocalError.
         """
         # Reset state for the new pattern.
         self.scope_variables = set()

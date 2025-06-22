@@ -75,7 +75,6 @@ class WriteJITCode:
         # Bind the writing methods directly for convenience
         self.write = parent.write
         self.write_block = parent.write_block
-        self.indent_block = parent.indent_block
         self.write_print_to_stderr = parent.write_print_to_stderr
 
         self.jit_warmed_targets = []
@@ -83,10 +82,13 @@ class WriteJITCode:
 
     def generate_scenario(self, prefix: str) -> None:
         """
-        (Final Version)
         Main entry point for all JIT scenario generation.
-        It selects a target (function or method) and then dispatches to the
-        appropriate generation engine based on the --jit-mode flag.
+
+        This method acts as the master orchestrator. It first selects a target
+        (a module-level function or a class method) using the
+        _select_fuzzing_target() helper. It then dispatches to the
+        appropriate generation engine based on the user's --jit-mode and
+        other command-line flags.
         """
         # 1. Select a target to be fuzzed. This can be a function or a method.
         target = self._select_fuzzing_target(prefix)
@@ -117,8 +119,13 @@ class WriteJITCode:
 
     def _execute_randomized_strategy(self, prefix: str, target: dict) -> None:
         """
-        Called by --jit-mode=all. It now includes class fuzzing in its
-        pool of random choices.
+        Implements the logic for `--jit-mode=all`.
+
+        For a single test case, this method randomly selects a core generation
+        strategy ('synthesize', 'variational', or 'legacy') and a set of
+        compatible modifier flags. It then calls the appropriate generator
+        to create a test case, ensuring maximum diversity over the course
+        of a long fuzzing session.
         """
         chosen_mode = choice(['synthesize', 'variational', 'legacy'])
         self.write_print_to_stderr(0, f'"[{prefix}] JIT-MODE=ALL: Randomly selected mode: {chosen_mode}"')
@@ -194,8 +201,12 @@ class WriteJITCode:
 
     def _generate_hostile_scenario(self, prefix: str, target: dict) -> None:
         """
-        (This method is preserved for legacy mode)
-        Chooses and generates one of the hostile (crash-finding) scenarios.
+        (Legacy Mode) Chooses and generates one of the hostile (crash-finding)
+        scenarios from the original, hard-coded suite.
+
+        This method maintains a weighted choice between simpler, isolated hostile
+        scenarios and more complex "mixed" scenarios that combine multiple
+        attack techniques.
         """
         # The list of our original, non-pattern-based hostile generators.
         basic_hostile_generators = [
@@ -228,8 +239,11 @@ class WriteJITCode:
 
     def _generate_friendly_scenario(self, prefix: str, target: dict) -> None:
         """
-        (This method is now simplified for legacy mode)
-        Chooses and generates one of the JIT-friendly (warm-up) scenarios.
+        (Legacy Mode) Chooses and generates a JIT-friendly (warm-up) scenario.
+
+        This method randomly chooses between two strategies: generating a simple
+        polymorphic call block, or delegating to the more powerful variational
+        engine with the 'friendly_base' pattern.
         """
         if random() < 0.0:
             # Use the simple polymorphic call block.
@@ -241,9 +255,12 @@ class WriteJITCode:
     def generate_stateful_object_scenario(self, prefix: str, instance_var_name: str, class_name_str: str,
                                           class_type: type) -> None:
         """
-        (Refactored)
-        Generates a stateful hot loop for a class instance, designed to be
-        called from the main fusil class fuzzing logic.
+        Generates a stateful hot loop for a class instance.
+
+        This method is the primary bridge between the original `fusil` class
+        fuzzing logic and the JIT subsystem. It is called by `_fuzz_one_class`
+        when JIT mode is enabled. It selects a random method from the provided
+        class instance and generates code to call it repeatedly in a hot loop.
         """
         # 1. Discover a suitable method on the class to target.
         methods_dict = self.parent._get_object_methods(class_type, class_name_str)
@@ -295,9 +312,8 @@ if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE
 
     def _generate_polymorphic_call_block(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
         Generates a hot loop that calls one function/method with arguments
-        of different types to stress call-site caching.
+        of different types to stress the JIT's call-site caching.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -354,9 +370,15 @@ if {instance_var if instance_var else 'True'}:
 
     def _generate_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Orchestrates a three-phase JIT invalidation scenario. This method is now
-        a single, readable block that uses our new string-returning helpers.
+        Generates a three-phase invalidation attack on a class method.
+
+        This scenario is designed to test the JIT's ability to correctly
+        invalidate its caches for optimized code. It proceeds in three phases:
+        1. WARM-UP: A method on a class instance is called in a hot loop to
+           get it JIT-compiled.
+        2. INVALIDATE: The method is maliciously replaced on the class itself.
+        3. RE-EXECUTE: The method is called again on the original instance. A
+           crash at this stage indicates a JIT bug.
         """
         # This scenario is specific to invalidating a method on a class.
         if target['type'] != 'method':
@@ -425,10 +447,12 @@ if {instance_var}:
 
     def _generate_deleter_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored for Legacy Mode)
-        Generates a sophisticated scenario that uses a __del__ side effect
-        to induce type confusion for local, instance, and class variables.
-        The side effect is triggered only once, near the end of the hot loop.
+        Generates a scenario that uses a __del__ side effect to induce type
+        confusion for local, instance, and class variables.
+
+        This legacy scenario creates a `FrameModifier` class and then, within
+        a hot loop, instantiates it and arranges for its `__del__` method to
+        fire and corrupt variables that are being used in the same loop.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -508,11 +532,12 @@ if {instance_var}:
 
     def _generate_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
         Generates a function with >256 local variables by delegating to the
-        variational engine with the 'many_vars_base' pattern. This leverages
-        the AST mutator to create complex expressions using the large set
-        of local variables.
+        variational engine with the 'many_vars_base' pattern.
+
+        This approach leverages the AST mutator to create complex expressions
+        that use the large set of local variables, providing a more dynamic
+        and stressful test than the original hard-coded version.
         """
         self.write_print_to_stderr(0, f'"""[{prefix}] >>> Starting "Many Vars" Generative Scenario via Pattern <<<"""')
 
@@ -520,9 +545,11 @@ if {instance_var}:
 
     def _generate_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Generates a deep chain of function calls to stress the JIT's
-        stack analysis and trace stack limits.
+        Generates a scenario to stress the JIT's handling of deep call stacks.
+
+        This method defines a chain of deeply nested recursive function calls
+        and then executes the top-level function in a hot loop to test the
+        JIT's ability to handle deep C stack usage and long traces.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -575,11 +602,13 @@ if {instance_var}:
 
     def _define_frame_modifier_instances(self, prefix: str, targets_and_payloads: dict) -> tuple[str, list[str]]:
         """
-        (Refactored)
         Generates the 'fm_... = FrameModifier(...)' lines for a set of targets.
 
-        This method now returns the generated code as a string, along with
-        a list of the variable names created for the FrameModifier instances.
+        This helper takes a dictionary mapping target variable paths (e.g.,
+        'my_var' or 'my_instance.attr') to the payload they should be
+        corrupted with. It returns the generated code as a string, along with
+        a list of the variable names created for the FrameModifier instances,
+        which can then be used in a `del` trigger.
         """
         fm_vars = []
         code_lines = ["# Define FrameModifier instances to arm the __del__ side effects."]
@@ -596,9 +625,13 @@ if {instance_var}:
 
     def _generate_mixed_many_vars_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        MIXED SCENARIO: Combines "Many Vars", `__del__` side effects, and
-        JIT-friendly math/logic patterns into one hostile function.
+        (Legacy Mode) Generates a scenario combining multiple stress factors.
+
+        This hostile scenario creates a single function that:
+        1. Defines over 256 local variables to stress EXTENDED_ARG handling.
+        2. Arms a `__del__` side-effect attack to corrupt one of the high-index
+           variables during a hot loop.
+        3. Executes JIT-friendly math patterns within that loop.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -670,9 +703,13 @@ def {func_name}():
 
     def _generate_del_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        MIXED SCENARIO: An invalidation scenario where the invalidation
-        is performed indirectly via a __del__ side effect.
+        (Legacy Mode) Generates a scenario that uses a __del__ side effect
+        to trigger a JIT cache invalidation.
+
+        This mixed hostile scenario first warms up a target method to get it
+        JIT-compiled. It then defines and immediately deletes a `FrameModifier`
+        instance whose `__del__` method monkey-patches the target method on
+        its class. Finally, it re-executes the method to check for a crash.
         """
         if target['type'] != 'method':
             self.write_print_to_stderr(0, f'"[{prefix}] Skipping __del__ Invalidation for non-method target."')
@@ -744,10 +781,13 @@ if {instance_var}:
 
     def _generate_mixed_deep_calls_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        MIXED SCENARIO: Combines "Deep Calls" with JIT-friendly patterns.
-        Each function in the deep call chain performs complex work and the
-        deepest function calls the fuzzed target.
+        (Legacy Mode) Generates a deep call chain with complex logic in each frame.
+
+        This scenario creates a chain of deeply nested functions. Unlike the
+        simpler 'deep_calls' scenario, each function in this chain performs its
+        own JIT-friendly work, and the deepest function also calls the main
+        fuzzed target. This is designed to stress the JIT's ability to
+        optimize across many active and complex stack frames.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -823,10 +863,14 @@ if {instance_var}:
 
     def _generate_deep_call_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        MIXED SCENARIO: Combines "Deep Calls" with an invalidation attack.
-        A deep function call chain is JIT-compiled, then a function in the
-        middle of the chain is redefined to test trace invalidation.
+        (Legacy Mode) Generates a scenario that invalidates a JIT trace
+        in the middle of a deep call chain.
+
+        This hostile scenario first warms up a deep chain of recursive function
+        calls to get the entire trace JIT-compiled. It then redefines one of
+        the functions in the middle of the chain and calls the top-level
+        function again, testing if the JIT can correctly invalidate the now-broken
+        trace.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -902,9 +946,14 @@ if {instance_var}:
 
     def _generate_indirect_call_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Stresses the JIT by passing the fuzzed target (function or method)
-        as an argument to a JIT-hot harness function, forcing an indirect call.
+        (Legacy Mode) Generates a scenario to stress the JIT's handling of
+        indirect function calls.
+
+        This method creates a harness function that takes a single callable
+        argument. It JIT-compiles this harness by calling it in a hot loop.
+        Finally, it calls the hot harness one last time, passing the main
+        fuzzed target (function or method) as the argument, forcing an
+        indirect call on a JIT-optimized path.
         """
         # 1. Generate the component code blocks as strings.
         harness_func_name = f"harness_{prefix}"
@@ -954,10 +1003,13 @@ if {instance_var}:
 
     def _generate_fuzzed_func_invalidation_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        A three-phase invalidation attack where the fuzzed callable itself
-        is the dependency that gets invalidated. This scenario is specific
-        to module-level functions.
+        Generates a three-phase invalidation attack on an inlined function call.
+
+        This scenario tests the JIT's ability to invalidate a trace when a
+        function that was inlined into it is changed. It defines a simple
+        wrapper, JIT-compiles it (which may inline the fuzzed target), then
+        redefines the original fuzzed target on its module and re-executes
+        the wrapper to check for a crash.
         """
         # This attack redefines a function on a module, so we only run it
         # if our target is a function.
@@ -1027,10 +1079,12 @@ collect()
 
     def _generate_polymorphic_call_block_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Generates a hot loop that makes calls to different KINDS of callables
-        (the fuzzed target, a lambda, a new instance method) to stress
-        call-site caching and polymorphism handling in the JIT.
+        (Legacy Mode) Generates a scenario to stress the JIT's call-site caching.
+
+        This method creates a hot loop that, on each iteration, calls a
+        variety of different *kinds* of callables in sequence: the main fuzzed
+        target, a newly defined lambda, and a method on a newly defined class.
+        This tests the JIT's ability to handle polymorphic call sites.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -1106,9 +1160,13 @@ collect()
 
     def _generate_type_version_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Attacks the JIT's attribute caching by accessing an attribute with the
-        same name across classes where its nature differs.
+        (Legacy Mode) Generates a scenario to attack the JIT's attribute caching.
+
+        This scenario defines several classes that all have an attribute with
+        the same name ('payload'), but where the nature of that attribute
+        differs (e.g., data attribute, property, method). It then accesses
+        this attribute polymorphically in a hot loop, testing the JIT's type
+        versioning and `LOAD_ATTR` specialization.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -1171,9 +1229,13 @@ collect()
 
     def _generate_concurrency_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Creates a race condition between a "hammer" thread running JIT'd
-        code and an "invalidator" thread modifying its dependencies.
+        Generates a race condition to test the JIT's thread-safety.
+
+        This scenario creates two competing threads: a "hammer" thread that
+        repeatedly accesses an attribute in a JIT-compiled loop, and an
+        "invalidator" thread that constantly changes that same attribute
+        from another thread. This tests the JIT's attribute caches and type
+        versioning mechanisms in a concurrent context.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -1251,9 +1313,13 @@ collect()
 
     def _generate_side_exit_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Stresses the JIT's deoptimization mechanism by creating a hot loop
-        with a guard that fails unpredictably, forcing frequent "side exits".
+        (Legacy Mode) Generates a scenario to stress the JIT's deoptimization guards.
+
+        This method creates a hot loop with a guard condition (`if random() ...`)
+        that is designed to fail unpredictably. The JIT will heavily optimize
+        the main path, and a failure of the guard forces a "side exit" from
+        the optimized code. The scenario also changes a variable's type in the
+        side-exit path to further stress the deoptimization mechanism.
         """
         # 1. Generate the component code blocks as strings.
         target_var = f"side_exit_var_{prefix}"
@@ -1306,10 +1372,14 @@ collect()
 
     def _generate_isinstance_attack_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        Attacks the JIT's `isinstance` elimination by using a class with a
-        deep inheritance hierarchy and injecting a call to the fuzzed target
-        into a patched __instancecheck__.
+        Generates a grey-box attack on the JIT's `isinstance` elimination.
+
+        This scenario creates a deep inheritance hierarchy and a class whose
+        metaclass's `__instancecheck__` method can be monkey-patched. In a
+        hot loop, it calls `isinstance` repeatedly, then triggers a `__del__`
+        side effect to perform the patch, which injects a call to the fuzzed
+        target. This tests for vulnerabilities in the JIT's type-checking
+        optimizations.
         """
         # 1. Generate the component code blocks as strings.
 
@@ -1454,9 +1524,12 @@ collect()
 
     def _generate_decref_escapes_scenario(self, prefix: str, target: dict) -> None:
         """
-        (Refactored)
-        RE-DISCOVERY SCENARIO: A highly targeted attack designed specifically
-        to reproduce the crash from GH-124483 (test_decref_escapes).
+        (Legacy Mode) Generates the specific, hard-coded scenario to reproduce
+        the crash from CPython bug GH-124483 (test_decref_escapes).
+
+        This method is preserved as a targeted regression test. It creates the
+        minimal `FrameModifier` class and loop structure known to trigger the
+        original bug.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -1522,9 +1595,18 @@ collect()
 
     def _generate_variational_scenario(self, prefix: str, pattern_names: str, target: dict) -> None:
         """
-        (Final Refactored Version)
-        Acts as the master dispatcher for the variational engine. This final
-        version now fully uses the block-based generation API for all strategies.
+        Acts as the master dispatcher for all pattern-based fuzzing.
+
+        This method orchestrates the full lifecycle of generating a test from
+        the bug_patterns.py library. Its responsibilities include:
+        1.  Selecting a pattern from the library.
+        2.  Reading the pattern's metadata 'tags' to understand its requirements.
+        3.  Calling the appropriate specialized mutation helpers (e.g.,
+            _get_mutations_for_many_vars) based on the pattern's tags.
+        4.  Injecting the unified 'target' callable's information into the
+            mutation dictionary.
+        5.  Dispatching to either the crash-test generator or the "Twin
+            Execution" correctness-test generator based on the pattern's tags.
         """
         # --- 1. Pattern Selection ---
         if pattern_names == "ALL":
@@ -1657,9 +1739,9 @@ collect()
 
     def _get_mutations_for_many_vars(self, prefix: str, mutations: dict) -> dict:
         """
-        (Updated)
-        Receives the base mutation dictionary and adds keys specific to the
-        'many-vars' pattern.
+        Receives a base mutation dictionary and adds keys specific to the
+        'many-vars' pattern, including the `{var_definitions}` placeholder
+        and a complex `{expression}` that uses the new variables.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: many_vars"')
 
@@ -1678,9 +1760,12 @@ collect()
 
     def _get_mutations_for_evil_math(self, prefix: str, mutations: dict) -> dict:
         """
-        (Updated)
-        Receives the base mutation dictionary and adds keys specific to the
+        Receives a base mutation dictionary and adds keys specific to the
         'evil_boundary_math' pattern.
+
+        This helper generates several "interesting" boundary values (like NaN,
+        inf, maxint) and injects them into the mutation dictionary for use in
+        the pattern's setup code.
         """
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: evil_math"')
         mutations.update({
@@ -1693,10 +1778,13 @@ collect()
 
     def _get_mutations_for_deep_calls(self, prefix: str, mutations: dict, target: dict, is_evil: bool = False) -> dict:
         """
-        (Updated)
-        Generates mutations for 'deep-calls' patterns. This includes dynamically
-        building a string that defines a chain of recursive functions, which can
-        now call the provided 'target' callable.
+        Receives a base mutation dictionary and adds keys specific to
+        'deep-calls' patterns.
+
+        This helper programmatically generates a string containing a chain of
+        deeply nested function definitions (`{function_chain}`) and injects
+        it into the mutation dictionary for use in the pattern's setup code.
+        The 'evil' version incorporates more complex logic into each frame.
         """
         generator_name = "evil_deep_calls" if is_evil else "deep_calls"
         self.write_print_to_stderr(0, f'"[{prefix}] Using specialized generator: {generator_name}"')
@@ -1770,10 +1858,13 @@ collect()
         return mutations
 
     def _get_mutated_values_for_pattern(self, prefix: str, param_names: list[str]) -> dict:
-        """
-        (Corrected)
-        Creates a dictionary of randomized values to be injected into
-        a bug pattern template. It now includes all necessary static context.
+        """"
+        Creates the base dictionary of randomized placeholders for a pattern.
+
+        This is the standard mutation generator. It is responsible for creating
+        the common placeholders used by most patterns, such as `{loop_var}`,
+        `{expression}`, `{loop_iterations}`, and `{corruption_payload}`. It
+        also includes necessary context like `{module_name}`.
         """
         # --- Hybrid Operator/Expression Mutation ---
         operator_pairs = [
@@ -1818,10 +1909,12 @@ collect()
     def _write_mutated_code_in_environment(self, prefix: str, setup_code: str, body_code: str, params: dict = None,
                                            return_str: bool = False) -> str:
         """
-        (Refactored)
-        Takes the final generated code and wraps it in a randomly chosen
-        execution environment using the new block-based API. Can optionally
-        return the generated block as a string instead of writing it.
+        Wraps a generated block of code in a randomly chosen execution environment.
+
+        This method takes the core logic of a test case and embeds it within
+        one of several environmental templates (e.g., a top-level function, a
+        nested function, a class method, an async function). This increases
+        test diversity by changing the context in which the JIT analyzes the code.
         """
         if params is None:
             params = {'def_str': '', 'call_str': '', 'setup_code': ''}
@@ -1902,10 +1995,12 @@ collect()
 
     def write_pattern(self, setup_code: str, body_code: str, level: int = 0, return_str: bool = False) -> str:
         """
-        (Refactored)
-        Takes setup and body code, wraps it in a robust try...except block,
-        and writes the final result using the new block-based API.
-        Can optionally return the generated block as a string.
+        Takes setup and body code and wraps it in a robust try...except block.
+
+        This is a low-level helper that provides the primary safety harness for
+        all generated test cases. It ensures that benign runtime exceptions are
+        caught and ignored, while our specific `JITCorrectnessError` signal is
+        allowed to propagate.
         """
         # Assemble the final try...except structure as a single f-string.
         final_code_block = CT(dedent("""
@@ -2041,8 +2136,8 @@ collect()
 
     def _generate_guarded_call(self, call_str: str) -> str:
         """
-        Takes a string representing a function call and wraps it in a
-        robust try...except Exception: pass block.
+        Wraps a string representing a function call in a robust try...except
+        block and returns the complete block as a string.
         """
         return CT(dedent("""
             try:
@@ -2078,9 +2173,13 @@ collect()
 
     def _generate_paired_ast_mutation_scenario(self, prefix: str, pattern_name: str, pattern: dict, mutations: dict) -> None:
         """
-        (Refactored)
-        Generates a 'Twin Execution' correctness test using the new block-based API.
-        This is the single, unified engine for all 'body-based' correctness patterns.
+        The unified engine for all 'body-based' correctness-checking patterns.
+
+        This method orchestrates the entire "Twin Execution" model. It takes a
+        pattern's core logic, uses a seeded AST mutation to create two
+        identical but mutated versions, wraps them in `jit_target` and
+        `control` functions, and generates the harness code to run both and
+        compare their results.
         """
         # 1. Generate the component code blocks as strings.
         header_print = self.parent.write_print_to_stderr(
@@ -2272,10 +2371,14 @@ class JITCorrectnessError(AssertionError): pass
 
     def _generate_class_fuzzing_scenario(self, prefix: str) -> None:
         """
-        (Refactored)
-        Selects a class, instantiates it, and calls one of its methods
-        repeatedly in a JIT-warming hot loop. This method now uses the
-        new block-based, string-returning generation API for improved clarity.
+        Generates a scenario that stresses the JIT with method calls.
+
+        This scenario discovers and filters suitable classes from the target
+        module, safely instantiates one, and then calls one of its methods
+        repeatedly in a JIT-warming hot loop. It uses a "smart" argument
+        generator that generates plausible arguments for the method's
+        signature most of the time, but occasionally injects "evil" values
+        to test for type-confusion bugs.
         """
         # 1. Discover and select a target class.
         fuzzable_classes = self._discover_and_filter_classes()
@@ -2348,9 +2451,14 @@ if {instance_var}:
 
     def _select_fuzzing_target(self, prefix: str) -> dict | None:
         """
-        (Upgraded)
         Selects a callable to be used as the "payload" for a JIT scenario.
-        It now explicitly returns the variable name for any created instance.
+
+        This method probabilistically chooses between a simple module-level
+        function and a method from a class instance. It returns a unified
+
+        dictionary describing the chosen target, abstracting away the
+        difference between a function and a method for the scenario
+        generators that consume it.
         """
         if self.parent.module_classes and random() < 0.2:
             fuzzable_classes = self._discover_and_filter_classes()
@@ -2383,8 +2491,11 @@ if {instance_var}:
 
     def _write_target_setup(self, prefix: str, target: dict) -> tuple[str, str | None]:
         """
-        Safely generates the setup code for a fuzzing target, returning it
-        as a string along with the instance variable name.
+        Safely generates the setup code for a fuzzing target.
+
+        It takes a target dictionary, pre-initializes the instance variable
+        to None, and wraps the instantiation code (from target['setup_code'])
+        in a try...except block. It returns the generated code as a string.
         """
         instance_var = target.get('instance_var')
         setup_code = target.get('setup_code')
