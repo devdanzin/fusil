@@ -308,7 +308,7 @@ class WriteJITCode:
 
         # 2. Get the hot loop boilerplate from our helper and a guarded call.
         hot_loop_str = self._begin_hot_loop(prefix)
-        guarded_call = self._generate_guarded_call(f"uop_harness_{prefix}()")
+        guarded_call = self._generate_guarded_call(f"uop_harness_{prefix}()", verbose=True, break_loop=True)
 
         # 3. Assemble the final code block using the CodeTemplate class.
         final_code = CT("""
@@ -2209,15 +2209,23 @@ collect()
             return ""
         return ""
 
-    def _generate_guarded_call(self, call_str: str) -> str:
+    def _generate_guarded_call(self, call_str: str, verbose: bool = False, break_loop: bool = False) -> str:
         """
         Wraps a string representing a function call in a robust try...except
         block and returns the complete block as a string.
         """
+        verbose_str = "# Ignoring exception silently"
+        if verbose:
+            verbose_str = self.write_print_to_stderr(
+                0, 'f"EXCEPTION: {e.__class__.__name__}: {e}"', return_str=True
+            )
+        break_loop_str = "break" if break_loop else "# break"
         return CT(dedent("""
             try:
                 {call_str}
-            except Exception:
+            except Exception as e:
+                {verbose_str}
+                {break_loop_str}
                 pass
         """)).render(**locals())
 

@@ -47,7 +47,7 @@ UOP_RECIPES = {
         'placeholders': {'target_obj': 'object_with_getitem', 'key': 'any'}
     },
     '_DELETE_ATTR': {
-        'pattern': "del {target_obj}.x; {target_obj}.x = 1",
+        'pattern': "del {target_obj}.x; {target_obj}.x = 1",  # We cannot simply delete sequentially
         'placeholders': {'target_obj': 'object_with_attr'}
     },
 
