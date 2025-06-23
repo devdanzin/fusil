@@ -283,6 +283,15 @@ class Fuzzer(Application):
             help="Enable the JIT class method fuzzer. This will occasionally generate scenarios that instantiate classes and call their methods in a hot loop.",
         )
 
+        jit_options.add_option(
+            "--jit-target-uop",
+            help="Target a specific JIT micro-op (uop) for fuzzing. Provide the name "
+                 "of the uop (e.g., '_STORE_ATTR'). This will generate patterns "
+                 "specifically designed to stress that uop.",
+            type="str",
+            default=None,
+        )
+
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",

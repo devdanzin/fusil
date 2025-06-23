@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 import fusil.python.values
 from fusil.python.jit.ast_mutator import ASTMutator
-from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator
+from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator, UOP_MAP
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 from fusil.write_code import CodeTemplate as CT
 
@@ -97,12 +97,14 @@ class WriteJITCode:
             )
             return output
 
-        # 2. Dispatch to the main generation logic based on the chosen mode.
-        mode = self.options.jit_mode
         output = ""
+        mode = self.options.jit_mode
+
+        if self.options.jit_target_uop:
+            output = self._generate_uop_targeted_scenario(prefix, target)
 
         # This helper is now only used for `--jit-mode=all`
-        if mode == 'all':
+        elif mode == 'all':
             output = self._execute_randomized_strategy(prefix, target)
 
         elif mode == 'synthesize':
@@ -270,6 +272,61 @@ class WriteJITCode:
         else:
             # Use the JIT pattern block, which is now powered by the variational engine.
             return self._generate_jit_pattern_block(prefix, target)
+
+    def _generate_uop_targeted_scenario(self, prefix: str, target: dict) -> str:
+        """
+        Generates a test case specifically designed to stress a single micro-op.
+
+        This method calls the ASTPatternGenerator to synthesize a new pattern
+        based on the --jit-target-uop flag, then wraps it in a simple
+        execution environment.
+
+        If --jit-target-uop is set to 'ALL', this method will randomly select
+        a uop from the known UOP_MAP for each test case it generates.
+        """
+        uop_to_target = self.options.jit_target_uop
+
+        selection_print = ""
+        if uop_to_target.upper() == 'ALL':
+            # Randomly select a uop from the keys of our mapping dictionary.
+            uop_to_target = choice(list(UOP_MAP.keys()))
+            selection_print = self.parent.write_print_to_stderr(
+                0, f'"[{prefix}] JIT-TARGET-UOP=ALL: Randomly selected uop: {uop_to_target}"', return_str=True
+            )
+
+        header_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] STRATEGY: Targeted Uop Fuzzing ({uop_to_target})"', return_str=True
+        )
+        if selection_print:
+            header_print = f"{selection_print}\n{header_print}"
+        footer_print = self.parent.write_print_to_stderr(
+            0, f'"[{prefix}] Targeted Uop Fuzzing ({uop_to_target}) done."', return_str=True
+        )
+
+        # 1. Generate a new pattern specifically for the target uop.
+        synthesized_body = self.ast_pattern_generator.generate_uop_targeted_pattern(self.options.jit_target_uop)
+
+        # 2. Get the hot loop boilerplate from our helper and a guarded call.
+        hot_loop_str = self._begin_hot_loop(prefix)
+        guarded_call = self._generate_guarded_call(f"uop_harness_{prefix}()")
+
+        # 3. Assemble the final code block using the CodeTemplate class.
+        final_code = CT("""
+                    {header_print}
+
+                    # This harness function contains the synthesized code.
+                    def uop_harness_{prefix}():
+                        {synthesized_body}
+
+                    # Execute the harness in a JIT-warming hot loop.
+                    {hot_loop_str}
+                        {guarded_call}
+
+                    {footer_print}
+
+                """).render(**locals())
+
+        return final_code
 
     def generate_stateful_object_scenario(self, prefix: str, instance_var_name: str, class_name_str: str,
                                           class_type: type) -> str:
@@ -2365,7 +2422,7 @@ class JITCorrectnessError(AssertionError): pass
                     # Default to a simple integer if we have no better heuristic.
                     args_list.append(self.arg_generator.genInt()[0])
 
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, NameError):
             # If signature inspection fails, fall back to generating a single random arg.
             args_list.append(self.arg_generator.genInterestingValues()[0])
 

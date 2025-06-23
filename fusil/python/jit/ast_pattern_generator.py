@@ -27,6 +27,12 @@ from typing import TYPE_CHECKING, List
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
 
+UOP_MAP = {
+    '_STORE_ATTR': "target_obj.x = 1",
+    '_LOAD_ATTR_MODULE': "math.pi",
+    '_DELETE_ATTR': "del target_obj.x",
+}
+
 
 class ASTPatternGenerator:
     """
@@ -466,3 +472,83 @@ class ASTPatternGenerator:
             return ast.unparse(module_node)
         except AttributeError:
             return "# AST unparsing failed."
+
+    def _collect_assigned_variables(self, nodes: List[ast.stmt]) -> set[str]:
+        """
+        Walks a list of AST nodes and returns a set of all variable names
+        that are assigned to, created in a for loop, or created as a class/function.
+        """
+        assigned_vars = set()
+        for node in nodes:
+            # Look for assignment targets (x = ..., y.attr = ...)
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned_vars.add(target.id)
+            # Look for for-loop variables (for x in ...)
+            elif isinstance(node, ast.For):
+                if isinstance(node.target, ast.Name):
+                    assigned_vars.add(node.target.id)
+            # Look for function and class definitions
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                assigned_vars.add(node.name)
+
+            # Recursively check inside control flow blocks
+            if hasattr(node, 'body'):
+                assigned_vars.update(self._collect_assigned_variables(node.body))
+            if hasattr(node, 'orelse'):
+                assigned_vars.update(self._collect_assigned_variables(node.orelse))
+
+        return assigned_vars
+
+    def generate_uop_targeted_pattern(self, uop_name: str) -> str:
+        """
+        Generates a pattern specifically designed to stress the given uop.
+        """
+        self.scope_variables = {'target_obj'}  # Assume a target object exists
+        self.prefix_counter = 0
+
+        # 1. Get the minimal Python snippet for the target uop.
+        base_snippet = UOP_MAP.get(uop_name)
+        if not base_snippet:
+            return f"# ERROR: No mapping found for uop '{uop_name}'"
+
+        try:
+            # 2. Parse the snippet into an AST node.
+            base_ast_node = ast.parse(base_snippet).body[0]
+        except (SyntaxError, IndexError):
+            return f"# ERROR: Failed to parse snippet for uop '{uop_name}'"
+
+        # 3. Generate a list of "supporting" statements around the core snippet.
+        #    This creates a more complex and realistic context for the test.
+        num_prefix_statements = random.randint(0, 2)
+        num_suffix_statements = random.randint(0, 2)
+
+        prefix_statements = self.generate_statement_list(num_prefix_statements, depth=2)
+        suffix_statements = self.generate_statement_list(num_suffix_statements, depth=2)
+
+        # 4. Assemble the final pattern.
+        #    Define a simple class for 'target_obj' to operate on.
+        setup_nodes = ast.parse(dedent("""
+            class Target: pass
+            target_obj = Target()
+        """)).body
+
+        repeat_base = random.randint(1, 96)
+        # The final code places the targeted AST node within other random statements.
+        final_statement_nodes = setup_nodes + prefix_statements + [base_ast_node] * repeat_base + suffix_statements
+
+        # 5. Pre-initialize all variables and unparse the final AST.
+        all_vars_in_scope = self._collect_assigned_variables(final_statement_nodes)
+        initializers = []
+        for var_name in sorted(list(all_vars_in_scope)):
+            value = random.randint(-2 ** 15, 2 ** 15)
+            assign_node = ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Constant(value=value))
+            initializers.append(assign_node)
+
+        final_statement_nodes = initializers + final_statement_nodes
+
+        module_node = ast.Module(body=final_statement_nodes, type_ignores=[])
+        ast.fix_missing_locations(module_node)
+
+        return ast.unparse(module_node)
