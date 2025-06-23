@@ -24,13 +24,74 @@ import random
 from textwrap import dedent
 from typing import TYPE_CHECKING, List
 
+from fusil.write_code import CodeTemplate as CT
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
 
-UOP_MAP = {
-    '_STORE_ATTR': "target_obj.x = 1",
-    '_LOAD_ATTR_MODULE': "math.pi",
-    '_DELETE_ATTR': "del target_obj.x",
+UOP_RECIPES = {
+    # --- Attribute and Subscript Operations ---
+    '_STORE_ATTR': {
+        'pattern': "{target_obj}.x = {value}",
+        'placeholders': {'target_obj': 'object', 'value': 'any'}
+    },
+    '_LOAD_ATTR_METHOD_WITH_VALUES': {
+        'pattern': "_ = {target_obj}.get_value()",
+        'placeholders': {'target_obj': 'object_with_method'}
+    },
+    '_BINARY_SUBSCR_LIST_INT': {
+        'pattern': "_ = {target_list}[{index}]",
+        'placeholders': {'target_list': 'list', 'index': 'small_int'}
+    },
+    '_BINARY_OP_SUBSCR_GETITEM': {
+        'pattern': "_ = {target_obj}[{key}]",
+        'placeholders': {'target_obj': 'object_with_getitem', 'key': 'any'}
+    },
+    '_DELETE_ATTR': {
+        'pattern': "del {target_obj}.x",
+        'placeholders': {'target_obj': 'object_with_attr'}
+    },
+
+    # --- Binary Operations ---
+    '_BINARY_OP_ADD_INT': {
+        'pattern': "{result_var} = {operand_a} + {operand_b}",
+        'placeholders': {'result_var': 'new_variable', 'operand_a': 'int', 'operand_b': 'int'}
+    },
+    '_BINARY_OP_ADD_FLOAT': {
+        'pattern': "{result_var} = {operand_a} + {operand_b}",
+        'placeholders': {'result_var': 'new_variable', 'operand_a': 'float', 'operand_b': 'float'}
+    },
+    '_BINARY_OP_MULTIPLY_TUPLE_INT': {
+        'pattern': "{result_var} = {operand_a} * {operand_b}",
+        'placeholders': {'result_var': 'new_variable', 'operand_a': 'tuple', 'operand_b': 'small_int'}
+    },
+
+    # --- Collection and Iteration ---
+    '_BUILD_LIST': {
+        'pattern': "{result_var} = [{val_a}, {val_b}, {val_c}]",
+        'placeholders': {'result_var': 'new_variable', 'val_a': 'any', 'val_b': 'any', 'val_c': 'any'}
+    },
+    '_CONTAINS_OP_DICT': {
+        'pattern': "_ = {key} in {target_dict}",
+        'placeholders': {'key': 'any', 'target_dict': 'dict'}
+    },
+    '_CALL_LIST_APPEND': {
+        'pattern': "{target_list}.append({value})",
+        'placeholders': {'target_list': 'list', 'value': 'any'}
+    },
+    '_FOR_ITER_LIST': {
+        'pattern': "for {loop_var} in {target_list}: pass",
+        'placeholders': {'loop_var': 'new_variable', 'target_list': 'list'}
+    },
+
+    # --- Compare and Boolean Operations ---
+    '_COMPARE_OP_INT': {
+        'pattern': "_ = {operand_a} > {operand_b}",
+        'placeholders': {'operand_a': 'int', 'operand_b': 'int'}
+    },
+    '_TO_BOOL_INT': {
+        'pattern': "if {target_int}: pass",
+        'placeholders': {'target_int': 'int'}
+    },
 }
 
 
@@ -503,52 +564,108 @@ class ASTPatternGenerator:
 
     def generate_uop_targeted_pattern(self, uop_name: str) -> str:
         """
-        Generates a pattern specifically designed to stress the given uop.
+        Generates a pattern specifically designed to stress the given uop
+        by using a template from the UOP_RECIPES library.
         """
-        self.scope_variables = {'target_obj'}  # Assume a target object exists
-        self.prefix_counter = 0
+        # 1. Get the recipe for the target uop.
+        recipe = UOP_RECIPES.get(uop_name)
+        if not recipe:
+            return f"# ERROR: No recipe found for uop '{uop_name}'"
 
-        # 1. Get the minimal Python snippet for the target uop.
-        base_snippet = UOP_MAP.get(uop_name)
-        if not base_snippet:
-            return f"# ERROR: No mapping found for uop '{uop_name}'"
+        # Generate setup code and substitutions for the placeholders.
+        setup_template = CT("""
+                    # --- Setup for {uop_name} ---
+                    a = 1
+                    b = 2
 
-        try:
-            # 2. Parse the snippet into an AST node.
-            base_ast_node = ast.parse(base_snippet).body[0]
-        except (SyntaxError, IndexError):
-            return f"# ERROR: Failed to parse snippet for uop '{uop_name}'"
+                    class Target: pass
+                    target_obj = Target()
 
-        # 3. Generate a list of "supporting" statements around the core snippet.
-        #    This creates a more complex and realistic context for the test.
-        num_prefix_statements = random.randint(0, 2)
-        num_suffix_statements = random.randint(0, 2)
+                    class TargetWithMethod:
+                        value = 5
+                        def get_value(self):
+                            return self.value
+                    target_obj_with_method = TargetWithMethod()
 
-        prefix_statements = self.generate_statement_list(num_prefix_statements, depth=2)
-        suffix_statements = self.generate_statement_list(num_suffix_statements, depth=2)
+                    class TargetWithAttr:
+                        x = 5
+                    target_obj_with_attr = TargetWithAttr()
 
-        # 4. Assemble the final pattern.
-        #    Define a simple class for 'target_obj' to operate on.
-        setup_nodes = ast.parse(dedent("""
-            class Target: pass
-            target_obj = Target()
-        """)).body
+                    class TargetWithGetItem:
+                        def __getitem__(self, item):
+                            return 5
+                    target_obj_with_getitem = TargetWithGetItem()
 
-        repeat_base = random.randint(1, 96)
-        # The final code places the targeted AST node within other random statements.
-        final_statement_nodes = setup_nodes + prefix_statements + [base_ast_node] * repeat_base + suffix_statements
+                    target_list = list(range(-100, 101))
+                    target_dict = {x: x for x in target_list}
+                    target_tuple = tuple(target_list)
 
-        # 5. Pre-initialize all variables and unparse the final AST.
-        all_vars_in_scope = self._collect_assigned_variables(final_statement_nodes)
-        initializers = []
-        for var_name in sorted(list(all_vars_in_scope)):
-            value = random.randint(-2 ** 15, 2 ** 15)
-            assign_node = ast.Assign(targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Constant(value=value))
-            initializers.append(assign_node)
+                """)
+        setup_code = setup_template.render(uop_name=uop_name)
 
-        final_statement_nodes = initializers + final_statement_nodes
+        substitutions = {}
+        # We need a predictable set of variables to use.
+        # This can be expanded later to be more dynamic.
+        var_map = {
+            'int': ['a', 'b'],
+            'object': ['target_obj'],
+            'object_with_method': ['target_obj_with_method'],
+            'object_with_attr': ['target_obj_with_attr'],
+            'object_with_getitem': ['target_obj_with_getitem'],
+            'list': ['target_list'],
+            'dict': ['target_dict'],
+            'tuple': ['target_tuple'],
+        }
 
-        module_node = ast.Module(body=final_statement_nodes, type_ignores=[])
-        ast.fix_missing_locations(module_node)
+        for placeholder, type_hint in recipe['placeholders'].items():
+            if type_hint == 'new_variable':
+                substitutions[placeholder] = f"res_{uop_name.lower().replace('_', '')}"
+                continue
 
-        return ast.unparse(module_node)
+            use_variable = type_hint in var_map and random.random() < 0.5
+            if use_variable:
+                substitutions[placeholder] = random.choice(var_map[type_hint])
+            else:
+                if type_hint == 'int':
+                    substitutions[placeholder] = self.arg_generator.genInt()[0]
+                elif type_hint == 'small_int':
+                    substitutions[placeholder] = self.arg_generator.genSmallUint()[0]
+                elif type_hint == 'float':
+                    substitutions[placeholder] = self.arg_generator.genFloat()[0]
+                elif type_hint == 'object':
+                    substitutions[placeholder] = "target_obj"
+                elif type_hint == 'object_with_method':
+                    substitutions[placeholder] = "target_obj_with_method"
+                elif type_hint == 'object_with_attr':
+                    substitutions[placeholder] = "target_obj_with_attr"
+                elif type_hint == 'object_with_getitem':
+                    substitutions[placeholder] = "target_obj_with_getitem"
+                elif type_hint == 'list':
+                    substitutions[placeholder] = "target_list"
+                elif type_hint == 'dict':
+                    substitutions[placeholder] = "target_dict"
+                elif type_hint == 'tuple':
+                    substitutions[placeholder] = "target_tuple"
+                else:  # Default 'any' or other types to a simple integer.
+                    substitutions[placeholder] = self.arg_generator.genInt()[0]
+
+            # --- Core Pattern Generation ---
+        core_code = recipe['pattern'].format(**substitutions)
+        core_repeats = random.randint(1, 32)
+        core_code = "\n".join((core_code,) * core_repeats)
+
+        # --- Final Assembly ---
+        final_template = CT("""
+                    # Uop-targeted test for: {uop_name}
+                    {setup}
+
+                    # --- Core Pattern ---
+                    {core}
+                """)
+
+        final_code = final_template.render(
+            uop_name=uop_name,
+            setup=setup_code,
+            core=core_code
+        )
+        return final_code

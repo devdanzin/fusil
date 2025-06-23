@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 import fusil.python.values
 from fusil.python.jit.ast_mutator import ASTMutator
-from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator, UOP_MAP
+from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator, UOP_RECIPES
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 from fusil.write_code import CodeTemplate as CT
 
@@ -289,7 +289,7 @@ class WriteJITCode:
         selection_print = ""
         if uop_to_target.upper() == 'ALL':
             # Randomly select a uop from the keys of our mapping dictionary.
-            uop_to_target = choice(list(UOP_MAP.keys()))
+            uop_to_target = choice(list(UOP_RECIPES.keys()))
             selection_print = self.parent.write_print_to_stderr(
                 0, f'"[{prefix}] JIT-TARGET-UOP=ALL: Randomly selected uop: {uop_to_target}"', return_str=True
             )
@@ -304,7 +304,7 @@ class WriteJITCode:
         )
 
         # 1. Generate a new pattern specifically for the target uop.
-        synthesized_body = self.ast_pattern_generator.generate_uop_targeted_pattern(self.options.jit_target_uop)
+        synthesized_body = self.ast_pattern_generator.generate_uop_targeted_pattern(uop_to_target)
 
         # 2. Get the hot loop boilerplate from our helper and a guarded call.
         hot_loop_str = self._begin_hot_loop(prefix)
