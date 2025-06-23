@@ -47,7 +47,7 @@ UOP_RECIPES = {
         'placeholders': {'target_obj': 'object_with_getitem', 'key': 'any'}
     },
     '_DELETE_ATTR': {
-        'pattern': "del {target_obj}.x",
+        'pattern': "del {target_obj}.x; {target_obj}.x = 1",
         'placeholders': {'target_obj': 'object_with_attr'}
     },
 
@@ -567,6 +567,9 @@ class ASTPatternGenerator:
         Generates a pattern specifically designed to stress the given uop
         by using a template from the UOP_RECIPES library.
         """
+        self.scope_variables = set()
+        self.prefix_counter = 0
+
         # 1. Get the recipe for the target uop.
         recipe = UOP_RECIPES.get(uop_name)
         if not recipe:
@@ -650,22 +653,142 @@ class ASTPatternGenerator:
                     substitutions[placeholder] = self.arg_generator.genInt()[0]
 
             # --- Core Pattern Generation ---
-        core_code = recipe['pattern'].format(**substitutions)
-        core_repeats = random.randint(1, 32)
-        core_code = "\n".join((core_code,) * core_repeats)
+        core_code_str = recipe['pattern'].format(**substitutions)
+        core_repeats = random.randint(67, 134) # Repeat the core op many times
+
+        # --- NEW: Evil Snippet Injection Logic ---
+        final_core_logic_nodes = []
+        # First, parse the "friendly" core pattern into AST nodes.
+        core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
+
+        # Decide whether to inject an evil snippet.
+        # This will be controlled by the --jit-uop-evilness-prob flag later.
+        evil_print = ""
+        if random.random() < 1.25: # 25% chance of being evil for now
+            evil_print = self.parent.write_print_to_stderr(
+                0, f'"[{self._get_prefix()}] Injecting EVIL snippet into uop-targeted pattern!"', return_str=True
+            )
+
+            # Find a suitable variable to attack from the recipe's placeholders.
+            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t), None)
+
+            if target_var_placeholder:
+                target_var_name = substitutions.get(target_var_placeholder)
+                target_var_type = recipe['placeholders'][target_var_placeholder]
+
+                # Generate the evil AST nodes.
+                evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type)
+
+                # Inject the evil snippet right before the last core operation.
+                final_core_logic_nodes.extend(core_ast_nodes[:-1])
+                final_core_logic_nodes.extend(evil_nodes)
+                final_core_logic_nodes.append(core_ast_nodes[-1])
+            else:
+                # If no suitable variable to attack, just generate the friendly code.
+                final_core_logic_nodes.extend(core_ast_nodes)
+        else:
+            final_core_logic_nodes.extend(core_ast_nodes)
+
+        module_node = ast.Module(body=final_core_logic_nodes, type_ignores=[])
+        ast.fix_missing_locations(module_node)
+        # Unparse the final list of core logic nodes back into a string.
+        core_code = ast.unparse(module_node)
 
         # --- Final Assembly ---
         final_template = CT("""
-                    # Uop-targeted test for: {uop_name}
-                    {setup}
+            # Uop-targeted test for: {uop_name}
+            {evil_print}
+            {setup}
 
-                    # --- Core Pattern ---
-                    {core}
-                """)
+            # --- Core Pattern ---
+            {core}
+        """)
 
         final_code = final_template.render(
             uop_name=uop_name,
             setup=setup_code,
-            core=core_code
+            core=core_code,
+            evil_print=evil_print,
         )
         return final_code
+
+
+    def _generate_evil_snippet(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
+        """
+        Selects and generates a random "evil snippet" of code designed to
+        violate the JIT's assumptions about a target variable.
+
+        Args:
+            target_var: The name of the variable to attack.
+            target_var_type: A hint about the variable's original type
+                             (e.g., 'object_with_method', 'int').
+
+        Returns:
+            A list of AST statement nodes representing the evil snippet.
+        """
+        # This is our menu of evil actions. We can add more over time.
+        evil_actions = [
+            self._create_type_corruption_node,
+            self._create_uop_attribute_deletion_node,
+            self._create_method_patch_node,
+        ]
+
+        # Some actions only make sense for objects.
+        if target_var_type not in ('object', 'object_with_method', 'object_with_attr'):
+            # For simple types like 'int', only type corruption is applicable.
+            chosen_action = self._create_type_corruption_node
+        else:
+            chosen_action = random.choice(evil_actions)
+
+        return chosen_action(target_var)
+
+    def _create_type_corruption_node(self, target_var: str) -> List[ast.stmt]:
+        """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
+        # Choose a random, incompatible type to corrupt the variable with.
+        corruption_value = random.choice([
+            ast.Constant(value="corrupted by string"),
+            ast.Constant(value=None),
+            ast.Constant(value=123.456),
+        ])
+
+        return [ast.Assign(
+            targets=[ast.Name(id=target_var, ctx=ast.Store())],
+            value=corruption_value
+        )]
+
+    def _create_uop_attribute_deletion_node(self, target_var: str) -> List[ast.stmt]:
+        """Generates code to delete an attribute (e.g., `del obj.x`)."""
+        # Try to delete a common but potentially unexpected attribute.
+        attr_to_delete = random.choice(['x', 'value', 'payload', '_private'])
+
+        return [ast.Delete(targets=[ast.Attribute(
+            value=ast.Name(id=target_var, ctx=ast.Load()),
+            attr=attr_to_delete,
+            ctx=ast.Del()
+        )])]
+
+    def _create_method_patch_node(self, target_var: str) -> List[ast.stmt]:
+        """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
+        # Target a common method name.
+        method_to_patch = 'get_value'
+
+        # The payload is a simple lambda that returns a constant.
+        lambda_payload = ast.Lambda(
+            args=ast.arguments(args=[], posonlyargs=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
+            body=ast.Constant(value='patched!')
+        )
+
+        # Generate: `target_var.__class__.get_value = lambda: 'patched!'`
+        # Patching the class is more effective for JIT invalidation.
+        return [ast.Assign(
+            targets=[ast.Attribute(
+                value=ast.Attribute(
+                    value=ast.Name(id=target_var, ctx=ast.Load()),
+                    attr='__class__',
+                    ctx=ast.Load()
+                ),
+                attr=method_to_patch,
+                ctx=ast.Store()
+            )],
+            value=lambda_payload
+        )]
