@@ -697,7 +697,7 @@ class ASTPatternGenerator:
         # --- Final Assembly ---
         final_template = CT("""
             # Uop-targeted test for: {uop_name}
-            {evil_print}
+            # {evil_print}
             {setup}
 
             # --- Core Pattern ---
@@ -774,7 +774,14 @@ class ASTPatternGenerator:
 
         # The payload is a simple lambda that returns a constant.
         lambda_payload = ast.Lambda(
-            args=ast.arguments(args=[], posonlyargs=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
+            args=ast.arguments(
+                posonlyargs=[],
+                args=[],
+                vararg=ast.arg(arg='a'),
+                kwarg=ast.arg(arg='kw'),
+                kw_defaults=[],
+                defaults=[]
+            ),
             body=ast.Constant(value='patched!')
         )
 
