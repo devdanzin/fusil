@@ -303,8 +303,10 @@ class WriteJITCode:
             0, f'"[{prefix}] Targeted Uop Fuzzing ({uop_to_target}) done."', return_str=True
         )
 
-        # 1. Generate a new pattern specifically for the target uop.
-        synthesized_body = self.ast_pattern_generator.generate_uop_targeted_pattern(uop_to_target)
+        # 1. Generate a new setup code and pattern specifically for the target uop.
+        setup_code, core_pattern_code, evil_print = self.ast_pattern_generator.generate_uop_targeted_pattern(
+            uop_to_target
+        )
 
         # 2. Get the hot loop boilerplate from our helper and a guarded call.
         hot_loop_str = self._begin_hot_loop(prefix)
@@ -313,10 +315,13 @@ class WriteJITCode:
         # 3. Assemble the final code block using the CodeTemplate class.
         final_code = CT("""
                     {header_print}
+                    # --- Setup for uop: {uop_to_target} ---
+                    {setup_code}
 
                     # This harness function contains the synthesized code.
                     def uop_harness_{prefix}():
-                        {synthesized_body}
+                        # --- Core Pattern ---
+                        {core_pattern_code}
 
                     # Execute the harness in a JIT-warming hot loop.
                     {hot_loop_str}

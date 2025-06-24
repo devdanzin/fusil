@@ -47,8 +47,8 @@ UOP_RECIPES = {
         'placeholders': {'target_obj': 'object_with_getitem', 'key': 'any'}
     },
     '_DELETE_ATTR': {
-        'pattern': "del {target_obj}.x; {target_obj}.x = 1",  # We cannot simply delete sequentially
-        'placeholders': {'target_obj': 'object_with_attr'}
+        'pattern': "del {target_obj}.x",
+        'placeholders': {'target_obj': 'object_with_attr', 'value': 'int'}
     },
 
     # --- Binary Operations ---
@@ -562,7 +562,7 @@ class ASTPatternGenerator:
 
         return assigned_vars
 
-    def generate_uop_targeted_pattern(self, uop_name: str) -> str:
+    def generate_uop_targeted_pattern(self, uop_name: str) -> tuple[str, str, str]:
         """
         Generates a pattern specifically designed to stress the given uop
         by using a template from the UOP_RECIPES library.
@@ -573,7 +573,7 @@ class ASTPatternGenerator:
         # 1. Get the recipe for the target uop.
         recipe = UOP_RECIPES.get(uop_name)
         if not recipe:
-            return f"# ERROR: No recipe found for uop '{uop_name}'"
+            return f"# ERROR: No recipe found for uop '{uop_name}'", "pass", ""
 
         # Generate setup code and substitutions for the placeholders.
         setup_template = CT("""
@@ -581,20 +581,28 @@ class ASTPatternGenerator:
                     a = 1
                     b = 2
 
-                    class Target: pass
+                    class Target:
+                        def __init__(self):
+                            self.value = 5
+                    
                     target_obj = Target()
 
                     class TargetWithMethod:
-                        value = 5
+                        def __init__(self):
+                            self.value = 5
                         def get_value(self):
                             return self.value
                     target_obj_with_method = TargetWithMethod()
 
                     class TargetWithAttr:
                         x = 5
+                        def __init__(self):
+                            self.value = 5
                     target_obj_with_attr = TargetWithAttr()
 
                     class TargetWithGetItem:
+                        def __init__(self):
+                            self.value = 5
                         def __getitem__(self, item):
                             return 5
                     target_obj_with_getitem = TargetWithGetItem()
@@ -606,6 +614,111 @@ class ASTPatternGenerator:
                 """)
         setup_code = setup_template.render(uop_name=uop_name)
 
+        substitutions = self._get_substitutions_for_recipe(uop_name, recipe)
+
+            # --- Core Pattern Generation ---
+        if uop_name == '_DELETE_ATTR':
+            # Create a robust del/set pair
+            core_template = CT("""
+                try:
+                    del {target_obj}.x
+                except AttributeError:
+                    pass
+                {target_obj}.x = {value}
+            """)
+            core_code_str = core_template.render(**substitutions)
+        else:
+            # The standard pattern for other uops
+            core_code_str = recipe['pattern'].format(**substitutions)
+        core_repeats = random.randint(67, 134) # Repeat the core op many times
+
+        # --- NEW: Evil Snippet Injection Logic ---
+        final_core_logic_nodes = []
+        # First, parse the "friendly" core pattern into AST nodes.
+        core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
+
+        # Decide whether to inject an evil snippet.
+        # This will be controlled by the --jit-uop-evilness-prob flag later.
+        evil_print = ""
+        if random.random() < 0.25: # 25% chance of being evil for now
+            evil_print = self.parent.write_print_to_stderr(
+                0, f'"[{self._get_prefix()}] Injecting EVIL snippet into uop-targeted pattern!"', return_str=True
+            )
+
+            # Find a suitable variable to attack from the recipe's placeholders.
+            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t), None)
+
+            if target_var_placeholder:
+                target_var_name = substitutions.get(target_var_placeholder)
+                target_var_type = recipe['placeholders'][target_var_placeholder]
+
+                # Generate the evil AST nodes.
+                evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type)
+
+                # Inject the evil snippet right before the last core operation.
+                final_core_logic_nodes.extend(core_ast_nodes[:-1])
+                final_core_logic_nodes.extend(evil_nodes)
+                final_core_logic_nodes.append(core_ast_nodes[-1])
+            else:
+                # If no suitable variable to attack, just generate the friendly code.
+                final_core_logic_nodes.extend(core_ast_nodes)
+        else:
+            final_core_logic_nodes.extend(core_ast_nodes)
+
+        # 1. Find all variables that are assigned to inside the generated code.
+        assigned_locals = self._collect_assigned_variables(final_core_logic_nodes)
+
+        # 2. These are the "globals" defined in our setup block.
+        setup_globals = {
+            'a', 'b', 'target_obj', 'target_obj_with_method', 'target_obj_with_attr',
+            'target_obj_with_getitem', 'target_list', 'target_dict', 'target_tuple'
+        }
+
+        # 3. Find the intersection - these are the names we need to shadow.
+        shadowed_vars = assigned_locals.intersection(setup_globals)
+
+        shadowing_assignments = []
+        if shadowed_vars:
+            for var_name in shadowed_vars:
+                # Create an AST node for: `var_name = globals(var_name)`
+                shadowing_assignment = ast.Assign(
+                    targets=[ast.Name(id=var_name, ctx=ast.Store())],
+                    value=ast.Subscript(value=ast.Call(
+                        func=ast.Name(id='globals', ctx=ast.Load()),
+                        args=[],
+                        keywords=[]
+                    ), slice=ast.Constant(value=var_name))
+                )
+                shadowing_assignments.append(shadowing_assignment)
+
+        # 4. Prepend the shadowing assignments to the core logic.
+        # This makes them explicit locals at the top of the function scope.
+        final_core_logic_nodes = shadowing_assignments + final_core_logic_nodes
+
+        module_node = ast.Module(body=final_core_logic_nodes, type_ignores=[])
+        ast.fix_missing_locations(module_node)
+        # Unparse the final list of core logic nodes back into a string.
+        core_code = ast.unparse(module_node)
+
+        # --- Final Assembly ---
+        final_template = CT("""
+            # Uop-targeted test for: {uop_name}
+
+            # --- Core Pattern ---
+            {core}
+        """)
+
+        final_code = final_template.render(
+            uop_name=uop_name,
+            core=core_code,
+            evil_print=evil_print,
+        )
+        return setup_code, core_code, evil_print
+
+    def _get_substitutions_for_recipe(self, uop_name: str, recipe: dict) -> dict:
+        """
+        A dedicated helper to handle placeholder substitutions.
+        """
         substitutions = {}
         # We need a predictable set of variables to use.
         # This can be expanded later to be more dynamic.
@@ -652,66 +765,7 @@ class ASTPatternGenerator:
                 else:  # Default 'any' or other types to a simple integer.
                     substitutions[placeholder] = self.arg_generator.genInt()[0]
 
-            # --- Core Pattern Generation ---
-        core_code_str = recipe['pattern'].format(**substitutions)
-        core_repeats = random.randint(67, 134) # Repeat the core op many times
-
-        # --- NEW: Evil Snippet Injection Logic ---
-        final_core_logic_nodes = []
-        # First, parse the "friendly" core pattern into AST nodes.
-        core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
-
-        # Decide whether to inject an evil snippet.
-        # This will be controlled by the --jit-uop-evilness-prob flag later.
-        evil_print = ""
-        if random.random() < 1.25: # 25% chance of being evil for now
-            evil_print = self.parent.write_print_to_stderr(
-                0, f'"[{self._get_prefix()}] Injecting EVIL snippet into uop-targeted pattern!"', return_str=True
-            )
-
-            # Find a suitable variable to attack from the recipe's placeholders.
-            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t), None)
-
-            if target_var_placeholder:
-                target_var_name = substitutions.get(target_var_placeholder)
-                target_var_type = recipe['placeholders'][target_var_placeholder]
-
-                # Generate the evil AST nodes.
-                evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type)
-
-                # Inject the evil snippet right before the last core operation.
-                final_core_logic_nodes.extend(core_ast_nodes[:-1])
-                final_core_logic_nodes.extend(evil_nodes)
-                final_core_logic_nodes.append(core_ast_nodes[-1])
-            else:
-                # If no suitable variable to attack, just generate the friendly code.
-                final_core_logic_nodes.extend(core_ast_nodes)
-        else:
-            final_core_logic_nodes.extend(core_ast_nodes)
-
-        module_node = ast.Module(body=final_core_logic_nodes, type_ignores=[])
-        ast.fix_missing_locations(module_node)
-        # Unparse the final list of core logic nodes back into a string.
-        core_code = ast.unparse(module_node)
-
-        # --- Final Assembly ---
-        final_template = CT("""
-            # Uop-targeted test for: {uop_name}
-            # {evil_print}
-            {setup}
-
-            # --- Core Pattern ---
-            {core}
-        """)
-
-        final_code = final_template.render(
-            uop_name=uop_name,
-            setup=setup_code,
-            core=core_code,
-            evil_print=evil_print,
-        )
-        return final_code
-
+        return substitutions
 
     def _generate_evil_snippet(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
         """
@@ -759,7 +813,7 @@ class ASTPatternGenerator:
     def _create_uop_attribute_deletion_node(self, target_var: str) -> List[ast.stmt]:
         """Generates code to delete an attribute (e.g., `del obj.x`)."""
         # Try to delete a common but potentially unexpected attribute.
-        attr_to_delete = random.choice(['x', 'value', 'payload', '_private'])
+        attr_to_delete = random.choice(['value'])
 
         return [ast.Delete(targets=[ast.Attribute(
             value=ast.Name(id=target_var, ctx=ast.Load()),
