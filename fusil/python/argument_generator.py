@@ -15,6 +15,7 @@ vulnerabilities through unusual type interactions and boundary conditions.
 from __future__ import annotations
 
 from random import choice, randint, sample
+from textwrap import dedent
 from typing import Callable
 
 import fusil.python
@@ -350,7 +351,7 @@ class ArgumentGenerator:
         return ["Exception('fuzzer_generated_exception')"]
 
     def _gen_collection_internal(
-        self, open_text: str, close_text: str, empty_repr: str, is_dict: bool = False
+        self, open_text: str, close_text: str, empty_repr: str, is_dict: bool = False, is_set: bool = False
     ) -> list[str]:
         """Helper to generate code for lists, tuples, or dictionaries."""
         same_type = randint(1, 10) != 1  # 90% same_type
@@ -361,7 +362,7 @@ class ArgumentGenerator:
 
         items_code_lines: list[list[str]] = []
         if same_type:
-            key_generator_func = self.create_hashable_argument if is_dict else None
+            key_generator_func = self.create_hashable_argument if is_dict or is_set else None
             value_generator_func = self.create_simple_argument
 
             for _ in range(nb_item):
@@ -369,6 +370,8 @@ class ArgumentGenerator:
                     current_item_lines = self._create_dict_item_lines(
                         key_generator_func, value_generator_func
                     )
+                elif is_set and key_generator_func:
+                    current_item_lines = key_generator_func()
                 else:
                     current_item_lines = value_generator_func()
                 items_code_lines.append(current_item_lines)
@@ -376,6 +379,8 @@ class ArgumentGenerator:
             for _ in range(nb_item):
                 if is_dict:
                     current_item_lines = self._create_dict_item_lines()
+                elif is_set:
+                    current_item_lines = self.create_hashable_argument()
                 else:
                     current_item_lines = self.create_simple_argument()
                 items_code_lines.append(current_item_lines)
@@ -423,3 +428,57 @@ class ArgumentGenerator:
     def genDict(self) -> list[str]:
         """Generate a dictionary literal string."""
         return self._gen_collection_internal("{", "}", "{}", True)
+
+    def genSet(self) -> list[str]:
+        """Generate a set literal string."""
+        return self._gen_collection_internal("{", "}", "set()", is_set=True)
+
+    def genSimpleObject(self, var_name: str) -> str:
+        class_name = f"C_{var_name}"  # We can use var_name because it will be unique
+        setup_code = (dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self.x = 1
+                    self.y = 'y'
+                    self.value = "value"
+                def get_value(self):
+                    return self.value
+                def __getitem__(self, item):
+                    return 5
+            {var_name} = {class_name}()
+        """))
+        return setup_code
+
+    def generate_arg_by_type(self, p_type, var_name: str) -> str:
+        """
+        Generates setup code for a given placeholder type.
+
+        Args:
+            p_type: The type hint for the placeholder (e.g., 'int', 'list').
+            var_name: The base name for the variable to be created.
+        Returns: The setup_code for the variable.
+        """
+        simple_dispatch_table = {
+            'int': self.genInt,
+            'float': self.genFloat,
+            'str': self.genString,
+            'list': self.genList,
+            'tuple': self.genTuple,
+            'set': self.genSet,
+            'dict': self.genDict,
+            'small_int': self.genSmallUint,
+        }
+
+        custom_dispatch_table = {
+            'object': self.genSimpleObject,
+            'object_with_method': self.genSimpleObject,
+            'object_with_attr': self.genSimpleObject,
+            'object_with_getitem': self.genSimpleObject,
+        }
+
+        if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
+            return self.generate_arg_by_type(choice(('int', 'float', 'str', 'list')), var_name)
+        elif p_type in simple_dispatch_table:
+            return f"{var_name} = {"".join(simple_dispatch_table[p_type]())}"
+        else:
+            return custom_dispatch_table[p_type](var_name)

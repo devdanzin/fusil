@@ -21,6 +21,7 @@ This engine is activated by the `--jit-mode=synthesize` command-line option.
 import ast
 import copy
 import random
+from collections import defaultdict
 from textwrap import dedent
 from typing import TYPE_CHECKING, List
 
@@ -35,16 +36,16 @@ UOP_RECIPES = {
         'placeholders': {'target_obj': 'object', 'value': 'any'}
     },
     '_LOAD_ATTR_METHOD_WITH_VALUES': {
-        'pattern': "_ = {target_obj}.get_value()",
-        'placeholders': {'target_obj': 'object_with_method'}
+        'pattern': "{result_var} = {target_obj}.get_value()",
+        'placeholders': {'result_var': 'new_variable', 'target_obj': 'object_with_method'}
     },
     '_BINARY_SUBSCR_LIST_INT': {
-        'pattern': "_ = {target_list}[{index}]",
-        'placeholders': {'target_list': 'list', 'index': 'small_int'}
+        'pattern': "{result_var} = {target_list}[{index}]",
+        'placeholders': {'result_var': 'new_variable', 'target_list': 'list', 'index': 'small_int'}
     },
     '_BINARY_OP_SUBSCR_GETITEM': {
-        'pattern': "_ = {target_obj}[{key}]",
-        'placeholders': {'target_obj': 'object_with_getitem', 'key': 'any'}
+        'pattern': "{result_var} = {target_obj}[{key}]",
+        'placeholders': {'result_var': 'new_variable', 'target_obj': 'object_with_getitem', 'key': 'any'}
     },
     '_DELETE_ATTR': {
         'pattern': "del {target_obj}.x",
@@ -67,30 +68,126 @@ UOP_RECIPES = {
 
     # --- Collection and Iteration ---
     '_BUILD_LIST': {
-        'pattern': "{result_var} = [{val_a}, {val_b}, {val_c}]",
+        'pattern': "{result_var} = [" + "{val_a}, {val_b}, {val_c}," * 50 + "]",
         'placeholders': {'result_var': 'new_variable', 'val_a': 'any', 'val_b': 'any', 'val_c': 'any'}
     },
     '_CONTAINS_OP_DICT': {
-        'pattern': "_ = {key} in {target_dict}",
-        'placeholders': {'key': 'any', 'target_dict': 'dict'}
-    },
-    '_CALL_LIST_APPEND': {
-        'pattern': "{target_list}.append({value})",
-        'placeholders': {'target_list': 'list', 'value': 'any'}
-    },
-    '_FOR_ITER_LIST': {
-        'pattern': "for {loop_var} in {target_list}: pass",
-        'placeholders': {'loop_var': 'new_variable', 'target_list': 'list'}
+        'pattern': "{result_var} = {key} in {target_dict}",
+        'placeholders': {'result_var': 'new_variable', 'key': 'any', 'target_dict': 'dict'}
     },
 
     # --- Compare and Boolean Operations ---
     '_COMPARE_OP_INT': {
-        'pattern': "_ = {operand_a} > {operand_b}",
-        'placeholders': {'operand_a': 'int', 'operand_b': 'int'}
+        'pattern': "{result_var} = {operand_a} > {operand_b}",
+        'placeholders': {'result_var': 'new_variable', 'operand_a': 'int', 'operand_b': 'int'}
     },
     '_TO_BOOL_INT': {
         'pattern': "if {target_int}: pass",
         'placeholders': {'target_int': 'int'}
+    },
+    '_LOAD_ATTR': {
+        'pattern': '{target_obj}.x',
+        'placeholders': {'target_obj': 'object_with_attr'}
+    },
+    '_BINARY_SUBSCR_TUPLE_INT': {
+        'pattern': '{target_tuple}[{index}]',
+        'placeholders': {'target_tuple': 'tuple', 'index': 'small_int'}
+    },
+    '_BINARY_OP_SUB_INT': {
+        'pattern': '{a} - {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_BINARY_OP_MUL_INT': {
+        'pattern': '{a} * {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_BINARY_OP_SUB_FLOAT': {
+        'pattern': '{a} - {b}',
+        'placeholders': {'a': 'float', 'b': 'float'}
+    },
+    '_BINARY_OP_MUL_FLOAT': {
+        'pattern': '{a} * {b}',
+        'placeholders': {'a': 'float', 'b': 'float'}
+    },
+    '_BINARY_OP_AND_INT': {
+        'pattern': '{a} & {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_BINARY_OP_OR_INT': {
+        'pattern': '{a} | {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_BINARY_OP_XOR_INT': {
+        'pattern': '{a} ^ {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_COMPARE_OP_EQ_INT': {
+        'pattern': '{a} == {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_COMPARE_OP_LT_INT': {
+        'pattern': '{a} < {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_COMPARE_OP_GT_INT': {
+        'pattern': '{a} > {b}',
+        'placeholders': {'a': 'int', 'b': 'int'}
+    },
+    '_COMPARE_OP_EQ_STR': {
+        'pattern': '{a} == {b}',
+        'placeholders': {'a': 'str', 'b': 'str'}
+    },
+    '_COMPARE_OP_LT_STR': {
+        'pattern': '{a} < {b}',
+        'placeholders': {'a': 'str', 'b': 'str'}
+    },
+    '_COMPARE_OP_GT_STR': {
+        'pattern': '{a} > {b}',
+        'placeholders': {'a': 'str', 'b': 'str'}
+    },
+    '_UNARY_NOT': {
+        'pattern': 'not {value}',
+        'placeholders': {'value': 'any'}
+    },
+    '_TO_BOOL': {
+        'pattern': 'if {obj}: pass',
+        'placeholders': {'obj': 'object'}
+    },
+    '_BUILD_TUPLE': {
+        'pattern': '({a}, {b})',
+        'placeholders': {'a': 'any', 'b': 'any'}
+    },
+    '_BUILD_SET': {
+        'pattern': '{{ {a}, {b} }}',
+        'placeholders': {'a': 'any', 'b': 'any'}
+    },
+    '_BUILD_MAP': {
+        'pattern': '{{ {key}: {value} }}',
+        'placeholders': {'key': 'str', 'value': 'any'}
+    },
+    '_UNPACK_SEQUENCE_TUPLE': {
+        'pattern': 'x, *y = {iterable}',
+        'placeholders': {'iterable': 'tuple'}
+    },
+    '_UNPACK_SEQUENCE_LIST': {
+        'pattern': 'x, *y = {iterable}',
+        'placeholders': {'iterable': 'list'}
+    },
+    '_FOR_ITER_LIST': {
+        'pattern': 'for {result_var} in {iterable}: pass',
+        'placeholders': {'result_var': 'new_variable', 'iterable': 'list'}
+    },
+    '_FOR_ITER_TUPLE': {
+        'pattern': 'for {result_var} in {iterable}: pass',
+        'placeholders': {'result_var': 'new_variable', 'iterable': 'tuple'}
+    },
+    '_CALL_LIST_APPEND': {
+        'pattern': '{target_list}.append({value})',
+        'placeholders': {'target_list': 'list', 'value': 'any'}
+    },
+    '_YIELD_VALUE': {
+        'pattern': 'yield {value}',
+        'placeholders': {'value': 'any'}
     },
 }
 
@@ -126,6 +223,9 @@ class ASTPatternGenerator:
         """Generates a unique prefix for variable names."""
         self.prefix_counter += 1
         return f"v{self.prefix_counter}"
+
+    def _get_unique_var_name(self, base="var"):
+        return f"{base}_{self._get_prefix()}"
 
     def _generate_expression_ast(self, depth: int = 0) -> ast.expr:
         """
@@ -431,7 +531,8 @@ class ASTPatternGenerator:
             bases=[],
             keywords=[],
             body=[ast.Pass()],
-            decorator_list=[]
+            decorator_list=[],
+            type_params=[]
         )
 
         instance_creation = ast.Assign(
@@ -575,46 +676,18 @@ class ASTPatternGenerator:
         if not recipe:
             return f"# ERROR: No recipe found for uop '{uop_name}'", "pass", ""
 
-        # Generate setup code and substitutions for the placeholders.
-        setup_template = CT("""
-                    # --- Setup for {uop_name} ---
-                    a = 1
-                    b = 2
-
-                    class Target:
-                        def __init__(self):
-                            self.value = 5
-                    
-                    target_obj = Target()
-
-                    class TargetWithMethod:
-                        def __init__(self):
-                            self.value = 5
-                        def get_value(self):
-                            return self.value
-                    target_obj_with_method = TargetWithMethod()
-
-                    class TargetWithAttr:
-                        x = 5
-                        def __init__(self):
-                            self.value = 5
-                    target_obj_with_attr = TargetWithAttr()
-
-                    class TargetWithGetItem:
-                        def __init__(self):
-                            self.value = 5
-                        def __getitem__(self, item):
-                            return 5
-                    target_obj_with_getitem = TargetWithGetItem()
-
-                    target_list = list(range(-100, 101))
-                    target_dict = {x: x for x in target_list}
-                    target_tuple = tuple(target_list)
-
-                """)
-        setup_code = setup_template.render(uop_name=uop_name)
-
-        substitutions = self._get_substitutions_for_recipe(uop_name, recipe)
+        var_map = defaultdict(list)
+        setup_code_lines = []
+        for p_name, p_type in recipe['placeholders'].items():
+            if p_type == "new_variable":
+                var_name =  f"res_{uop_name.lower().replace('_', '')}"
+            else:
+                var_name = self._get_unique_var_name()
+            var_map[p_type].append(var_name)
+            setup_code = self.arg_generator.generate_arg_by_type(p_type, var_name)
+            setup_code_lines.append(setup_code)
+        setup_code = "\n\n".join(setup_code_lines)
+        substitutions = self._get_substitutions_for_recipe(uop_name, recipe, var_map)
 
             # --- Core Pattern Generation ---
         if uop_name == '_DELETE_ATTR':
@@ -630,17 +703,18 @@ class ASTPatternGenerator:
         else:
             # The standard pattern for other uops
             core_code_str = recipe['pattern'].format(**substitutions)
-        core_repeats = random.randint(67, 134) # Repeat the core op many times
+        core_repeats = random.randint(5, 10) # Repeat the core op many times
 
         # --- NEW: Evil Snippet Injection Logic ---
         final_core_logic_nodes = []
-        # First, parse the "friendly" core pattern into AST nodes.
+        # First, parse the setup code and the "friendly" core pattern into AST nodes.
         core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
+        setup_ast_nodes = ast.parse(dedent(setup_code)).body
 
         # Decide whether to inject an evil snippet.
         # This will be controlled by the --jit-uop-evilness-prob flag later.
         evil_print = ""
-        if random.random() < 0.25: # 25% chance of being evil for now
+        if random.random() < 1.25: # 25% chance of being evil for now
             evil_print = self.parent.write_print_to_stderr(
                 0, f'"[{self._get_prefix()}] Injecting EVIL snippet into uop-targeted pattern!"', return_str=True
             )
@@ -669,13 +743,10 @@ class ASTPatternGenerator:
         assigned_locals = self._collect_assigned_variables(final_core_logic_nodes)
 
         # 2. These are the "globals" defined in our setup block.
-        setup_globals = {
-            'a', 'b', 'target_obj', 'target_obj_with_method', 'target_obj_with_attr',
-            'target_obj_with_getitem', 'target_list', 'target_dict', 'target_tuple'
-        }
+        assigned_globals = self._collect_assigned_variables(setup_ast_nodes)
 
         # 3. Find the intersection - these are the names we need to shadow.
-        shadowed_vars = assigned_locals.intersection(setup_globals)
+        shadowed_vars = assigned_locals.intersection(assigned_globals)
 
         shadowing_assignments = []
         if shadowed_vars:
@@ -715,56 +786,18 @@ class ASTPatternGenerator:
         )
         return setup_code, core_code, evil_print
 
-    def _get_substitutions_for_recipe(self, uop_name: str, recipe: dict) -> dict:
+    def _get_substitutions_for_recipe(self, uop_name: str, recipe: dict, var_map: dict) -> dict:
         """
         A dedicated helper to handle placeholder substitutions.
         """
         substitutions = {}
-        # We need a predictable set of variables to use.
-        # This can be expanded later to be more dynamic.
-        var_map = {
-            'int': ['a', 'b'],
-            'object': ['target_obj'],
-            'object_with_method': ['target_obj_with_method'],
-            'object_with_attr': ['target_obj_with_attr'],
-            'object_with_getitem': ['target_obj_with_getitem'],
-            'list': ['target_list'],
-            'dict': ['target_dict'],
-            'tuple': ['target_tuple'],
-        }
 
         for placeholder, type_hint in recipe['placeholders'].items():
             if type_hint == 'new_variable':
                 substitutions[placeholder] = f"res_{uop_name.lower().replace('_', '')}"
                 continue
 
-            use_variable = type_hint in var_map and random.random() < 0.5
-            if use_variable:
-                substitutions[placeholder] = random.choice(var_map[type_hint])
-            else:
-                if type_hint == 'int':
-                    substitutions[placeholder] = self.arg_generator.genInt()[0]
-                elif type_hint == 'small_int':
-                    substitutions[placeholder] = self.arg_generator.genSmallUint()[0]
-                elif type_hint == 'float':
-                    substitutions[placeholder] = self.arg_generator.genFloat()[0]
-                elif type_hint == 'object':
-                    substitutions[placeholder] = "target_obj"
-                elif type_hint == 'object_with_method':
-                    substitutions[placeholder] = "target_obj_with_method"
-                elif type_hint == 'object_with_attr':
-                    substitutions[placeholder] = "target_obj_with_attr"
-                elif type_hint == 'object_with_getitem':
-                    substitutions[placeholder] = "target_obj_with_getitem"
-                elif type_hint == 'list':
-                    substitutions[placeholder] = "target_list"
-                elif type_hint == 'dict':
-                    substitutions[placeholder] = "target_dict"
-                elif type_hint == 'tuple':
-                    substitutions[placeholder] = "target_tuple"
-                else:  # Default 'any' or other types to a simple integer.
-                    substitutions[placeholder] = self.arg_generator.genInt()[0]
-
+            substitutions[placeholder] = random.choice(var_map[type_hint])
         return substitutions
 
     def _generate_evil_snippet(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
