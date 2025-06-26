@@ -714,30 +714,49 @@ class ASTPatternGenerator:
         # Decide whether to inject an evil snippet.
         # This will be controlled by the --jit-uop-evilness-prob flag later.
         evil_print = ""
-        if random.random() < 1.25: # 25% chance of being evil for now
-            evil_print = self.parent.write_print_to_stderr(
-                0, f'"[{self._get_prefix()}] Injecting EVIL snippet into uop-targeted pattern!"', return_str=True
-            )
+        # This will be controlled by a flag later, e.g., self.parent.config.jit_uop_evilness_prob
+        evil_probability = 0.005
+        inject_evil = random.random() < 1.25 # Forcing it to be more common for now for testing
 
-            # Find a suitable variable to attack from the recipe's placeholders.
-            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t), None)
+        if inject_evil:
+            # Find a suitable variable to attack
+            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t or 'int' in t or 'list' in t), None)
 
             if target_var_placeholder:
+                evil_print = self.parent.write_print_to_stderr(
+                    0, f'"[{self._get_prefix()}] Injecting PROBABILISTIC EVIL snippet!"', return_str=True
+                )
                 target_var_name = substitutions.get(target_var_placeholder)
                 target_var_type = recipe['placeholders'][target_var_placeholder]
 
-                # Generate the evil AST nodes.
+                # Generate the evil AST nodes
                 evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type)
 
+                # Create the probabilistic `if` condition: `if random.random() < 0.005:`
+                probabilistic_if_node = ast.If(
+                    test=ast.Compare(
+                        left=ast.Call(
+                            func=ast.Name(id='random', ctx=ast.Load()),
+                            args=[],
+                            keywords=[]
+                        ),
+                        ops=[ast.Lt()],
+                        comparators=[ast.Constant(value=evil_probability)]
+                    ),
+                    body=evil_nodes,
+                    orelse=[]
+                )
+
                 # Inject the evil snippet right before the last core operation.
-                final_core_logic_nodes.extend(core_ast_nodes[:-1])
-                final_core_logic_nodes.extend(evil_nodes)
+                final_core_logic_nodes = core_ast_nodes[:-1]
+                final_core_logic_nodes.append(probabilistic_if_node)
                 final_core_logic_nodes.append(core_ast_nodes[-1])
             else:
-                # If no suitable variable to attack, just generate the friendly code.
-                final_core_logic_nodes.extend(core_ast_nodes)
+                final_core_logic_nodes = core_ast_nodes
         else:
-            final_core_logic_nodes.extend(core_ast_nodes)
+            final_core_logic_nodes = core_ast_nodes
+
+
 
         # 1. Find all variables that are assigned to inside the generated code.
         assigned_locals = self._collect_assigned_variables(final_core_logic_nodes)
@@ -818,6 +837,7 @@ class ASTPatternGenerator:
             self._create_type_corruption_node,
             self._create_uop_attribute_deletion_node,
             self._create_method_patch_node,
+            self._create_type_confusion_node,
         ]
 
         # Some actions only make sense for objects.
@@ -827,9 +847,34 @@ class ASTPatternGenerator:
         else:
             chosen_action = random.choice(evil_actions)
 
-        return chosen_action(target_var)
+        return chosen_action(target_var, target_var_type)
 
-    def _create_type_corruption_node(self, target_var: str) -> List[ast.stmt]:
+    def _create_type_confusion_node(self, target_var_name: str, target_var_type: str) -> list[ast.AST]:
+        """
+        Generates AST nodes to perform a type corruption attack on the target variable.
+        """
+        # A mapping from a type to a "confusable" type for corruption.
+        corruption_map = {
+            'int': 'float',
+            'float': 'int',
+            'list': 'tuple',
+            'tuple': 'list',
+            'str': 'int',
+            'object': 'int',
+        }
+        evil_type = corruption_map.get(target_var_type, 'str')
+
+        evil_var_name = self._get_unique_var_name(base="evil_val")
+        evil_setup_code = self.arg_generator.generate_arg_by_type(evil_type, evil_var_name)
+
+        evil_setup_nodes = ast.parse(dedent(evil_setup_code)).body
+        final_corruption_node = ast.Assign(
+            targets=[ast.Name(id=target_var_name, ctx=ast.Store())],
+            value=ast.Name(id=evil_var_name, ctx=ast.Load())
+        )
+        return evil_setup_nodes + [final_corruption_node]
+
+    def _create_type_corruption_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
         """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
         # Choose a random, incompatible type to corrupt the variable with.
         corruption_value = random.choice([
@@ -843,7 +888,7 @@ class ASTPatternGenerator:
             value=corruption_value
         )]
 
-    def _create_uop_attribute_deletion_node(self, target_var: str) -> List[ast.stmt]:
+    def _create_uop_attribute_deletion_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
         """Generates code to delete an attribute (e.g., `del obj.x`)."""
         # Try to delete a common but potentially unexpected attribute.
         attr_to_delete = random.choice(['value'])
@@ -854,7 +899,7 @@ class ASTPatternGenerator:
             ctx=ast.Del()
         )])]
 
-    def _create_method_patch_node(self, target_var: str) -> List[ast.stmt]:
+    def _create_method_patch_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
         """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
         # Target a common method name.
         method_to_patch = 'get_value'
