@@ -493,9 +493,78 @@ class ArgumentGenerator:
             class {class_name}:
                 def __hash__(self):
                     # Violates the rule that hash must be constant for the object's lifetime.
-                    new_hash = random.randint(0, 2**64 - 1)
+                    new_hash = randint(0, 2**64 - 1)
                     print(f"[EVIL] UnstableHash __hash__ called, returning {{new_hash}}", file=sys.stderr)
                     return new_hash
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulStrReprObject(self, var_name: str) -> str:
+        """
+        Generates a class with stateful __str__ and __repr__ methods.
+        __repr__ will eventually return a non-string type to cause a TypeError.
+        """
+        class_name = f"StatefulStrRepr_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._str_count = 0
+                    self._repr_count = 0
+                    self._str_options = ['a', 'b', 'c']
+                def __str__(self):
+                    val = self._str_options[self._str_count % len(self._str_options)]
+                    print(f"[EVIL] StatefulStrRepr __str__ called, returning '{{val}}'", file=sys.stderr)
+                    self._str_count += 1
+                    return val
+                def __repr__(self):
+                    self._repr_count += 1
+                    if self._repr_count > 3:
+                        print("[EVIL] StatefulStrRepr __repr__ called, returning NON-STRING type 123", file=sys.stderr)
+                        return 123  # Violates contract, should raise TypeError
+                    val = f"<StatefulRepr run #{{self._repr_count}}>"
+                    print(f"[EVIL] StatefulStrRepr __repr__ called, returning '{{val}}'", file=sys.stderr)
+                    return val
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulGetitemObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __getitem__ returns different types based on call count.
+        """
+        class_name = f"StatefulGetitem_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._getitem_count = 0
+                def __getitem__(self, key):
+                    self._getitem_count += 1
+                    if self._getitem_count > 5:
+                        print(f"[EVIL] StatefulGetitem __getitem__ returning float", file=sys.stderr)
+                        return 99.9
+                    print(f"[EVIL] StatefulGetitem __getitem__ returning int", file=sys.stderr)
+                    return 5
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulGetattrObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __getattr__ returns different values based on call count.
+        """
+        class_name = f"StatefulGetattr_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._getattr_count = 0
+                def __getattr__(self, name):
+                    self._getattr_count += 1
+                    if self._getattr_count > 5:
+                        print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'evil_attribute'", file=sys.stderr)
+                        return 'evil_attribute'
+                    print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'normal_attribute'", file=sys.stderr)
+                    return 'normal_attribute'
             {var_name} = {class_name}()
         """)
         return setup_code
@@ -528,11 +597,19 @@ class ArgumentGenerator:
             'lying_eq_object': self.genLyingEqualityObject,
             'stateful_len_object': self.genStatefulLenObject,
             'unstable_hash_object': self.genUnstableHashObject,
+            'stateful_str_object': self.genStatefulStrReprObject,
+            'stateful_getitem_object': self.genStatefulGetitemObject,
+            'stateful_getattr_object': self.genStatefulGetattrObject,
         }
 
         if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
             # For 'any', we can now also choose one of our new evil objects.
-            choices = ['int', 'float', 'str', 'list', 'lying_eq_object', 'stateful_len_object', 'unstable_hash_object']
+            choices = [
+                'int', 'float', 'str', 'list', 'object', 'object_with_method',
+                'object_with_attr', 'object_with_getitem',
+                'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
+                'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
+            ]
             chosen_type = choice(choices)
             return self.generate_arg_by_type(chosen_type, var_name)
         elif p_type in simple_dispatch_table:
