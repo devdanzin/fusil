@@ -449,6 +449,57 @@ class ArgumentGenerator:
         """))
         return setup_code
 
+    def genLyingEqualityObject(self, var_name: str) -> str:
+        """
+        Generates a class that lies about equality.
+        __eq__ and __ne__ both always return True.
+        """
+        class_name = f"LyingEquality_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __eq__(self, other):
+                    print("[EVIL] LyingEquality __eq__ called, returning True", file=sys.stderr)
+                    return True
+                def __ne__(self, other):
+                    print("[EVIL] LyingEquality __ne__ called, returning True", file=sys.stderr)
+                    return True
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulLenObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __len__ changes on each call.
+        """
+        class_name = f"StatefulLen_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._len = 0
+                def __len__(self):
+                    print(f"[EVIL] StatefulLen __len__ called, returning {{self._len}}", file=sys.stderr)
+                    self._len += 1
+                    return self._len
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genUnstableHashObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __hash__ is different on each call.
+        """
+        class_name = f"UnstableHash_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __hash__(self):
+                    # Violates the rule that hash must be constant for the object's lifetime.
+                    new_hash = random.randint(0, 2**64 - 1)
+                    print(f"[EVIL] UnstableHash __hash__ called, returning {{new_hash}}", file=sys.stderr)
+                    return new_hash
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
     def generate_arg_by_type(self, p_type, var_name: str) -> str:
         """
         Generates setup code for a given placeholder type.
@@ -474,11 +525,17 @@ class ArgumentGenerator:
             'object_with_method': self.genSimpleObject,
             'object_with_attr': self.genSimpleObject,
             'object_with_getitem': self.genSimpleObject,
+            'lying_eq_object': self.genLyingEqualityObject,
+            'stateful_len_object': self.genStatefulLenObject,
+            'unstable_hash_object': self.genUnstableHashObject,
         }
 
         if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
-            return self.generate_arg_by_type(choice(('int', 'float', 'str', 'list')), var_name)
+            # For 'any', we can now also choose one of our new evil objects.
+            choices = ['int', 'float', 'str', 'list', 'lying_eq_object', 'stateful_len_object', 'unstable_hash_object']
+            chosen_type = choice(choices)
+            return self.generate_arg_by_type(chosen_type, var_name)
         elif p_type in simple_dispatch_table:
-            return f"{var_name} = {"".join(simple_dispatch_table[p_type]())}"
+            return f"{var_name} = {'\n'.join(simple_dispatch_table[p_type]())}"
         else:
             return custom_dispatch_table[p_type](var_name)
