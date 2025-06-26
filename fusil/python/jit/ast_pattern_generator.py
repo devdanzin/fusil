@@ -703,7 +703,7 @@ class ASTPatternGenerator:
         else:
             # The standard pattern for other uops
             core_code_str = recipe['pattern'].format(**substitutions)
-        core_repeats = random.randint(5, 10) # Repeat the core op many times
+        core_repeats = random.randint(67, 100) # Repeat the core op many times
 
         # --- NEW: Evil Snippet Injection Logic ---
         final_core_logic_nodes = []

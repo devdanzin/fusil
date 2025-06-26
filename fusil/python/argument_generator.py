@@ -569,6 +569,66 @@ class ArgumentGenerator:
         """)
         return setup_code
 
+
+    def genStatefulBoolObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __bool__ result flips after a few calls.
+        """
+        class_name = f"StatefulBool_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._bool_count = 0
+                def __bool__(self):
+                    self._bool_count += 1
+                    if self._bool_count > 3:
+                        print("[EVIL] StatefulBool __bool__ flipping to False", file=sys.stderr)
+                        return False
+                    print("[EVIL] StatefulBool __bool__ returning True", file=sys.stderr)
+                    return True
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulIterObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __iter__ returns different iterators.
+        """
+        class_name = f"StatefulIter_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._iter_count = 0
+                    self._iterables = [[1, 2, 3], ['a', 'b'], [None]]
+                def __iter__(self):
+                    iterable = self._iterables[self._iter_count % len(self._iterables)]
+                    print(f"[EVIL] StatefulIter __iter__ yielding from {{iterable!r}}", file=sys.stderr)
+                    self._iter_count += 1
+                    return iter(iterable)
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
+    def genStatefulIndexObject(self, var_name: str) -> str:
+        """
+        Generates a class whose __index__ returns different integer values.
+        """
+        class_name = f"StatefulIndex_{var_name}"
+        setup_code = dedent(f"""
+            class {class_name}:
+                def __init__(self):
+                    self._index_count = 0
+                def __index__(self):
+                    self._index_count += 1
+                    if self._index_count > 4:
+                        print("[EVIL] StatefulIndex __index__ returning 99", file=sys.stderr)
+                        return 99 # A different, potentially out-of-bounds index
+                    print("[EVIL] StatefulIndex __index__ returning 0", file=sys.stderr)
+                    return 0
+            {var_name} = {class_name}()
+        """)
+        return setup_code
+
     def generate_arg_by_type(self, p_type, var_name: str) -> str:
         """
         Generates setup code for a given placeholder type.
@@ -600,6 +660,9 @@ class ArgumentGenerator:
             'stateful_str_object': self.genStatefulStrReprObject,
             'stateful_getitem_object': self.genStatefulGetitemObject,
             'stateful_getattr_object': self.genStatefulGetattrObject,
+            'stateful_bool_object': self.genStatefulBoolObject,
+            'stateful_iter_object': self.genStatefulIterObject,
+            'stateful_index_object': self.genStatefulIndexObject,
         }
 
         if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
@@ -609,6 +672,7 @@ class ArgumentGenerator:
                 'object_with_attr', 'object_with_getitem',
                 'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
                 'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
+                'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
             ]
             chosen_type = choice(choices)
             return self.generate_arg_by_type(chosen_type, var_name)
