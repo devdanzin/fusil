@@ -33,161 +33,161 @@ UOP_RECIPES = {
     # --- Attribute and Subscript Operations ---
     '_STORE_ATTR': {
         'pattern': "{target_obj}.x = {value}",
-        'placeholders': {'target_obj': 'object', 'value': 'any'}
+        'placeholders': {'target_obj': ('object','object_with_attr', 'stateful_getattr_object'), 'value': ('any',)}
     },
     '_LOAD_ATTR_METHOD_WITH_VALUES': {
         'pattern': "{result_var} = {target_obj}.get_value()",
-        'placeholders': {'result_var': 'new_variable', 'target_obj': 'object_with_method'}
+        'placeholders': {'result_var': ('new_variable',), 'target_obj': ('object_with_method',  'stateful_getattr_object')}
     },
     '_BINARY_SUBSCR_LIST_INT': {
         'pattern': "{result_var} = {target_list}[{index}]",
-        'placeholders': {'result_var': 'new_variable', 'target_list': 'list', 'index': 'small_int'}
+        'placeholders': {'result_var': ('new_variable',), 'target_list': ('list', 'object_with_getitem', 'stateful_getitem_object'), 'index': ('small_int','stateful_index_object')}
     },
     '_BINARY_OP_SUBSCR_GETITEM': {
         'pattern': "{result_var} = {target_obj}[{key}]",
-        'placeholders': {'result_var': 'new_variable', 'target_obj': 'object_with_getitem', 'key': 'any'}
+        'placeholders': {'result_var': ('new_variable',), 'target_obj': ('object_with_getitem', 'stateful_getitem_object'), 'key': ('any', 'stateful_index_object')}
     },
     '_DELETE_ATTR': {
         'pattern': "del {target_obj}.x",
-        'placeholders': {'target_obj': 'object_with_attr', 'value': 'int'}
+        'placeholders': {'target_obj': ('object_with_attr',), 'value': ('int',)}
     },
 
     # --- Binary Operations ---
     '_BINARY_OP_ADD_INT': {
         'pattern': "{result_var} = {operand_a} + {operand_b}",
-        'placeholders': {'result_var': 'new_variable', 'operand_a': 'int', 'operand_b': 'int'}
+        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('int',), 'operand_b': ('int',)}
     },
     '_BINARY_OP_ADD_FLOAT': {
         'pattern': "{result_var} = {operand_a} + {operand_b}",
-        'placeholders': {'result_var': 'new_variable', 'operand_a': 'float', 'operand_b': 'float'}
+        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('float',), 'operand_b': ('float',)}
     },
     '_BINARY_OP_MULTIPLY_TUPLE_INT': {
         'pattern': "{result_var} = {operand_a} * {operand_b}",
-        'placeholders': {'result_var': 'new_variable', 'operand_a': 'tuple', 'operand_b': 'small_int'}
+        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('tuple',), 'operand_b': ('small_int', 'stateful_index_object')}
     },
 
     # --- Collection and Iteration ---
     '_BUILD_LIST': {
         'pattern': "{result_var} = [" + "{val_a}, {val_b}, {val_c}," * 50 + "]",
-        'placeholders': {'result_var': 'new_variable', 'val_a': 'any', 'val_b': 'any', 'val_c': 'any'}
+        'placeholders': {'result_var': ('new_variable',), 'val_a': ('any',), 'val_b': ('any',), 'val_c': ('any',)}
     },
     '_CONTAINS_OP_DICT': {
         'pattern': "{result_var} = {key} in {target_dict}",
-        'placeholders': {'result_var': 'new_variable', 'key': 'any', 'target_dict': 'dict'}
+        'placeholders': {'result_var': ('new_variable',), 'key': ('any', 'unstable_hash_object'), 'target_dict': ('dict',)}
     },
 
     # --- Compare and Boolean Operations ---
     '_COMPARE_OP_INT': {
         'pattern': "{result_var} = {operand_a} > {operand_b}",
-        'placeholders': {'result_var': 'new_variable', 'operand_a': 'int', 'operand_b': 'int'}
+        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('int',), 'operand_b': ('int', 'stateful_index_object')}
     },
     '_TO_BOOL_INT': {
         'pattern': "if {target_int}: pass",
-        'placeholders': {'target_int': 'int'}
+        'placeholders': {'target_int': ('int', 'stateful_index_object', 'stateful_len_object')}
     },
     '_LOAD_ATTR': {
         'pattern': '{target_obj}.x',
-        'placeholders': {'target_obj': 'object_with_attr'}
+        'placeholders': {'target_obj': ('object_with_attr', 'stateful_getattr_object')}
     },
     '_BINARY_SUBSCR_TUPLE_INT': {
         'pattern': '{target_tuple}[{index}]',
-        'placeholders': {'target_tuple': 'tuple', 'index': 'small_int'}
+        'placeholders': {'target_tuple': ('tuple',), 'index': ('small_int', 'stateful_index_object')}
     },
     '_BINARY_OP_SUB_INT': {
         'pattern': '{a} - {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int',)}
     },
     '_BINARY_OP_MUL_INT': {
         'pattern': '{a} * {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
     },
     '_BINARY_OP_SUB_FLOAT': {
         'pattern': '{a} - {b}',
-        'placeholders': {'a': 'float', 'b': 'float'}
+        'placeholders': {'a': ('float',), 'b': ('float',)}
     },
     '_BINARY_OP_MUL_FLOAT': {
         'pattern': '{a} * {b}',
-        'placeholders': {'a': 'float', 'b': 'float'}
+        'placeholders': {'a': ('float',), 'b': ('float',)}
     },
     '_BINARY_OP_AND_INT': {
         'pattern': '{a} & {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int', 'stateful_index_object'), 'b': ('int', 'stateful_index_object')}
     },
     '_BINARY_OP_OR_INT': {
         'pattern': '{a} | {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int', 'stateful_index_object'), 'b': ('int', 'stateful_index_object')}
     },
     '_BINARY_OP_XOR_INT': {
         'pattern': '{a} ^ {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
     },
     '_COMPARE_OP_EQ_INT': {
         'pattern': '{a} == {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
     },
     '_COMPARE_OP_LT_INT': {
         'pattern': '{a} < {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int',)}
     },
     '_COMPARE_OP_GT_INT': {
         'pattern': '{a} > {b}',
-        'placeholders': {'a': 'int', 'b': 'int'}
+        'placeholders': {'a': ('int',), 'b': ('int',)}
     },
     '_COMPARE_OP_EQ_STR': {
         'pattern': '{a} == {b}',
-        'placeholders': {'a': 'str', 'b': 'str'}
+        'placeholders': {'a': ('str',), 'b': ('str',)}
     },
     '_COMPARE_OP_LT_STR': {
         'pattern': '{a} < {b}',
-        'placeholders': {'a': 'str', 'b': 'str'}
+        'placeholders': {'a': ('str',), 'b': ('str',)}
     },
     '_COMPARE_OP_GT_STR': {
         'pattern': '{a} > {b}',
-        'placeholders': {'a': 'str', 'b': 'str'}
+        'placeholders': {'a': ('str',), 'b': ('str',)}
     },
     '_UNARY_NOT': {
         'pattern': 'not {value}',
-        'placeholders': {'value': 'any'}
+        'placeholders': {'value': ('any', 'stateful_index_object')}
     },
     '_TO_BOOL': {
         'pattern': 'if {obj}: pass',
-        'placeholders': {'obj': 'object'}
+        'placeholders': {'obj': ('object', 'stateful_bool_object', 'stateful_len_object', 'stateful_index_object')}
     },
     '_BUILD_TUPLE': {
-        'pattern': '({a}, {b})',
-        'placeholders': {'a': 'any', 'b': 'any'}
+        'pattern': '(' + '{a}, {b},' * 50 + ')',
+        'placeholders': {'a': ('any',), 'b': ('any',)}
     },
     '_BUILD_SET': {
         'pattern': '{{ {a}, {b} }}',
-        'placeholders': {'a': 'any', 'b': 'any'}
+        'placeholders': {'a': ('any', 'unstable_hash_object'), 'b': ('any', 'unstable_hash_object')}
     },
     '_BUILD_MAP': {
         'pattern': '{{ {key}: {value} }}',
-        'placeholders': {'key': 'str', 'value': 'any'}
+        'placeholders': {'key': ('str', 'int', 'unstable_hash_object'), 'value': ('any',)}
     },
     '_UNPACK_SEQUENCE_TUPLE': {
         'pattern': 'x, *y = {iterable}',
-        'placeholders': {'iterable': 'tuple'}
+        'placeholders': {'iterable': ('tuple', 'stateful_iter_object')}
     },
     '_UNPACK_SEQUENCE_LIST': {
         'pattern': 'x, *y = {iterable}',
-        'placeholders': {'iterable': 'list'}
+        'placeholders': {'iterable': ('list', 'stateful_iter_object')}
     },
     '_FOR_ITER_LIST': {
         'pattern': 'for {result_var} in {iterable}: pass',
-        'placeholders': {'result_var': 'new_variable', 'iterable': 'list'}
+        'placeholders': {'result_var': ('new_variable',), 'iterable': ('list', 'stateful_iter_object')}
     },
     '_FOR_ITER_TUPLE': {
         'pattern': 'for {result_var} in {iterable}: pass',
-        'placeholders': {'result_var': 'new_variable', 'iterable': 'tuple'}
+        'placeholders': {'result_var': ('new_variable',), 'iterable': ('tuple', 'stateful_iter_object')}
     },
     '_CALL_LIST_APPEND': {
         'pattern': '{target_list}.append({value})',
-        'placeholders': {'target_list': 'list', 'value': 'any'}
+        'placeholders': {'target_list': ('list',), 'value': ('any',)}
     },
     '_YIELD_VALUE': {
         'pattern': 'yield {value}',
-        'placeholders': {'value': 'any'}
+        'placeholders': {'value': ('any',)}
     },
 }
 
@@ -678,12 +678,13 @@ class ASTPatternGenerator:
 
         var_map = defaultdict(list)
         setup_code_lines = []
-        for p_name, p_type in recipe['placeholders'].items():
+        for p_name, p_types in recipe['placeholders'].items():
+            p_type = random.choice(p_types)
             if p_type == "new_variable":
                 var_name =  f"res_{uop_name.lower().replace('_', '')}"
             else:
                 var_name = self._get_unique_var_name()
-            var_map[p_type].append(var_name)
+            var_map[p_name].append(var_name)
             setup_code = self.arg_generator.generate_arg_by_type(p_type, var_name)
             setup_code_lines.append(setup_code)
         setup_code = "\n\n".join(setup_code_lines)
@@ -756,8 +757,6 @@ class ASTPatternGenerator:
         else:
             final_core_logic_nodes = core_ast_nodes
 
-
-
         # 1. Find all variables that are assigned to inside the generated code.
         assigned_locals = self._collect_assigned_variables(final_core_logic_nodes)
 
@@ -811,12 +810,15 @@ class ASTPatternGenerator:
         """
         substitutions = {}
 
-        for placeholder, type_hint in recipe['placeholders'].items():
-            if type_hint == 'new_variable':
+        for placeholder, type_hints in recipe['placeholders'].items():
+            if 'new_variable' in type_hints:
                 substitutions[placeholder] = f"res_{uop_name.lower().replace('_', '')}"
                 continue
 
-            substitutions[placeholder] = random.choice(var_map[type_hint])
+            if placeholder in var_map and var_map[placeholder]:
+                substitutions[placeholder] = random.choice(var_map[placeholder])
+            else:
+                raise ValueError(f"No variable was generated for placeholder '{placeholder}' in recipe '{uop_name}'")
         return substitutions
 
     def _generate_evil_snippet(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
