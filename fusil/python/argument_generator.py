@@ -14,6 +14,7 @@ vulnerabilities through unusual type interactions and boundary conditions.
 
 from __future__ import annotations
 
+import random
 from random import choice, randint, sample
 from textwrap import dedent
 from typing import Callable
@@ -436,7 +437,7 @@ class ArgumentGenerator:
     def genSimpleObject(self, var_name: str) -> str:
         class_name = f"C_{var_name}"  # We can use var_name because it will be unique
         setup_code = (dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self.x = 1
                     self.y = 'y'
@@ -456,13 +457,19 @@ class ArgumentGenerator:
         """
         class_name = f"LyingEquality_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
+                eq_count = 0
+                ne_count = 0
                 def __eq__(self, other):
-                    print("[EVIL] LyingEquality __eq__ called, returning True", file=sys.stderr)
-                    return True
+                    self.eq_count += 1
+                    if self.eq_count < 70:
+                        print("[EVIL] LyingEquality __eq__ called, returning True", file=sys.stderr)
+                        return True
                 def __ne__(self, other):
-                    print("[EVIL] LyingEquality __ne__ called, returning True", file=sys.stderr)
-                    return True
+                    self.ne_count += 1
+                    if self.ne_count < 70:
+                        print("[EVIL] LyingEquality __ne__ called, returning True", file=sys.stderr)
+                        return True
             {var_name} = {class_name}()
         """)
         return setup_code
@@ -473,13 +480,14 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulLen_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
-                    self._len = 0
+                    self.len_count = 0
                 def __len__(self):
-                    print(f"[EVIL] StatefulLen __len__ called, returning {{self._len}}", file=sys.stderr)
-                    self._len += 1
-                    return self._len
+                    _len = 0 if self.len_count < 70 else 99
+                    print(f"[EVIL] StatefulLen __len__ called, returning {{_len}}", file=sys.stderr)
+                    self.len_count += 1
+                    return _len
             {var_name} = {class_name}()
         """)
         return setup_code
@@ -490,10 +498,12 @@ class ArgumentGenerator:
         """
         class_name = f"UnstableHash_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
+                hash_count = 0
                 def __hash__(self):
                     # Violates the rule that hash must be constant for the object's lifetime.
-                    new_hash = randint(0, 2**64 - 1)
+                    self.hash_count += 1
+                    new_hash = 5 if self.hash_count < 70 else randint(0, 2**64 - 1)
                     print(f"[EVIL] UnstableHash __hash__ called, returning {{new_hash}}", file=sys.stderr)
                     return new_hash
             {var_name} = {class_name}()
@@ -507,19 +517,19 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulStrRepr_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._str_count = 0
                     self._repr_count = 0
                     self._str_options = ['a', 'b', 'c']
                 def __str__(self):
-                    val = self._str_options[self._str_count % len(self._str_options)]
+                    val = "a" if self._str_count < 67 else b'a' 
                     print(f"[EVIL] StatefulStrRepr __str__ called, returning '{{val}}'", file=sys.stderr)
                     self._str_count += 1
                     return val
                 def __repr__(self):
                     self._repr_count += 1
-                    if self._repr_count > 3:
+                    if self._repr_count > 70:
                         print("[EVIL] StatefulStrRepr __repr__ called, returning NON-STRING type 123", file=sys.stderr)
                         return 123  # Violates contract, should raise TypeError
                     val = f"<StatefulRepr run #{{self._repr_count}}>"
@@ -535,12 +545,12 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulGetitem_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._getitem_count = 0
                 def __getitem__(self, key):
                     self._getitem_count += 1
-                    if self._getitem_count > 5:
+                    if self._getitem_count > 67:
                         print(f"[EVIL] StatefulGetitem __getitem__ returning float", file=sys.stderr)
                         return 99.9
                     print(f"[EVIL] StatefulGetitem __getitem__ returning int", file=sys.stderr)
@@ -555,20 +565,19 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulGetattr_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._getattr_count = 0
                 def __getattr__(self, name):
                     self._getattr_count += 1
-                    if self._getattr_count > 5:
+                    if self._getattr_count > 67:
                         print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'evil_attribute'", file=sys.stderr)
-                        return 'evil_attribute'
+                        return b'evil_attribute'
                     print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'normal_attribute'", file=sys.stderr)
                     return 'normal_attribute'
             {var_name} = {class_name}()
         """)
         return setup_code
-
 
     def genStatefulBoolObject(self, var_name: str) -> str:
         """
@@ -576,12 +585,12 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulBool_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._bool_count = 0
                 def __bool__(self):
                     self._bool_count += 1
-                    if self._bool_count > 3:
+                    if self._bool_count > 70:
                         print("[EVIL] StatefulBool __bool__ flipping to False", file=sys.stderr)
                         return False
                     print("[EVIL] StatefulBool __bool__ returning True", file=sys.stderr)
@@ -596,14 +605,15 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulIter_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._iter_count = 0
-                    self._iterables = [[1, 2, 3], ['a', 'b'], [None]]
+                    self._iterable = [1, 2, 3]
                 def __iter__(self):
-                    iterable = self._iterables[self._iter_count % len(self._iterables)]
-                    print(f"[EVIL] StatefulIter __iter__ yielding from {{iterable!r}}", file=sys.stderr)
+                    print(f"[EVIL] StatefulIter __iter__ yielding from {{self._iterable!r}}", file=sys.stderr)
                     self._iter_count += 1
+                    if self._iter_count > 67:
+                        return iter((None,))
                     return iter(iterable)
             {var_name} = {class_name}()
         """)
@@ -615,12 +625,12 @@ class ArgumentGenerator:
         """
         class_name = f"StatefulIndex_{var_name}"
         setup_code = dedent(f"""
-            class {class_name}:
+            class {class_name}{self.generate_subclass_str()}:
                 def __init__(self):
                     self._index_count = 0
                 def __index__(self):
                     self._index_count += 1
-                    if self._index_count > 4:
+                    if self._index_count > 70:
                         print("[EVIL] StatefulIndex __index__ returning 99", file=sys.stderr)
                         return 99 # A different, potentially out-of-bounds index
                     print("[EVIL] StatefulIndex __index__ returning 0", file=sys.stderr)
@@ -628,6 +638,13 @@ class ArgumentGenerator:
             {var_name} = {class_name}()
         """)
         return setup_code
+
+    def generate_subclass_str(self) -> str:
+        if random.random() < 0.1:  # Temporary high chance for testing if it works
+            return ""
+        bases = ('int', 'float', 'str', 'bytes', 'tuple', 'list', 'dict', 'set')
+        base = random.choice(bases)
+        return f"({base})"
 
     def generate_arg_by_type(self, p_type, var_name: str) -> str:
         """
