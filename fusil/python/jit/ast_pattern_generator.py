@@ -740,7 +740,7 @@ class ASTPatternGenerator:
                         0, f'"[{self._get_prefix()}] Injecting INTER-PATTERN EVIL!"', return_str=True
                     )
                     all_evil_prints.append(evil_print)
-                    evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type, substitutions)
+                    evil_nodes = self._generate_evil_snippet(substitutions, var_map)
                     probabilistic_if_node = ast.If(
                         test=ast.Compare(
                             left=ast.Call(
@@ -808,7 +808,7 @@ class ASTPatternGenerator:
             substitutions[placeholder] = random.choice(candidate_vars)
         return substitutions
 
-    def _generate_evil_snippet(self, target_var: str, target_var_type: str, available_vars: dict[str, Any]) -> list[ast.stmt]:
+    def _generate_evil_snippet(self, available_vars: dict[str, Any], all_vars_by_type: dict[str, list[str]]) -> list[ast.stmt]:
         """
         Selects and generates a random "evil snippet" of code designed to
         violate the JIT's assumptions about a target variable.
@@ -821,24 +821,51 @@ class ASTPatternGenerator:
         Returns:
             A list of AST statement nodes representing the evil snippet.
         """
-        # This is our menu of evil actions. We can add more over time.
-        evil_actions = [
+        # Menu of single-target evil actions
+        single_target_actions = [
             self._create_type_corruption_node,
             self._create_uop_attribute_deletion_node,
             self._create_method_patch_node,
             self._create_type_confusion_node,
+            self._create_class_reassignment_node,
         ]
 
-        # Some actions only make sense for objects.
-        if target_var_type not in ('object', 'object_with_method', 'object_with_attr'):
-            # For simple types like 'int', only type corruption is applicable.
-            chosen_action = self._create_type_corruption_node
+        # Menu of multi-target evil actions
+        multi_target_actions = [
+            self._create_dict_swap_node,
+        ]
+
+        # Find all available object variables that could be targets
+        object_types = [
+            'object', 'object_with_method', 'object_with_attr'
+            'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
+            'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
+            'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+        ]
+        candidate_objects = [var for type_hint in object_types for var in all_vars_by_type.get(type_hint, [])]
+
+        if not candidate_objects:
+            # No objects to attack, do nothing
+            return [ast.Pass()]
+
+        # Decide whether to attempt a multi-target attack
+        if len(candidate_objects) >= 2 and random.random() < 1.2:  # 20% chance for multi-target
+            chosen_action = random.choice(multi_target_actions)
+            var1, var2 = random.sample(candidate_objects, 2)
+            return chosen_action(var1_name=var1, var2_name=var2)
         else:
-            chosen_action = random.choice(evil_actions)
+            # Perform a single-target attack
+            chosen_action = random.choice(single_target_actions)
+            target_var = random.choice(candidate_objects)
+            # Find the type hint for the chosen variable to pass to the helper
+            target_var_type = 'object'  # Default, can be refined if needed
+            for type_hint, var_list in all_vars_by_type.items():
+                if target_var in var_list:
+                    target_var_type = type_hint
+                    break
+            return chosen_action(target_var=target_var, target_var_type=target_var_type)
 
-        return chosen_action(target_var, target_var_type)
-
-    def _create_type_confusion_node(self, target_var_name: str, target_var_type: str) -> list[ast.AST]:
+    def _create_type_confusion_node(self, target_var: str, target_var_type: str, **kwargs) -> list[ast.AST]:
         """
         Generates AST nodes to perform a type corruption attack on the target variable.
         """
@@ -858,12 +885,12 @@ class ASTPatternGenerator:
 
         evil_setup_nodes = ast.parse(dedent(evil_setup_code)).body
         final_corruption_node = ast.Assign(
-            targets=[ast.Name(id=target_var_name, ctx=ast.Store())],
+            targets=[ast.Name(id=target_var, ctx=ast.Store())],
             value=ast.Name(id=evil_var_name, ctx=ast.Load())
         )
         return evil_setup_nodes + [final_corruption_node]
 
-    def _create_type_corruption_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
+    def _create_type_corruption_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
         # Choose a random, incompatible type to corrupt the variable with.
         corruption_value = random.choice([
@@ -877,7 +904,7 @@ class ASTPatternGenerator:
             value=corruption_value
         )]
 
-    def _create_uop_attribute_deletion_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
+    def _create_uop_attribute_deletion_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to delete an attribute (e.g., `del obj.x`)."""
         # Try to delete a common but potentially unexpected attribute.
         attr_to_delete = random.choice(['value'])
@@ -888,7 +915,7 @@ class ASTPatternGenerator:
             ctx=ast.Del()
         )])]
 
-    def _create_method_patch_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
+    def _create_method_patch_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
         # Target a common method name.
         method_to_patch = 'get_value'
@@ -920,3 +947,42 @@ class ASTPatternGenerator:
             )],
             value=lambda_payload
         )]
+
+    def _create_dict_swap_node(self, var1_name: str, var2_name: str, **kwargs) -> List[ast.stmt]:
+        """
+        Generates AST for: obj1.__dict__, obj2.__dict__ = obj2.__dict__, obj1.__dict__
+        """
+        return [ast.Assign(
+            targets=[ast.Tuple(
+                elts=[
+                    ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store()),
+                    ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store())
+                ],
+                ctx=ast.Store()
+            )],
+            value=ast.Tuple(
+                elts=[
+                    ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load()),
+                    ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load())
+                ],
+                ctx=ast.Load()
+            )
+        )]
+
+    def _create_class_reassignment_node(self, target_var: str, **kwargs) -> List[ast.stmt]:
+        """
+        Generates AST for: class NewClass: pass; obj.__class__ = NewClass
+        """
+        new_class_name = self._get_unique_var_name(base="SwappedClass")
+        class_def_node = ast.ClassDef(
+            name=new_class_name,
+            bases=[],
+            keywords=[],
+            body=[ast.Pass()],
+            decorator_list=[]
+        )
+        assign_node = ast.Assign(
+            targets=[ast.Attribute(value=ast.Name(id=target_var, ctx=ast.Load()), attr='__class__', ctx=ast.Store())],
+            value=ast.Name(id=new_class_name, ctx=ast.Load())
+        )
+        return [class_def_node, assign_node]
