@@ -14,8 +14,7 @@ vulnerabilities through unusual type interactions and boundary conditions.
 
 from __future__ import annotations
 
-import random
-from random import choice, randint, sample
+from random import choice, randint, sample, random
 from textwrap import dedent
 from typing import Callable
 
@@ -614,7 +613,7 @@ class ArgumentGenerator:
                     self._iter_count += 1
                     if self._iter_count > 67:
                         return iter((None,))
-                    return iter(iterable)
+                    return iter(self._iterable)
             {var_name} = {class_name}()
         """)
         return setup_code
@@ -640,10 +639,13 @@ class ArgumentGenerator:
         return setup_code
 
     def generate_subclass_str(self) -> str:
-        if random.random() < 0.1:  # Temporary high chance for testing if it works
+        if random() < 0.1:  # Temporary high chance for testing if it works
             return ""
         bases = ('int', 'float', 'str', 'bytes', 'tuple', 'list', 'dict', 'set')
-        base = random.choice(bases)
+        if random() > 0.1:
+            base = self.genWeirdClass()[0]
+        else:
+            base = choice(bases)
         return f"({base})"
 
     def generate_arg_by_type(self, p_type, var_name: str) -> str:
