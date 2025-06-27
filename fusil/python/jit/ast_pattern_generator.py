@@ -23,7 +23,7 @@ import copy
 import random
 from collections import defaultdict
 from textwrap import dedent
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any
 
 from fusil.write_code import CodeTemplate as CT
 if TYPE_CHECKING:
@@ -360,7 +360,7 @@ class ASTPatternGenerator:
 
     # --- REVISED Core Generation Loop ---
 
-    def generate_statement_list(self, num_statements: int, depth: int = 0) -> List[ast.stmt]:
+    def generate_statement_list(self, num_statements: int, depth: int = 0) -> list[ast.stmt]:
         """
         The core generation loop. Creates a sequence of statements, now with
         the potential for nested control flow.
@@ -419,7 +419,7 @@ class ASTPatternGenerator:
                     statements.append(new_node)
         return statements
 
-    def _synthesize_del_attack(self) -> List[ast.stmt]:
+    def _synthesize_del_attack(self) -> list[ast.stmt]:
         """
         Synthesizes a full __del__ side-effect attack from scratch.
 
@@ -479,7 +479,7 @@ class ASTPatternGenerator:
 
         return [*fm_class_nodes, fm_instance_creation, loop]
 
-    def _synthesize_correctness_test(self) -> List[ast.stmt]:
+    def _synthesize_correctness_test(self) -> list[ast.stmt]:
         """
         Synthesizes a full 'Twin Execution' correctness test harness.
 
@@ -521,7 +521,7 @@ class ASTPatternGenerator:
 
         return [jit_target_func, control_func, *harness_nodes]
 
-    def _create_class_and_instance_nodes(self) -> List[ast.stmt]:
+    def _create_class_and_instance_nodes(self) -> list[ast.stmt]:
         """Generates a simple class definition and an instance of it."""
         class_name = f"SynthClass_{self._get_prefix()}"
         instance_name = f"synth_instance_{self._get_prefix()}"
@@ -635,7 +635,7 @@ class ASTPatternGenerator:
         except AttributeError:
             return "# AST unparsing failed."
 
-    def _collect_assigned_variables(self, nodes: List[ast.stmt]) -> set[str]:
+    def _collect_assigned_variables(self, nodes: list[ast.stmt]) -> set[str]:
         """
         Walks a list of AST nodes and returns a set of all variable names
         that are assigned to, created in a for loop, or created as a class/function.
@@ -663,7 +663,7 @@ class ASTPatternGenerator:
 
         return assigned_vars
 
-    def generate_uop_targeted_pattern(self, uop_name: str) -> tuple[str, str, str]:
+    def generate_uop_targeted_pattern(self, uop_names: str) -> tuple[str, str, str]:
         """
         Generates a pattern specifically designed to stress the given uop
         by using a template from the UOP_RECIPES library.
@@ -671,99 +671,96 @@ class ASTPatternGenerator:
         self.scope_variables = set()
         self.prefix_counter = 0
 
-        # 1. Get the recipe for the target uop.
-        recipe = UOP_RECIPES.get(uop_name)
-        if not recipe:
-            return f"# ERROR: No recipe found for uop '{uop_name}'", "pass", ""
-
+        # --- Aggregation variables for the entire chain ---
+        all_setup_code_lines = []
+        all_core_logic_nodes = []
+        all_evil_prints = []
+        # var_map is global to the chain, mapping type hints to lists of var names
         var_map = defaultdict(list)
-        setup_code_lines = []
-        for p_name, p_types in recipe['placeholders'].items():
-            p_type = random.choice(p_types)
-            if p_type == "new_variable":
-                var_name =  f"res_{uop_name.lower().replace('_', '')}"
-            else:
-                var_name = self._get_unique_var_name()
-            var_map[p_name].append(var_name)
-            setup_code = self.arg_generator.generate_arg_by_type(p_type, var_name)
-            setup_code_lines.append(setup_code)
-        setup_code = "\n\n".join(setup_code_lines)
-        substitutions = self._get_substitutions_for_recipe(uop_name, recipe, var_map)
 
-            # --- Core Pattern Generation ---
-        if uop_name == '_DELETE_ATTR':
-            # Create a robust del/set pair
-            core_template = CT("""
-                try:
-                    del {target_obj}.x
-                except AttributeError:
-                    pass
-                {target_obj}.x = {value}
-            """)
-            core_code_str = core_template.render(**substitutions)
-        else:
-            # The standard pattern for other uops
-            core_code_str = recipe['pattern'].format(**substitutions)
-        core_repeats = random.randint(67, 100) # Repeat the core op many times
-
-        # --- NEW: Evil Snippet Injection Logic ---
-        final_core_logic_nodes = []
-        # First, parse the setup code and the "friendly" core pattern into AST nodes.
-        core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
-        setup_ast_nodes = ast.parse(dedent(setup_code)).body
-
-        # Decide whether to inject an evil snippet.
-        # This will be controlled by the --jit-uop-evilness-prob flag later.
-        evil_print = ""
-        # This will be controlled by a flag later, e.g., self.parent.config.jit_uop_evilness_prob
         evil_probability = 0.005
-        inject_evil = random.random() < 1.25 # Forcing it to be more common for now for testing
+        for i, uop_name in enumerate(uop_names):
+            recipe = UOP_RECIPES.get(uop_name)
+            if not recipe:
+                all_core_logic_nodes.append(ast.Expr(value=ast.Constant(value=f"# ERROR: No recipe for {uop_name}")))
+                continue
 
-        if inject_evil:
-            # Find a suitable variable to attack
-            target_var_placeholder = next((p for p, t in recipe['placeholders'].items() if 'object' in t or 'int' in t or 'list' in t), None)
+            # --- Generate variables for the current recipe ---
+            # This loop ensures we create any new types needed for the current recipe,
+            # adding them to the global var_map.
+            for p_name, p_types in recipe['placeholders'].items():
+                # Check if we already have a suitable variable from a previous step
+                has_suitable_var = any(p_type in var_map for p_type in p_types)
 
-            if target_var_placeholder:
-                evil_print = self.parent.write_print_to_stderr(
-                    0, f'"[{self._get_prefix()}] Injecting PROBABILISTIC EVIL snippet!"', return_str=True
-                )
-                target_var_name = substitutions.get(target_var_placeholder)
-                target_var_type = recipe['placeholders'][target_var_placeholder]
+                # If not, or with some probability, create a new one to increase variety
+                if not has_suitable_var or random.random() < 0.3:
+                    p_type = random.choice(p_types)
+                    if p_type == "new_variable":
+                        continue  # Handled by substitution logic later
 
-                # Generate the evil AST nodes
-                evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type)
+                    var_name = self._get_unique_var_name(base=p_type)
+                    var_map[p_type].append(var_name)
+                    setup_code = self.arg_generator.generate_arg_by_type(p_type, var_name)
+                    all_setup_code_lines.append(setup_code)
 
-                # Create the probabilistic `if` condition: `if random.random() < 0.005:`
-                probabilistic_if_node = ast.If(
-                    test=ast.Compare(
-                        left=ast.Call(
-                            func=ast.Name(id='random', ctx=ast.Load()),
-                            args=[],
-                            keywords=[]
-                        ),
-                        ops=[ast.Lt()],
-                        comparators=[ast.Constant(value=evil_probability)]
-                    ),
-                    body=evil_nodes,
-                    orelse=[]
-                )
-
-                # Inject the evil snippet right before the last core operation.
-                final_core_logic_nodes = core_ast_nodes[:-1]
-                final_core_logic_nodes.append(probabilistic_if_node)
-                final_core_logic_nodes.append(core_ast_nodes[-1])
+            # --- Generate the core pattern for the current uop ---
+            substitutions = self._get_substitutions_for_recipe(uop_name, recipe, var_map)
+            # --- Core Pattern Generation ---
+            if uop_name == '_DELETE_ATTR':
+                # Create a robust del/set pair
+                core_template = CT("""
+                    try:
+                        del {target_obj}.x
+                    except AttributeError:
+                        pass
+                    {target_obj}.x = {value}
+                """)
+                core_code_str = core_template.render(**substitutions)
             else:
-                final_core_logic_nodes = core_ast_nodes
-        else:
-            final_core_logic_nodes = core_ast_nodes
+                # The standard pattern for other uops
+                core_code_str = recipe['pattern'].format(**substitutions)
+            core_repeats = random.randint(3, 5)  # Fewer repeats per uop in a chain
+            core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
+            all_core_logic_nodes.extend(core_ast_nodes)
 
-        # 1. Find all variables that are assigned to inside the generated code.
-        assigned_locals = self._collect_assigned_variables(final_core_logic_nodes)
+            # --- Step 1.3: Implement Inter-Pattern Evil Snippets ---
+            # Inject evilness *between* patterns (but not after the last one)
+            if i < len(uop_names) - 1:
+                # This logic can be enhanced to find a shared variable to attack
+                target_placeholder = random.choice(list(substitutions.keys()))
+                target_var_name = substitutions[target_placeholder]
 
-        # 2. These are the "globals" defined in our setup block.
+                # We need to find the original type hint tuple for this placeholder
+                target_var_type_hints = recipe['placeholders'][target_placeholder]
+                # And pick one to pass to the evil generator
+                target_var_type = random.choice(target_var_type_hints)
+
+                if target_var_type != 'new_variable':
+                    evil_print = self.parent.write_print_to_stderr(
+                        0, f'"[{self._get_prefix()}] Injecting INTER-PATTERN EVIL!"', return_str=True
+                    )
+                    all_evil_prints.append(evil_print)
+                    evil_nodes = self._generate_evil_snippet(target_var_name, target_var_type, substitutions)
+                    probabilistic_if_node = ast.If(
+                        test=ast.Compare(
+                            left=ast.Call(
+                                func=ast.Name(id='random', ctx=ast.Load()),
+                                args=[],
+                                keywords=[]
+                            ),
+                            ops=[ast.Lt()],
+                            comparators=[ast.Constant(value=evil_probability)]
+                        ),
+                        body=evil_nodes,
+                        orelse=[]
+                    )
+                    all_core_logic_nodes.append(probabilistic_if_node)
+
+        # --- Final Processing (Shadowing, Assembly) ---
+        setup_code = "\n\n".join(all_setup_code_lines)
+        setup_ast_nodes = ast.parse(dedent(setup_code)).body
+        assigned_locals = self._collect_assigned_variables(all_core_logic_nodes)
         assigned_globals = self._collect_assigned_variables(setup_ast_nodes)
-
-        # 3. Find the intersection - these are the names we need to shadow.
         shadowed_vars = assigned_locals.intersection(assigned_globals)
 
         shadowing_assignments = []
@@ -780,29 +777,14 @@ class ASTPatternGenerator:
                 )
                 shadowing_assignments.append(shadowing_assignment)
 
-        # 4. Prepend the shadowing assignments to the core logic.
-        # This makes them explicit locals at the top of the function scope.
-        final_core_logic_nodes = shadowing_assignments + final_core_logic_nodes
+        final_core_logic_nodes = shadowing_assignments + all_core_logic_nodes
 
         module_node = ast.Module(body=final_core_logic_nodes, type_ignores=[])
         ast.fix_missing_locations(module_node)
         # Unparse the final list of core logic nodes back into a string.
         core_code = ast.unparse(module_node)
 
-        # --- Final Assembly ---
-        final_template = CT("""
-            # Uop-targeted test for: {uop_name}
-
-            # --- Core Pattern ---
-            {core}
-        """)
-
-        final_code = final_template.render(
-            uop_name=uop_name,
-            core=core_code,
-            evil_print=evil_print,
-        )
-        return setup_code, core_code, evil_print
+        return setup_code, core_code, "\n".join(all_evil_prints)
 
     def _get_substitutions_for_recipe(self, uop_name: str, recipe: dict, var_map: dict) -> dict:
         """
@@ -815,13 +797,18 @@ class ASTPatternGenerator:
                 substitutions[placeholder] = f"res_{uop_name.lower().replace('_', '')}"
                 continue
 
-            if placeholder in var_map and var_map[placeholder]:
-                substitutions[placeholder] = random.choice(var_map[placeholder])
-            else:
-                raise ValueError(f"No variable was generated for placeholder '{placeholder}' in recipe '{uop_name}'")
+            candidate_vars = []
+            for hint in type_hints:
+                candidate_vars.extend(var_map.get(hint, []))
+
+            if not candidate_vars:
+                raise ValueError(
+                    f"No variable in var_map for placeholder '{placeholder}' with types {type_hints} in recipe '{uop_name}'")
+
+            substitutions[placeholder] = random.choice(candidate_vars)
         return substitutions
 
-    def _generate_evil_snippet(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
+    def _generate_evil_snippet(self, target_var: str, target_var_type: str, available_vars: dict[str, Any]) -> list[ast.stmt]:
         """
         Selects and generates a random "evil snippet" of code designed to
         violate the JIT's assumptions about a target variable.
@@ -876,7 +863,7 @@ class ASTPatternGenerator:
         )
         return evil_setup_nodes + [final_corruption_node]
 
-    def _create_type_corruption_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
+    def _create_type_corruption_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
         """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
         # Choose a random, incompatible type to corrupt the variable with.
         corruption_value = random.choice([
@@ -890,7 +877,7 @@ class ASTPatternGenerator:
             value=corruption_value
         )]
 
-    def _create_uop_attribute_deletion_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
+    def _create_uop_attribute_deletion_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
         """Generates code to delete an attribute (e.g., `del obj.x`)."""
         # Try to delete a common but potentially unexpected attribute.
         attr_to_delete = random.choice(['value'])
@@ -901,7 +888,7 @@ class ASTPatternGenerator:
             ctx=ast.Del()
         )])]
 
-    def _create_method_patch_node(self, target_var: str, target_var_type: str) -> List[ast.stmt]:
+    def _create_method_patch_node(self, target_var: str, target_var_type: str) -> list[ast.stmt]:
         """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
         # Target a common method name.
         method_to_patch = 'get_value'

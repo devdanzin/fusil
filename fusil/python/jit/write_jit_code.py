@@ -26,7 +26,7 @@ import ast
 import inspect
 from textwrap import dedent
 from typing import Any
-from random import choice, randint, random
+from random import choice, randint, random, choices
 from typing import TYPE_CHECKING
 
 import fusil.python.values
@@ -289,23 +289,25 @@ class WriteJITCode:
         selection_print = ""
         if uop_to_target.upper() == 'ALL':
             # Randomly select a uop from the keys of our mapping dictionary.
-            uop_to_target = choice(list(UOP_RECIPES.keys()))
+            uops_to_target = choices(list(UOP_RECIPES.keys()), k=randint(3, 7))
             selection_print = self.parent.write_print_to_stderr(
-                0, f'"[{prefix}] JIT-TARGET-UOP=ALL: Randomly selected uop: {uop_to_target}"', return_str=True
+                0, f'"[{prefix}] JIT-TARGET-UOP=ALL: Randomly selected uops: {uops_to_target}"', return_str=True
             )
+        else:
+            uops_to_target = (uop_to_target,)
 
         header_print = self.parent.write_print_to_stderr(
-            0, f'"[{prefix}] STRATEGY: Targeted Uop Fuzzing ({uop_to_target})"', return_str=True
+            0, f'"[{prefix}] STRATEGY: Targeted Uop Fuzzing ({uops_to_target})"', return_str=True
         )
         if selection_print:
             header_print = f"{selection_print}\n{header_print}"
         footer_print = self.parent.write_print_to_stderr(
-            0, f'"[{prefix}] Targeted Uop Fuzzing ({uop_to_target}) done."', return_str=True
+            0, f'"[{prefix}] Targeted Uop Fuzzing ({uops_to_target}) done."', return_str=True
         )
 
         # 1. Generate a new setup code and pattern specifically for the target uop.
         setup_code, core_pattern_code, evil_print = self.ast_pattern_generator.generate_uop_targeted_pattern(
-            uop_to_target
+            uops_to_target
         )
 
         # 2. Get the hot loop boilerplate from our helper and a guarded call.
