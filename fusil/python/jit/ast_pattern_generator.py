@@ -663,7 +663,7 @@ class ASTPatternGenerator:
 
         return assigned_vars
 
-    def generate_uop_targeted_pattern(self, uop_names: str) -> tuple[str, str, str]:
+    def generate_uop_targeted_pattern(self, uop_names: list[str]) -> tuple[str, str, str]:
         """
         Generates a pattern specifically designed to stress the given uop
         by using a template from the UOP_RECIPES library.
@@ -830,6 +830,9 @@ class ASTPatternGenerator:
             self._create_class_reassignment_node,
         ]
 
+        if self.parent.jit_writer.live_object_pool:
+            single_target_actions.append(self._create_stale_object_attack_node)
+
         # Menu of multi-target evil actions
         multi_target_actions = [
             self._create_dict_swap_node,
@@ -948,7 +951,7 @@ class ASTPatternGenerator:
             value=lambda_payload
         )]
 
-    def _create_dict_swap_node(self, var1_name: str, var2_name: str, **kwargs) -> List[ast.stmt]:
+    def _create_dict_swap_node(self, var1_name: str, var2_name: str, **kwargs) -> list[ast.stmt]:
         """
         Generates AST for: obj1.__dict__, obj2.__dict__ = obj2.__dict__, obj1.__dict__
         """
@@ -969,7 +972,7 @@ class ASTPatternGenerator:
             )
         )]
 
-    def _create_class_reassignment_node(self, target_var: str, **kwargs) -> List[ast.stmt]:
+    def _create_class_reassignment_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """
         Generates AST for: class NewClass: pass; obj.__class__ = NewClass
         """
@@ -986,3 +989,27 @@ class ASTPatternGenerator:
             value=ast.Name(id=new_class_name, ctx=ast.Load())
         )
         return [class_def_node, assign_node]
+
+    def _create_stale_object_attack_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
+        """
+        Generates AST to replace a local variable with a "stale" object
+        from the global live object pool.
+        """
+        # Access the live pool from the parent orchestrator.
+        live_pool = self.parent.jit_writer.live_object_pool
+        if not live_pool:
+            return [ast.Pass(lineno=0, col_offset=0)]  # Return a valid node if pool is empty
+
+        stale_var_name = random.choice(list(live_pool.keys()))
+
+        # print(f"[EVIL] Stale object attack: overwriting '{target_var}' with global '{stale_var_name}'", file=sys.stderr)
+
+        # Generates: `target_var = globals()['stale_var_name']`
+        return [ast.Assign(
+            targets=[ast.Name(id=target_var, ctx=ast.Store())],
+            value=ast.Subscript(
+                value=ast.Call(func=ast.Name(id='globals', ctx=ast.Load()), args=[], keywords=[]),
+                slice=ast.Constant(value=stale_var_name),
+                ctx=ast.Load()
+            )
+        )]

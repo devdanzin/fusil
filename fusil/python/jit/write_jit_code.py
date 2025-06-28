@@ -78,6 +78,8 @@ class WriteJITCode:
 
         self.jit_warmed_targets = []
         self.fuzzable_classes = None
+        # This pool will persist across scenario generations.
+        self.live_object_pool = {}  # Stores {var_name: type_hint}
 
     def generate_scenario(self, prefix: str) -> str:
         """
@@ -89,6 +91,13 @@ class WriteJITCode:
         appropriate generation engine based on the user's --jit-mode and
         other command-line flags. It then writes the result to the output buffer.
         """
+
+        # With a certain probability, we just seed the object pool.
+        if self.live_object_pool and random() < 0.2: # 20% chance if pool is not empty
+            setup_code = self._generate_setup_only_scenario()
+            self.parent.write_block(0, setup_code)
+            return setup_code
+
         # 1. Select a target to be fuzzed. This can be a function or a method.
         target = self._select_fuzzing_target(prefix)
         if not target:
@@ -349,7 +358,7 @@ class WriteJITCode:
         methods_dict = self.parent._get_object_methods(class_type, class_name_str)
         if not methods_dict:
             # If no methods, we can't generate a meaningful scenario.
-            return
+            return ""
 
         chosen_method_name = choice(list(methods_dict.keys()))
         chosen_method_obj = methods_dict[chosen_method_name]
@@ -945,7 +954,7 @@ if {instance_var}:
 
 """)
         # 3. Return the entire assembled block.
-        final_code.render(**locals())
+        return final_code.render(**locals())
 
     def _generate_deep_call_invalidation_scenario(self, prefix: str, target: dict) -> str:
         """
@@ -1705,7 +1714,7 @@ collect()
         pattern = BUG_PATTERNS.get(pattern_name)
         if not pattern:
             self.write_print_to_stderr(0, f'"[!] Unknown bug pattern name: {pattern_name}"')
-            return
+            return ""
 
         tags = pattern.get('tags', {'standard'})
         has_payload_placeholder = '{corruption_payload}' in pattern['setup_code'] or \
@@ -2590,3 +2599,27 @@ if {instance_var}:
         """)
         return code, instance_var
 
+    def _generate_setup_only_scenario(self) -> str:
+        """
+        This method generates only setup code for new "stale" objects
+        and adds them to the live object pool.
+        """
+        print("[+] STRATEGY: Stale Object Pool Seeding", file=self.parent.stderr)
+        num_objects_to_create = randint(1, 3)
+        setup_code_lines = []
+
+        for _ in range(num_objects_to_create):
+            # Choose a random object type to create, preferring our custom evil ones.
+            p_type = self.ast_pattern_generator.arg_generator.get_random_object_type()
+
+            # Use a unique name that's unlikely to clash.
+            var_name = self.ast_pattern_generator._get_unique_var_name(base=f"stale_{p_type}")
+
+            # Generate the setup code and add the object to our pool.
+            setup_code = self.ast_pattern_generator.arg_generator.generate_arg_by_type(p_type, var_name)
+            self.live_object_pool[var_name] = p_type
+            setup_code_lines.append(f"# --- Stale object '{var_name}' of type '{p_type}' ---")
+            setup_code_lines.append(setup_code)
+
+        print(f"[+] Added {num_objects_to_create} new objects to the live pool.", file=self.parent.stderr)
+        return "\n\n".join(setup_code_lines)
