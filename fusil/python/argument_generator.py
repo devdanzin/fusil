@@ -655,7 +655,7 @@ class ArgumentGenerator:
         return setup_code
 
     def generate_subclass_str(self) -> str:
-        if random() < 0.1:  # Temporary high chance for testing if it works
+        if random() < 1.1:  # Temporarily no chance
             return ""
         bases = ('int', 'float', 'str', 'bytes', 'tuple', 'list', 'dict', 'set')
         if random() > 0.1:

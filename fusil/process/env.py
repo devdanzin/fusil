@@ -101,6 +101,8 @@ class Environment(ProjectAgent):
         self.copies.append("PYTHON_JIT")
         self.copies.append("LSAN_OPTIONS")
         self.copies.append("ASAN_OPTIONS")
+        self.copies.append("PYTHON_LLTRACE")
+        self.copies.append("PYTHON_OPT_DEBUG_4")
 
     def clear(self):
         self.copies = []

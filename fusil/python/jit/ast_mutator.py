@@ -38,10 +38,10 @@ class OperatorSwapper(ast.NodeTransformer):
 
         # Bitwise Operators
         ast.LShift: [ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor],
-        ast.RShift: [ast.LShift, ast.BitAnd, ast.BitOr, ast.BitXor],
-        ast.BitAnd: [ast.BitOr, ast.BitXor, ast.LShift, ast.RShift],
-        ast.BitOr: [ast.BitAnd, ast.BitXor, ast.LShift, ast.RShift],
-        ast.BitXor: [ast.BitAnd, ast.BitOr, ast.LShift, ast.RShift],
+        ast.RShift: [ast.BitAnd, ast.BitOr, ast.BitXor],
+        ast.BitAnd: [ast.BitOr, ast.BitXor, ast.RShift],
+        ast.BitOr: [ast.BitAnd, ast.BitXor, ast.RShift],
+        ast.BitXor: [ast.BitAnd, ast.BitOr, ast.RShift],
     }
 
     def visit_BinOp(self, node):
@@ -191,7 +191,7 @@ class ASTMutator:
             StatementDuplicator,
         ]
 
-    def mutate(self, code_string: str, seed: int = None) -> str:
+    def mutate(self, code_string: str, seed: int = None, mutations: int | None = None) -> str:
         """
         Parses code, applies a random pipeline of AST mutations, and unparses
         it back into a string.
@@ -218,8 +218,8 @@ class ASTMutator:
             return f"# Original code failed to parse:\n# {'#'.join(code_string.splitlines())}"
 
         # Randomly select 1 to 3 transformers to apply
-        num_mutations = random.randint(1, 3)
-        chosen_transformers = random.sample(self.transformers, num_mutations)
+        num_mutations = mutations if mutations else random.randint(1, 3)
+        chosen_transformers = random.choices(self.transformers, k=num_mutations)
 
         for transformer_class in chosen_transformers:
             transformer_instance = transformer_class()

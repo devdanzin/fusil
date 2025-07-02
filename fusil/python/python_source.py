@@ -21,13 +21,14 @@ time_start = time.time()
 class PythonSource(ProjectAgent):
     """Manages module discovery, loading, and Python source code generation."""
 
-    def __init__(self, project: Project, options: FusilConfig):
+    def __init__(self, project: Project, options: FusilConfig, source_output_path: str | None = None):
         ProjectAgent.__init__(self, project, "python_source")
         self.module: ModuleType | None = None
         self.module_name = ""
         self.write: WritePythonCode | None = None
         self.filename = ""
         self.options = options
+        self.source_output_path = source_output_path
 
         if self.options.modules != "*":
             self.modules = set()
@@ -122,7 +123,10 @@ class PythonSource(ProjectAgent):
 
     def on_session_start(self) -> None:
         """Start a new fuzzing session by selecting a module and generating test code."""
-        self.filename = self.session().createFilename("source.py")
+        if self.source_output_path:
+            self.filename = self.source_output_path
+        else:
+            self.filename = self.session().createFilename("source.py")
 
         # copy sys.modules
         old_sys_modules = sys.modules.copy()

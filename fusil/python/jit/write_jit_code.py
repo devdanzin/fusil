@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
+from pathlib import Path
 from textwrap import dedent
 from typing import Any
 from random import choice, randint, random, choices
+from sys import stderr
 from typing import TYPE_CHECKING
 
 import fusil.python.values
@@ -38,6 +41,9 @@ from fusil.write_code import CodeTemplate as CT
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
 
+# Define the path to the corpus directory.
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+CORPUS_DIR = PROJECT_ROOT / "corpus" / "jit_interesting_tests"
 
 class WriteJITCode:
     """
@@ -91,6 +97,15 @@ class WriteJITCode:
         appropriate generation engine based on the user's --jit-mode and
         other command-line flags. It then writes the result to the output buffer.
         """
+
+        # With high probability, choose to mutate from the corpus if the flag is set.
+        if self.options.jit_feedback_driven_mode: #  and random() < 0.95:
+             # Check if corpus exists and is not empty
+            if CORPUS_DIR.is_dir() and os.listdir(CORPUS_DIR):
+                output = self._generate_corpus_mutation_scenario(prefix)
+                self.parent.write_block(0, output)
+                return output
+
 
         # With a certain probability, we just seed the object pool.
         if self.live_object_pool and random() < 0.2: # 20% chance if pool is not empty
@@ -2604,7 +2619,7 @@ if {instance_var}:
         This method generates only setup code for new "stale" objects
         and adds them to the live object pool.
         """
-        print("[+] STRATEGY: Stale Object Pool Seeding", file=self.parent.stderr)
+        print("[+] STRATEGY: Stale Object Pool Seeding", file=stderr)
         num_objects_to_create = randint(1, 3)
         setup_code_lines = []
 
@@ -2621,5 +2636,78 @@ if {instance_var}:
             setup_code_lines.append(f"# --- Stale object '{var_name}' of type '{p_type}' ---")
             setup_code_lines.append(setup_code)
 
-        print(f"[+] Added {num_objects_to_create} new objects to the live pool.", file=self.parent.stderr)
+        print(f"[+] Added {num_objects_to_create} new objects to the live pool.", file=stderr)
         return "\n\n".join(setup_code_lines)
+
+    def _generate_corpus_mutation_scenario(self, prefix: str) -> str:
+        """
+        Generates a new test case by mutating an existing "interesting"
+        test case from the corpus.
+        """
+        # print(f"[+] STRATEGY: Feedback-Driven Corpus Mutation", file=stderr)
+
+        if not CORPUS_DIR.is_dir() or not os.listdir(CORPUS_DIR):
+            print("[-] Corpus is empty. Falling back to random uop generation.", file=stderr)
+            return self._generate_uop_targeted_scenario(prefix, {})
+
+        # 1. Randomly select a file from the corpus.
+        corpus_files = os.listdir(CORPUS_DIR)
+        chosen_filename = choice(corpus_files)
+        chosen_filepath = CORPUS_DIR / chosen_filename
+        # print(f"[+] Mutating corpus file: {chosen_filename}", file=stderr)
+        source_code = chosen_filepath.read_text()
+
+        # 2. Parse the source into an AST and find the setup and harness code.
+        tree = ast.parse(source_code)
+        harness_node = None
+        harness_node_index = -1
+        for i, node in enumerate(tree.body):
+            if isinstance(node, ast.FunctionDef) and node.name.startswith('uop_harness_'):
+                harness_node = node
+                harness_node_index = i
+                break
+
+        if harness_node is None:
+            print(f"[-] Could not find harness function in {chosen_filename}. Falling back.", file=stderr)
+            return self._generate_uop_targeted_scenario(prefix, {})
+
+        # 3. Separate setup code from the core logic to be mutated.
+        setup_nodes = tree.body[:harness_node_index]
+        setup_code = ast.unparse(setup_nodes)
+
+        core_ast_to_mutate = harness_node.body
+
+        # 4. Mutate the core logic using our existing ASTMutator.
+        num_mutations = randint(3, 5)
+        core_pattern_code = self.ast_mutator.mutate(ast.unparse(core_ast_to_mutate), mutations=num_mutations)
+        # core_pattern_code = ast.unparse(mutated_core_ast)
+
+        # 5. Assemble the final mutated test case.
+        # We reuse the template from the uop-targeted scenario for consistency.
+        hot_loop_str = self._begin_hot_loop(prefix)
+        guarded_call = self._generate_guarded_call(f"uop_harness_{prefix}()", verbose=True, break_loop=True)
+        header_print = self.write_print_to_stderr(
+            0, f"'[{prefix}] Running mutated code originally from {chosen_filename}.'", return_str=True
+        )
+        footer_print = self.write_print_to_stderr(
+            0, f"'[{prefix}] Done running mutated code originally from {chosen_filename}.'", return_str=True
+        )
+
+        final_code = CT("""
+                    # --- Mutated from corpus file: {chosen_filename} ---
+                    {header_print}
+                    {setup_code}
+
+                    # This harness function contains the MUTATED code.
+                    def uop_harness_{prefix}():
+                        {core_pattern_code}
+
+                    # Execute the harness in a JIT-warming hot loop.
+                    {hot_loop_str}
+                        {guarded_call}
+
+                    {footer_print}
+                """).render(**locals())
+
+        return final_code
+

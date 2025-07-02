@@ -292,6 +292,25 @@ class Fuzzer(Application):
             default=None,
         )
 
+        jit_options.add_option(
+            '--jit-feedback-driven-mode',
+            help='Enable feedback-driven mode, mutating from the corpus.',
+            action='store_true',
+            default=False,
+        )
+        jit_options.add_option(
+            '--source-output-path',
+            help='Specify an exact output path for the generated source file.',
+            type='str',
+            default=None,
+        )
+        jit_options.add_option(
+            '--stdout-path',
+            help='Specify an exact output path for the process stdout/stderr.',
+            type='str',
+            default=None,
+        )
+
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
@@ -326,9 +345,10 @@ class Fuzzer(Application):
         project.error("Use python interpreter: %s" % self.options.python)
         version = " -- ".join(line.strip() for line in sys.version.splitlines())
         project.error("Python version: %s" % version)
-        PythonSource(project, self.options)
+        self.source = PythonSource(project, self.options, source_output_path=self.options.source_output_path)
         process = PythonProcess(
             project,
+            self.options,
             [self.options.python, "-u", "<source.py>"],
             timeout=self.options.timeout,
         )

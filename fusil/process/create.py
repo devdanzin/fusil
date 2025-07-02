@@ -35,6 +35,7 @@ class CreateProcess(ProjectAgent):
     def __init__(
         self,
         project,
+        options,
         arguments=None,
         stdout="file",
         stdin=False,
@@ -63,6 +64,7 @@ class CreateProcess(ProjectAgent):
         }
         self.popen_args["close_fds"] = True
         self.stdin = stdin
+        self.options = options
 
     def init(self):
         self.score = None
@@ -74,7 +76,7 @@ class CreateProcess(ProjectAgent):
         self.current_arguments = None
         self.show_exit = True
         self.wrote_replay = False
-        self.stdout_file = None
+        self.stdout_file = self.options.stdout_path
 
     def prepareProcess(self):
         prepareProcess(self)
@@ -162,7 +164,7 @@ class CreateProcess(ProjectAgent):
         # Ignore stdout?
         if self.stdout != "null":
             # Otherwise, create a "stdout" file as output
-            filename = self.session().createFilename("stdout")
+            filename = self.stdout_file if self.stdout_file else self.session().createFilename("stdout")
             self.send("process_stdout", self, filename)
         else:
             filename = devnull
