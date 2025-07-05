@@ -21,14 +21,13 @@ import random
 import copy
 from textwrap import dedent
 
-# --- Step 3: A Library of Initial Mutation Strategies ---
 
 class OperatorSwapper(ast.NodeTransformer):
     """Swaps binary operators like + with *, avoiding ast.Pow."""
 
     # A rich suite of plausible substitutions for arithmetic and bitwise operators.
     OP_MAP = {
-        # Arithmetic Operators
+        # Arithmetic Operators, without Pow because it generates huge numbers
         ast.Add: [ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod],
         ast.Sub: [ast.Add, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod],
         ast.Mult: [ast.Add, ast.Sub, ast.Div, ast.FloorDiv],
@@ -36,7 +35,7 @@ class OperatorSwapper(ast.NodeTransformer):
         ast.FloorDiv: [ast.Div, ast.Mult, ast.Add, ast.Sub, ast.Mod],
         ast.Mod: [ast.FloorDiv, ast.Add, ast.Sub],
 
-        # Bitwise Operators
+        # Bitwise Operators, without LShift because it generates huge numbers
         ast.LShift: [ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor],
         ast.RShift: [ast.BitAnd, ast.BitOr, ast.BitXor],
         ast.BitAnd: [ast.BitOr, ast.BitXor, ast.RShift],
@@ -164,8 +163,6 @@ class StatementDuplicator(ast.NodeTransformer):
         return node
 
 
-# --- Step 1 & 4: The Main Mutator Class and Pipeline ---
-
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -191,6 +188,38 @@ class ASTMutator:
             StatementDuplicator,
         ]
 
+    def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> ast.AST:
+        """
+        Applies a random pipeline of AST mutations directly to an AST object.
+
+        This is a more efficient version of mutate() for use when the AST
+        is already available, avoiding an unparse/re-parse cycle.
+
+        Args:
+            tree: The AST object to be mutated.
+            seed: An optional integer to seed the random number generator.
+            mutations: An optional integer to specify the number of mutations.
+
+        Returns:
+            The new, mutated AST object.
+        """
+        if seed is not None:
+            random.seed(seed)
+
+        # Randomly select 1 to 3 transformers to apply
+        num_mutations = mutations if mutations is not None else random.randint(1, 3)
+        chosen_transformers = random.choices(self.transformers, k=num_mutations)
+
+        if isinstance(tree, list):
+            tree = ast.Module(body=tree, type_ignores=[])
+
+        for transformer_class in chosen_transformers:
+            transformer_instance = transformer_class()
+            tree = transformer_instance.visit(tree)
+
+        ast.fix_missing_locations(tree)
+        return tree.body
+
     def mutate(self, code_string: str, seed: int = None, mutations: int | None = None) -> str:
         """
         Parses code, applies a random pipeline of AST mutations, and unparses
@@ -208,26 +237,14 @@ class ASTMutator:
         Returns:
             A string containing the new, mutated Python code.
         """
-        # +++ NEW +++
-        if seed is not None:
-            random.seed(seed)
-
         try:
             tree = ast.parse(dedent(code_string))
         except SyntaxError:
             return f"# Original code failed to parse:\n# {'#'.join(code_string.splitlines())}"
 
-        # Randomly select 1 to 3 transformers to apply
-        num_mutations = mutations if mutations else random.randint(1, 3)
-        chosen_transformers = random.choices(self.transformers, k=num_mutations)
-
-        for transformer_class in chosen_transformers:
-            transformer_instance = transformer_class()
-            tree = transformer_instance.visit(tree)
-
-        ast.fix_missing_locations(tree)
+        mutated_tree = self.mutate_ast(tree, seed=seed, mutations=mutations)
 
         try:
-            return ast.unparse(tree)
+            return ast.unparse(mutated_tree)
         except AttributeError:
             return f"# AST unparsing failed. Original code was:\n# {code_string}"

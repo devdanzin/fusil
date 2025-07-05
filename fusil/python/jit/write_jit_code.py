@@ -23,6 +23,7 @@ The key responsibilities of this module are:
 from __future__ import annotations
 
 import ast
+import copy
 import inspect
 import os
 from pathlib import Path
@@ -2711,3 +2712,31 @@ if {instance_var}:
 
         return final_code
 
+    def _apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200):
+        """
+        A generator that yields a sequence of deterministically mutated ASTs.
+
+        This method takes a single "parent" AST and applies a series of
+        seeded mutations to it, yielding each new variant. This allows the
+        fuzzing loop to test hundreds of small changes against a single
+        interesting test case.
+
+        Args:
+            base_ast: The original, unmutated AST from a corpus file.
+            max_mutations: The number of mutated variants to generate.
+
+        Yields:
+            A new, mutated AST object for each seed.
+        """
+        print(f"[+] Applying mutation strategy to base AST, generating {max_mutations} variants...",
+              file=stderr)
+        for i in range(max_mutations):
+            # It is CRITICAL to deepcopy the base AST before each mutation.
+            # This ensures each mutation starts from the same pristine state,
+            # and we are only testing the effect of the current seed.
+            tree_copy = copy.deepcopy(base_ast)
+
+            # Use the loop counter `i` as the seed for deterministic mutation.
+            mutated_ast = self.ast_mutator.mutate_ast(tree_copy, seed=i)
+
+            yield mutated_ast

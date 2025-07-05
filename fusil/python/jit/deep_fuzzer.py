@@ -13,6 +13,8 @@ from typing import Any, Generator, Literal
 from fusil.python.jit.jit_coverage_parser import parse_log_for_edge_coverage
 from fusil.python.jit.ast_mutator import ASTMutator
 
+RANDOM = random.Random()
+
 # Define paths relative to this file's location
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
@@ -96,31 +98,22 @@ class DeepFuzzerOrchestrator:
         CRASHES_DIR.mkdir(exist_ok=True)
         TIMEOUTS_DIR.mkdir(exist_ok=True)
 
-    def _add_new_file_to_corpus(self, source_path: Path, parent_name: str = "generation") -> str:
+    def _add_new_file_to_corpus(
+            self,
+            source_path: Path,
+            baseline_coverage: dict[str, Any],
+            parent_name: str = "generation"
+    ) -> str:
         """
-        Copies a file to the corpus, calculates its baseline coverage,
-        and saves that coverage to the state file.
+        Copies a file to the corpus and saves its pre-calculated baseline
+        coverage to the state file.
         """
-        unique_id = f"id_{random.randint(10000, 99999)}_{parent_name.replace('.py', '')}.py"
+        unique_id = f"id_{RANDOM.randint(10000, 99999)}_{parent_name.replace('.py', '')}.py"
         corpus_filepath = CORPUS_DIR / unique_id
         shutil.copy(source_path, corpus_filepath)
         print(f"[+] Added to corpus: {unique_id}")
 
-        baseline_log_path = TMP_DIR / f"{unique_id}.log"
-        try:
-            with open(baseline_log_path, "w") as log_file:
-                subprocess.run(
-                    ["python3", str(corpus_filepath)],
-                    stdout=log_file, stderr=subprocess.STDOUT, timeout=10
-                )
-            baseline_coverage = parse_log_for_edge_coverage(baseline_log_path)
-        except (subprocess.TimeoutExpired, IOError) as e:
-            print(f"[!] Warning: Could not get baseline coverage for {unique_id}: {e}", file=sys.stderr)
-            baseline_coverage = {}
-        finally:
-            if baseline_log_path.exists():
-                baseline_log_path.unlink()
-
+        # The re-execution logic is now removed. We use the coverage that was passed in.
         self.coverage_state["per_file_coverage"][unique_id] = baseline_coverage
         return unique_id
 
@@ -134,7 +127,7 @@ class DeepFuzzerOrchestrator:
 
         corpus_files = [f for f in CORPUS_DIR.iterdir() if f.is_file()]
         # Future enhancement: Add heuristics here (e.g., smaller files, rarer coverage)
-        return random.choice(corpus_files)
+        return RANDOM.choice(corpus_files)
 
     def run_evolutionary_loop(self):
         """
@@ -196,7 +189,7 @@ class DeepFuzzerOrchestrator:
             subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT)
 
         # Analyze it for coverage
-        self.analyze_run(tmp_log, tmp_source)
+        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED")
 
     def apply_mutation_strategy(self, tree: ast.AST, max_mutations: int = 200) -> Generator[AST, None, None]:
         print(f"[+] Applying mutation strategy to base AST, generating {max_mutations} variants...",
@@ -286,7 +279,6 @@ class DeepFuzzerOrchestrator:
                     parent_baseline_coverage,
                     parent_id
                 )
-
                 if analysis_result == "CRASH":
                     # Crash was detected and saved by analyze_run. Continue to next mutation.
                     continue
@@ -349,32 +341,61 @@ class DeepFuzzerOrchestrator:
 
         # --- Coverage Analysis ---
         # This part only runs if no crash was detected.
-        current_coverage = parse_log_for_edge_coverage(log_path)
-        newly_discovered_globally = False
+        child_coverage = parse_log_for_edge_coverage(log_path)
+        is_interesting = False
 
         global_coverage = self.coverage_state["global_coverage"]
 
-        for harness_id, data in current_coverage.items():
-            # (Logic for updating uops, edges, and rare_events remains the same)
-            for uop, count in data.get("uops", {}).items():
+        for harness_id, child_data in child_coverage.items():
+            parent_harness_data = parent_baseline_coverage.get(harness_id, {})
+
+            # --- Check UOPs ---
+            child_uops = child_data.get("uops", {})
+            parent_uops = parent_harness_data.get("uops", {})
+            for uop, count in child_uops.items():
                 if uop not in global_coverage["uops"]:
-                    newly_discovered_globally = True
-                    global_coverage["uops"][uop] = 0
+                    print(f"[NEW GLOBAL UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+                elif uop not in parent_uops:
+                    print(f"[NEW RELATIVE UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+
+                global_coverage["uops"].setdefault(uop, 0)
                 global_coverage["uops"][uop] += count
-            for edge, count in data.get("edges", {}).items():
+
+            # --- Check Edges ---
+            child_edges = child_data.get("edges", {})
+            parent_edges = parent_harness_data.get("edges", {})
+            for edge, count in child_edges.items():
                 if edge not in global_coverage["edges"]:
-                    newly_discovered_globally = True
-                    global_coverage["edges"][edge] = 0
+                    print(f"[NEW GLOBAL EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+                elif edge not in parent_edges:
+                    print(f"[NEW RELATIVE EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+
+                # Update global state
+                global_coverage["edges"].setdefault(edge, 0)
                 global_coverage["edges"][edge] += count
-            for event, count in data.get("rare_events", {}).items():
+
+            # --- Check Rare Events ---
+            child_events = child_data.get("rare_events", {})
+            parent_events = parent_harness_data.get("rare_events", {})
+            for event, count in child_events.items():
                 if event not in global_coverage["rare_events"]:
-                    newly_discovered_globally = True
-                    global_coverage["rare_events"][event] = 0
+                    print(f"[NEW GLOBAL RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+                elif event not in parent_events:
+                    print(f"[NEW RELATIVE RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
+                    is_interesting = True
+
+                # Update global state
+                global_coverage["rare_events"].setdefault(event, 0)
                 global_coverage["rare_events"][event] += count
 
-        if newly_discovered_globally:
-            print(f"[!!!] NEW COVERAGE FOUND! Saving {source_path.name} to corpus.")
-            shutil.copy(source_path, CORPUS_DIR / f"id_{random.randint(1000, 9999)}_{source_path.name}")
+        if is_interesting or parent_id == "SEED":
+            new_file_id = self._add_new_file_to_corpus(source_path, child_coverage, parent_id)
+            print(f"[+] Saved interesting mutation as {new_file_id}")
             save_coverage_state(self.coverage_state)
             return "NEW_COVERAGE"
 

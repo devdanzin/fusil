@@ -10,13 +10,13 @@ from pathlib import Path
 HARNESS_MARKER_REGEX = re.compile(r"\[(f\d+)\]")
 
 # Regex to find standard uops in the JIT log files.
-UOP_REGEX = re.compile(r"(?:ADD_TO_TRACE|OPTIMIZED): (_[A-Z0-9_]+)")
+UOP_REGEX = re.compile(r"(?:ADD_TO_TRACE|OPTIMIZED): (_[A-Z0-9_]+)(?=\s|\n|$)")
 
 # Regex to find "rare" but highly interesting JIT events.
 RARE_EVENT_REGEX = re.compile(r"(_DEOPT|_GUARD_FAIL)")
 
 # Define paths for the coverage directory and the new state file.
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 COVERAGE_DIR = PROJECT_ROOT / "coverage"
 COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
 

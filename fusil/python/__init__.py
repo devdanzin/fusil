@@ -339,6 +339,8 @@ class Fuzzer(Application):
     def setupProject(self) -> None:
         """Initialize the fuzzing project with process monitoring and output analysis."""
         project = self.project
+        if not self.project:
+            project = self.project = Project(self)
         assert isinstance(project, Project)
 
         project.error(f"Start time: {time.asctime()}")
