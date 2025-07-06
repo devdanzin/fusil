@@ -272,6 +272,9 @@ class WritePythonCode(WriteCode):
                 from gc import collect
                 from random import choice, randint, random, sample
                 from sys import stderr, path as sys_path
+
+                # FUSIL_BOILERPLATE_START
+
                 from os.path import dirname
                 import ast
                 import inspect
@@ -489,6 +492,18 @@ class WritePythonCode(WriteCode):
             self.write(0, "fuzzer_threads_alive = []")
         if self.enable_async:
             self.write(0, "fuzzer_async_tasks = []")
+        self.emptyLine()
+
+        self.write(0, "\n# FUSIL_BOILERPLATE_END\n")
+        self.write(0,
+                   dedent(
+            """
+            import sys
+            from random import choice, randint, random, sample
+            from sys import stderr, path as sys_path
+            """
+                   )
+        )
         self.emptyLine()
 
         if self.module_functions:

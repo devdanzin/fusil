@@ -41,6 +41,9 @@ CRASH_KEYWORDS = [
     "AddressSanitizer",
 ]
 
+BOILERPLATE_START_MARKER = "# FUSIL_BOILERPLATE_START"
+BOILERPLATE_END_MARKER = "# FUSIL_BOILERPLATE_END"
+
 AnalysisResult = Literal["CRASH", "NEW_COVERAGE", "NO_CHANGE"]
 
 
@@ -91,6 +94,8 @@ class DeepFuzzerOrchestrator:
     def __init__(self):
         self.ast_mutator = ASTMutator()
         self.coverage_state = load_coverage_state()
+        self.boilerplate_code = None
+
 
         # Ensure temporary and corpus directories exist
         CORPUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,22 +103,51 @@ class DeepFuzzerOrchestrator:
         CRASHES_DIR.mkdir(exist_ok=True)
         TIMEOUTS_DIR.mkdir(exist_ok=True)
 
+    def _extract_and_cache_boilerplate(self, source_code: str):
+        """
+        Parses a full source file to find, extract, and cache the
+        static boilerplate code.
+        """
+        try:
+            start_index = source_code.index(BOILERPLATE_START_MARKER)
+            end_index = source_code.index(BOILERPLATE_END_MARKER)
+            # The boilerplate includes the start marker itself.
+            self.boilerplate_code = source_code[start_index:end_index]
+            print("[+] Boilerplate code extracted and cached.")
+        except ValueError:
+            print("[!] Warning: Could not find boilerplate markers in the initial seed file.", file=sys.stderr)
+            # Fallback to using an empty boilerplate
+            self.boilerplate_code = ""
+
+    def _get_core_code(self, source_code: str) -> str:
+        """
+        Strips the boilerplate from a full source file to get the dynamic core.
+        """
+        try:
+            end_index = source_code.index(BOILERPLATE_END_MARKER)
+            # The core code starts right after the end marker and its newline.
+            return source_code[end_index + len(BOILERPLATE_END_MARKER) + 1:]
+        except ValueError:
+            # If no marker, assume the whole file is the core (for minimized corpus files)
+            return source_code
+
     def _add_new_file_to_corpus(
             self,
-            source_path: Path,
-            baseline_coverage: dict[str, Any],
+            core_code: str,
+            baseline_coverage: Dict[str, Any],
             parent_name: str = "generation"
     ) -> str:
         """
-        Copies a file to the corpus and saves its pre-calculated baseline
-        coverage to the state file.
+        Saves the MINIMIZED core code to the corpus and updates the state file
+        with its baseline coverage.
         """
-        unique_id = f"id_{RANDOM.randint(10000, 99999)}_{parent_name.replace('.py', '')}.py"
+        unique_id = f"id_{random.randint(10000, 99999)}_{parent_name.replace('.py', '')}.py"
         corpus_filepath = CORPUS_DIR / unique_id
-        shutil.copy(source_path, corpus_filepath)
-        print(f"[+] Added to corpus: {unique_id}")
 
-        # The re-execution logic is now removed. We use the coverage that was passed in.
+        # Save only the core code, not the boilerplate.
+        corpus_filepath.write_text(core_code)
+        print(f"[+] Added minimized file to corpus: {unique_id}")
+
         self.coverage_state["per_file_coverage"][unique_id] = baseline_coverage
         return unique_id
 
@@ -216,7 +250,14 @@ class DeepFuzzerOrchestrator:
 
         try:
             parent_source = parent_path.read_text()
-            parent_tree = ast.parse(parent_source)
+
+            # If boilerplate isn't cached yet, this must be a full generation file.
+            if self.boilerplate_code is None:
+                self._extract_and_cache_boilerplate(parent_source)
+
+            # Get the core code for mutation. This works for both full and minimized files.
+            parent_core_code = self._get_core_code(parent_source)
+            parent_core_tree = ast.parse(parent_core_code)
         except (IOError, SyntaxError) as e:
             print(f"[!] Error processing parent file {parent_path.name}: {e}", file=sys.stderr)
             return
@@ -224,7 +265,7 @@ class DeepFuzzerOrchestrator:
         # Find the first harness function to use as the mutation target.
         # A more advanced strategy could mutate all harnesses.
         base_harness_node = None
-        for node in parent_tree.body:
+        for node in parent_core_tree.body:
             if isinstance(node, ast.FunctionDef) and node.name.startswith('uop_harness_'):
                 base_harness_node = node
                 break
@@ -234,7 +275,8 @@ class DeepFuzzerOrchestrator:
             return
 
         # Get the stream of mutated variants from our strategy generator.
-        mutation_generator = self.apply_mutation_strategy(base_harness_node.body)
+        core_logic_to_mutate = base_harness_node.body
+        mutation_generator = self.apply_mutation_strategy(core_logic_to_mutate)
 
         # Loop through a set number of mutations for this parent.
         env = os.environ.copy()
@@ -248,14 +290,15 @@ class DeepFuzzerOrchestrator:
             # 1. Re-assemble the full source code for the child.
             # We create a full copy of the parent's AST and then swap in the
             # mutated body to the correct harness function.
-            child_tree = copy.deepcopy(parent_tree)
-            for node in child_tree.body:
+            child_core_tree = copy.deepcopy(parent_core_tree)
+            for node in child_core_tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == base_harness_node.name:
                     node.body = mutated_body_ast
                     break
 
-            ast.fix_missing_locations(child_tree)
-            child_source_code = ast.unparse(child_tree.body)
+            # ast.fix_missing_locations(child_core_tree)
+            mutated_core_code = ast.unparse(child_core_tree)
+            child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
 
             # 2. Define temporary file paths for this specific child.
             child_source_path = TMP_DIR / f"child_{session_id}_{i + 1}.py"
@@ -263,7 +306,7 @@ class DeepFuzzerOrchestrator:
 
             # 3. Write and execute the child process.
             try:
-                child_source_path.write_text(child_source_code)
+                child_source_path.write_text(child_full_source)
                 with open(child_log_path, "w") as log_file:
                     result = subprocess.run(
                         ["python3", str(child_source_path)],
@@ -394,7 +437,16 @@ class DeepFuzzerOrchestrator:
                 global_coverage["rare_events"][event] += count
 
         if is_interesting or parent_id == "SEED":
-            new_file_id = self._add_new_file_to_corpus(source_path, child_coverage, parent_id)
+            # Read the full source code that was just run
+            full_source_code = source_path.read_text()
+            # Extract just the core part for saving to the corpus
+            core_code_to_save = self._get_core_code(full_source_code)
+
+            new_file_id = self._add_new_file_to_corpus(
+                core_code_to_save,
+                child_coverage,
+                parent_id
+            )
             print(f"[+] Saved interesting mutation as {new_file_id}")
             save_coverage_state(self.coverage_state)
             return "NEW_COVERAGE"
