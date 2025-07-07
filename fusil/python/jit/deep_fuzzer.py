@@ -166,13 +166,20 @@ def load_run_stats() -> dict[str, Any]:
             "crashes_found": 0,
             "timeouts_found": 0,
             "new_coverage_finds": 0,
+            "sum_of_mutations_per_find": 0,
+            "average_mutations_per_find": 0.0,
         }
     try:
         with open(RUN_STATS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            stats = json.load(f)
+            # Add new fields if loading an older stats file
+            stats.setdefault("sum_of_mutations_per_find", 0)
+            stats.setdefault("average_mutations_per_find", 0.0)
+            return stats
     except (json.JSONDecodeError, IOError) as e:
         print(f"Warning: Could not load run stats file. Starting fresh. Error: {e}", file=sys.stderr)
-        return {} # Return empty to trigger default creation
+        # Return a default structure on error
+        return load_run_stats()
 
 def save_run_stats(stats: dict[str, Any]):
     """
@@ -219,6 +226,7 @@ class DeepFuzzerOrchestrator:
         self.run_stats = load_run_stats()
         self.boilerplate_code = None
         self.scheduler = CorpusScheduler(self.coverage_state)
+        self.mutations_since_last_find = 0
 
         # Ensure temporary and corpus directories exist
         CORPUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -355,6 +363,12 @@ class DeepFuzzerOrchestrator:
         self.run_stats["global_uops"] = len(global_cov.get("uops", {}))
         self.run_stats["global_edges"] = len(global_cov.get("edges", {}))
         self.run_stats["global_rare_events"] = len(global_cov.get("rare_events", {}))
+
+        total_finds = self.run_stats.get("new_coverage_finds", 0)
+        if total_finds > 0:
+            self.run_stats["average_mutations_per_find"] = (
+                self.run_stats.get("sum_of_mutations_per_find", 0) / total_finds
+            )
 
         save_run_stats(self.run_stats)
 
@@ -623,6 +637,7 @@ class DeepFuzzerOrchestrator:
         })
         for i, (mutated_body_ast, mutation_info) in enumerate(mutation_generator):
             self.run_stats["total_mutations"] = self.run_stats.get("total_mutations", 0) + 1
+            self.mutations_since_last_find += 1
             print(f"  \\-> Running mutation #{i + 1} for {parent_path.name}...")
 
             # 1. Re-assemble the full source code for the child.
@@ -670,6 +685,8 @@ class DeepFuzzerOrchestrator:
                     continue
                 elif analysis_result == "NEW_COVERAGE":
                     self.run_stats["new_coverage_finds"] = self.run_stats.get("new_coverage_finds", 0) + 1
+                    self.run_stats["sum_of_mutations_per_find"] += self.mutations_since_last_find
+                    self.mutations_since_last_find = 0
                     print(f"  [***] SUCCESS! Mutation #{i + 1} found new coverage. Moving to next parent.")
                     parent_metadata["total_finds"] = parent_metadata.get("total_finds", 0) + 1
                     parent_metadata["mutations_since_last_find"] = 0
