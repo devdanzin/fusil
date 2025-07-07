@@ -269,12 +269,11 @@ class WritePythonCode(WriteCode):
             0,
             dedent(
                 """\
+                # FUSIL_BOILERPLATE_START
+
                 from gc import collect
                 from random import choice, randint, random, sample
                 from sys import stderr, path as sys_path
-
-                # FUSIL_BOILERPLATE_START
-
                 from os.path import dirname
                 import ast
                 import inspect

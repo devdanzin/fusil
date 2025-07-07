@@ -6,8 +6,11 @@ import random
 import shutil
 import subprocess
 import sys
+import time
 from _ast import AST
+from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import dedent
 from typing import Any, Generator, Literal
 
 from fusil.python.jit.jit_coverage_parser import parse_log_for_edge_coverage
@@ -134,21 +137,36 @@ class DeepFuzzerOrchestrator:
     def _add_new_file_to_corpus(
             self,
             core_code: str,
-            baseline_coverage: Dict[str, Any],
-            parent_name: str = "generation"
+            baseline_coverage: dict[str, Any],
+            execution_time_ms: int,
+            parent_id: str | None
     ) -> str:
         """
-        Saves the MINIMIZED core code to the corpus and updates the state file
-        with its baseline coverage.
+        Copies a file to the corpus and saves its rich metadata object.
         """
-        unique_id = f"id_{random.randint(10000, 99999)}_{parent_name.replace('.py', '')}.py"
+        # --- Step 1.2: Implement Metadata Tracking ---
+        parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {}) if parent_id else {}
+        lineage_depth = parent_metadata.get("lineage_depth", 0) + 1
+
+        unique_id = f"id_{RANDOM.randint(10000, 99999)}_{parent_id.replace('.py', '') if parent_id else 'seed'}.py"
         corpus_filepath = CORPUS_DIR / unique_id
 
         # Save only the core code, not the boilerplate.
         corpus_filepath.write_text(core_code)
         print(f"[+] Added minimized file to corpus: {unique_id}")
 
-        self.coverage_state["per_file_coverage"][unique_id] = baseline_coverage
+        metadata = {
+            "baseline_coverage": baseline_coverage,
+            "parent_id": parent_id,
+            "lineage_depth": lineage_depth,
+            "discovery_time": datetime.now(timezone.utc).isoformat(),
+            "execution_time_ms": execution_time_ms,
+            "file_size_bytes": len(core_code.encode('utf-8')),
+            "mutations_since_last_find": 0,
+            "total_finds": 0,
+            "is_sterile": False
+        }
+        self.coverage_state["per_file_coverage"][unique_id] = metadata
         return unique_id
 
     def select_parent_from_corpus(self) -> Path | None:
@@ -223,7 +241,7 @@ class DeepFuzzerOrchestrator:
             subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT)
 
         # Analyze it for coverage
-        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED")
+        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0)
 
     def apply_mutation_strategy(self, tree: ast.AST, max_mutations: int = 200) -> Generator[AST, None, None]:
         print(f"[+] Applying mutation strategy to base AST, generating {max_mutations} variants...",
@@ -246,7 +264,8 @@ class DeepFuzzerOrchestrator:
         executes and analyzes each resulting child.
         """
         parent_id = parent_path.name
-        parent_baseline_coverage = self.coverage_state["per_file_coverage"].get(parent_id, {})
+        parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {})
+        parent_baseline_coverage = parent_metadata.get("baseline_coverage", {})
 
         try:
             parent_source = parent_path.read_text()
@@ -308,6 +327,7 @@ class DeepFuzzerOrchestrator:
             try:
                 child_source_path.write_text(child_full_source)
                 with open(child_log_path, "w") as log_file:
+                    start_time = time.monotonic()
                     result = subprocess.run(
                         ["python3", str(child_source_path)],
                         stdout=log_file,
@@ -315,20 +335,27 @@ class DeepFuzzerOrchestrator:
                         timeout=10,
                         env=env,
                     )
+                    end_time = time.monotonic()
+                    execution_time_ms = int((end_time - start_time) * 1000)
                 analysis_result = self.analyze_run(
                     child_log_path,
                     child_source_path,
                     result.returncode,
                     parent_baseline_coverage,
-                    parent_id
+                    parent_id,
+                    execution_time_ms,
                 )
-                if analysis_result == "CRASH":
-                    # Crash was detected and saved by analyze_run. Continue to next mutation.
-                    continue
-                elif analysis_result == "NEW_COVERAGE":
-                    # New coverage was found and saved. Move to the next parent.
+                if analysis_result == "NEW_COVERAGE":
                     print(f"  [***] SUCCESS! Mutation #{i + 1} found new coverage. Moving to next parent.")
-                    break
+                    parent_metadata["total_finds"] = parent_metadata.get("total_finds", 0) + 1
+                    parent_metadata["mutations_since_last_find"] = 0
+                    save_coverage_state(self.coverage_state)
+                    break # Move to next parent
+                else:
+                    parent_metadata["mutations_since_last_find"] = parent_metadata.get("mutations_since_last_find", 0) + 1
+                    # Check for sterility
+                    if parent_metadata["mutations_since_last_find"] > 5000: # Sterility threshold
+                        parent_metadata["is_sterile"] = True
             except subprocess.TimeoutExpired:
                 print(f"  [!!!] TIMEOUT DETECTED! Saving test case.", file=sys.stderr)
                 timeout_path = TIMEOUTS_DIR / f"timeout_{session_id}_{i + 1}_{parent_path.name}"
@@ -356,6 +383,7 @@ class DeepFuzzerOrchestrator:
             return_code: int,
             parent_baseline_coverage: dict[str, Any],
             parent_id: str,
+            execution_time_ms: int,
     ) -> AnalysisResult:
         """
         Analyzes a run for crashes (via exit code or log keywords) and new
@@ -445,6 +473,7 @@ class DeepFuzzerOrchestrator:
             new_file_id = self._add_new_file_to_corpus(
                 core_code_to_save,
                 child_coverage,
+                execution_time_ms,
                 parent_id
             )
             print(f"[+] Saved interesting mutation as {new_file_id}")
