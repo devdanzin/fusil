@@ -232,16 +232,15 @@ class DeepFuzzerOrchestrator:
         self.coverage_state["per_file_coverage"][unique_id] = metadata
         return unique_id
 
-    def select_parent_from_corpus(self) -> Path | None:
+    def select_parent_from_corpus(self) -> tuple[Path, float] | None:
         """
         Selects a test case from the corpus using a weighted random choice
-        based on the scheduler's scores.
+        and returns the path and its calculated score.
         """
         corpus_files = list(self.coverage_state.get("per_file_coverage", {}).keys())
         if not corpus_files:
             return None
 
-        # --- Step 2.1 & 2.2: Use the scoring engine ---
         print("[+] Calculating corpus scores for parent selection...")
         scores = self.scheduler.calculate_scores()
 
@@ -255,7 +254,8 @@ class DeepFuzzerOrchestrator:
             # Perform a weighted random selection.
             chosen_filename = RANDOM.choices(corpus_files, weights=corpus_weights, k=1)[0]
 
-        return CORPUS_DIR / chosen_filename
+        chosen_score = scores.get(chosen_filename, 1.0)
+        return CORPUS_DIR / chosen_filename, chosen_score
 
     def run_evolutionary_loop(self):
         """
@@ -270,18 +270,19 @@ class DeepFuzzerOrchestrator:
             print(f"\n--- Fuzzing Session #{session_count} ---")
 
             # 1. Selection
-            parent_path = self.select_parent_from_corpus()
+            selection = self.select_parent_from_corpus()
 
-            if parent_path is None:
+            if selection is None:
                 print("[-] Corpus is empty. Running a generation run to seed the corpus.")
                 self.run_generation_session()
                 continue
 
-            print(f"[+] Selected parent for mutation: {parent_path.name}")
+            parent_path, parent_score = selection
+            print(f"[+] Selected parent for mutation: {parent_path.name} (Score: {parent_score:.2f})")
 
             # This is where the logic from Step 3.2 will go.
             # For now, we'll just show a placeholder for the next step.
-            self.execute_mutation_and_analysis_cycle(parent_path, session_count)
+            self.execute_mutation_and_analysis_cycle(parent_path, parent_score, session_count)
 
     def run_generation_session(self):
         """
@@ -333,12 +334,29 @@ class DeepFuzzerOrchestrator:
 
             yield mutated_ast
 
+    def execute_mutation_and_analysis_cycle(self, parent_path: Path, parent_score: float, session_id: int):
+        """
+        Takes a parent test case, dynamically determines the number of mutations
+        based on its score, and then executes and analyzes each child.
+        """
+        # --- Step 3.2: Implement Dynamic Mutation Count ---
+        base_mutations = 200
+        # Normalize the score relative to a baseline of 100 to calculate a multiplier
+        score_multiplier = parent_score / 100.0
 
-    def execute_mutation_and_analysis_cycle(self, parent_path: Path, session_id: int):
-        """
-        Takes a parent test case, applies a mutation strategy, and then
-        executes and analyzes each resulting child.
-        """
+        # Apply a gentle curve so that very high scores don't lead to extreme mutation counts
+        # and very low scores don't get starved completely.
+        # We use math.log to dampen the effect. Add 1 to avoid log(0).
+        dynamic_multiplier = 0.5 + (math.log(max(1, score_multiplier * 10)) / 2)
+
+        # Clamp the multiplier to a reasonable range (e.g., 0.25x to 3.0x)
+        final_multiplier = max(0.25, min(3.0, dynamic_multiplier))
+
+        max_mutations = int(base_mutations * final_multiplier)
+
+        print(
+            f"[+] Dynamically adjusting mutation count based on score. Base: {base_mutations}, Multiplier: {final_multiplier:.2f}, Final Count: {max_mutations}")
+
         parent_id = parent_path.name
         parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {})
         parent_baseline_coverage = parent_metadata.get("baseline_coverage", {})
@@ -371,7 +389,8 @@ class DeepFuzzerOrchestrator:
 
         # Get the stream of mutated variants from our strategy generator.
         core_logic_to_mutate = base_harness_node.body
-        mutation_generator = self.apply_mutation_strategy(core_logic_to_mutate)
+        # Pass the dynamically calculated mutation count to the strategy generator
+        mutation_generator = self.apply_mutation_strategy(base_harness_node.body, max_mutations=max_mutations)
 
         # Loop through a set number of mutations for this parent.
         env = os.environ.copy()
