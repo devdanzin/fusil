@@ -9,13 +9,14 @@ import subprocess
 import sys
 import time
 from _ast import AST
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Generator, Literal
 
 from fusil.python.jit.jit_coverage_parser import parse_log_for_edge_coverage
-from fusil.python.jit.ast_mutator import ASTMutator
+from fusil.python.jit.ast_mutator import ASTMutator, VariableRenamer
 
 RANDOM = random.Random()
 
@@ -374,6 +375,92 @@ class DeepFuzzerOrchestrator:
         ast.fix_missing_locations(tree)
         return tree.body
 
+    def _analyze_setup_ast(self, setup_nodes: list[ast.stmt]) -> dict[str, str]:
+        """
+        Analyzes a list of setup AST nodes to map variable names to their
+        inferred types based on our naming convention (e.g., 'int_v1').
+        """
+        variable_map = {}
+        for node in setup_nodes:
+            # We are interested in simple, top-level assignments
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                target = node.targets[0]
+                if isinstance(target, ast.Name):
+                    var_name = target.id
+                    # Infer type from prefix, e.g., "int_v1" -> "int"
+                    # This is robust to names that don't have a version suffix.
+                    parts = var_name.split('_v')
+                    inferred_type = parts[0]
+                    variable_map[var_name] = inferred_type
+        return variable_map
+
+    def _run_splicing_stage(self, base_core_ast: ast.AST, **kwargs) -> ast.AST:
+        """
+        Performs a "crossover" by splicing the harness from a second parent
+        into the setup of the first parent, remapping variable names.
+        """
+        print("  [~] Attempting SPLICING stage...", file=sys.stderr)
+
+        selection = self.select_parent_from_corpus()
+        if not selection: return base_core_ast
+        parent_b_path, _ = selection
+
+        try:
+            parent_b_source = parent_b_path.read_text()
+            parent_b_core_code = self._get_core_code(parent_b_source)
+            parent_b_tree = ast.parse(parent_b_core_code)
+        except (IOError, SyntaxError):
+            return base_core_ast
+
+        # --- Analysis ---
+        setup_nodes_a = [n for n in base_core_ast if not isinstance(n, ast.FunctionDef)]
+        provided_vars_a = self._analyze_setup_ast(setup_nodes_a)
+
+        setup_nodes_b = [n for n in parent_b_tree.body if not isinstance(n, ast.FunctionDef)]
+        provided_vars_b = self._analyze_setup_ast(setup_nodes_b)
+
+        harness_b = next((n for n in parent_b_tree.body if isinstance(n, ast.FunctionDef)), None)
+        if not harness_b: return base_core_ast
+
+        required_vars = {node.id for node in ast.walk(harness_b) if
+                         isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+
+        # --- Phase 2: Remapping Logic ---
+        remapping_dict = {}
+        is_possible = True
+        available_vars_a = defaultdict(list)
+        for name, type_name in provided_vars_a.items():
+            available_vars_a[type_name].append(name)
+
+        for required_var in sorted(list(required_vars)):
+            required_type = provided_vars_b.get(required_var)
+            if not required_type: continue
+
+            if available_vars_a.get(required_type):
+                compatible_var = RANDOM.choice(available_vars_a[required_type])
+                remapping_dict[required_var] = compatible_var
+                available_vars_a[required_type].remove(compatible_var)
+            else:
+                print(f"    -> Splice failed: No var of type '{required_type}' for '{required_var}'", file=sys.stderr)
+                is_possible = False
+                break
+
+        if not is_possible:
+            return base_core_ast
+
+        print(f"    -> Remapping successful: {remapping_dict}")
+
+        # --- Phase 3: Transformation and Assembly ---
+        renamer = VariableRenamer(remapping_dict)
+        remapped_harness_b = renamer.visit(copy.deepcopy(harness_b))
+
+        # The new core AST consists of Parent A's setup and the remapped Harness B
+        new_core_body = setup_nodes_a + [remapped_harness_b]
+        new_core_ast = ast.Module(body=new_core_body, type_ignores=[])
+        ast.fix_missing_locations(new_core_ast)
+
+        return new_core_ast
+
     def apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200) -> Generator[ast.AST, None, None]:
         """
         A generator that yields a sequence of mutated ASTs, using a
@@ -385,9 +472,10 @@ class DeepFuzzerOrchestrator:
         strategies = [
             self._run_deterministic_stage,
             self._run_havoc_stage,
-            self._run_spam_stage
+            self._run_spam_stage,
+            self._run_splicing_stage,
         ]
-        weights = [0.85, 0.10, 0.05]
+        weights = [0.80, 0.10, 0.05, 0.05]
 
         for i in range(max_mutations):
             tree_copy = copy.deepcopy(base_ast)
@@ -455,7 +543,7 @@ class DeepFuzzerOrchestrator:
         # Get the stream of mutated variants from our strategy generator.
         core_logic_to_mutate = base_harness_node.body
         # Pass the dynamically calculated mutation count to the strategy generator
-        mutation_generator = self.apply_mutation_strategy(base_harness_node.body, max_mutations=max_mutations)
+        mutation_generator = self.apply_mutation_strategy(core_logic_to_mutate, max_mutations=max_mutations)
 
         # Loop through a set number of mutations for this parent.
         env = os.environ.copy()

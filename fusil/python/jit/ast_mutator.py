@@ -163,6 +163,25 @@ class StatementDuplicator(ast.NodeTransformer):
         return node
 
 
+class VariableRenamer(ast.NodeTransformer):
+    """
+    A NodeTransformer that renames variables based on a provided mapping.
+    This is used by the splicing strategy to make a donor harness compatible
+    with a recipient's setup code.
+    """
+    def __init__(self, remapping_dict: dict[str, str]):
+        self.remapping_dict = remapping_dict
+
+    def visit_Name(self, node: ast.Name) -> ast.Name:
+        """
+        If this node's ID is in our remapping dictionary, rename it.
+        This affects variables being loaded, stored, or deleted.
+        """
+        if node.id in self.remapping_dict:
+            node.id = self.remapping_dict[node.id]
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
