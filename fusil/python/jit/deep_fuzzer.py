@@ -1,6 +1,7 @@
 import ast
 import copy
 import json
+import math
 import os
 import random
 import shutil
@@ -85,6 +86,68 @@ def save_coverage_state(state: dict[str, Any]):
         json.dump(state, f, indent=2, sort_keys=True)
 
 
+class CorpusScheduler:
+    """
+    Calculates a "fuzzing score" for each item in the corpus to guide
+    the parent selection process.
+    """
+
+    def __init__(self, coverage_state: dict[str, Any]):
+        self.coverage_state = coverage_state
+        self.global_coverage = coverage_state.get("global_coverage", {})
+
+    def _calculate_rarity_score(self, file_metadata: dict[str, Any]) -> float:
+        """
+        Calculates a score based on how rare the coverage in this file is.
+        Rarer edges (lower global hit count) contribute more to the score.
+        """
+        rarity_score = 0.0
+        baseline_coverage = file_metadata.get("baseline_coverage", {})
+
+        for harness_data in baseline_coverage.values():
+            for edge in harness_data.get("edges", []):
+                # The score for an edge is the inverse of its global hit count.
+                # We add 1 to the denominator to avoid division by zero.
+                global_hits = self.global_coverage.get("edges", {}).get(edge, 0)
+                rarity_score += 1.0 / (global_hits + 1)
+        return rarity_score
+
+    def calculate_scores(self) -> dict[str, float]:
+        """
+        Iterates through the corpus and calculates a score for each file.
+        """
+        scores = {}
+        for filename, metadata in self.coverage_state.get("per_file_coverage", {}).items():
+            # Start with a base score
+            score = 100.0
+
+            # --- Heuristic 1: Performance (lower is better) ---
+            # Penalize slow and large files.
+            score -= metadata.get("execution_time_ms", 100) * 0.1
+            score -= metadata.get("file_size_bytes", 1000) * 0.01
+
+            # --- Heuristic 2: Rarity (higher is better) ---
+            # Reward files that contain globally rare coverage.
+            rarity = self._calculate_rarity_score(metadata)
+            score += rarity * 50.0
+
+            # --- Heuristic 3: Fertility (higher is better) ---
+            # Reward parents that have produced successful children.
+            score += metadata.get("total_finds", 0) * 20.0
+            # Heavily penalize sterile parents that haven't found anything new in a long time.
+            if metadata.get("is_sterile", False):
+                score *= 0.1
+
+            # --- Heuristic 4: Depth (higher is better) ---
+            # Slightly reward deeper mutation chains to encourage depth exploration.
+            score += metadata.get("lineage_depth", 1) * 5.0
+
+            # Ensure score is non-negative
+            scores[filename] = max(1.0, score)
+
+        return scores
+
+
 class DeepFuzzerOrchestrator:
     """
     The "brain" of the feedback-driven fuzzer.
@@ -98,7 +161,7 @@ class DeepFuzzerOrchestrator:
         self.ast_mutator = ASTMutator()
         self.coverage_state = load_coverage_state()
         self.boilerplate_code = None
-
+        self.scheduler = CorpusScheduler(self.coverage_state)
 
         # Ensure temporary and corpus directories exist
         CORPUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -171,15 +234,28 @@ class DeepFuzzerOrchestrator:
 
     def select_parent_from_corpus(self) -> Path | None:
         """
-        Selects a test case from the corpus to be the parent for a
-        round of mutations.
+        Selects a test case from the corpus using a weighted random choice
+        based on the scheduler's scores.
         """
-        if not os.listdir(CORPUS_DIR):
+        corpus_files = list(self.coverage_state.get("per_file_coverage", {}).keys())
+        if not corpus_files:
             return None
 
-        corpus_files = [f for f in CORPUS_DIR.iterdir() if f.is_file()]
-        # Future enhancement: Add heuristics here (e.g., smaller files, rarer coverage)
-        return RANDOM.choice(corpus_files)
+        # --- Step 2.1 & 2.2: Use the scoring engine ---
+        print("[+] Calculating corpus scores for parent selection...")
+        scores = self.scheduler.calculate_scores()
+
+        # Ensure we have scores for all files, providing a default if any are missing.
+        corpus_weights = [scores.get(filename, 1.0) for filename in corpus_files]
+
+        if not any(w > 0 for w in corpus_weights):
+            # If all scores are zero, fall back to uniform random choice
+            chosen_filename = RANDOM.choice(corpus_files)
+        else:
+            # Perform a weighted random selection.
+            chosen_filename = RANDOM.choices(corpus_files, weights=corpus_weights, k=1)[0]
+
+        return CORPUS_DIR / chosen_filename
 
     def run_evolutionary_loop(self):
         """
@@ -354,7 +430,7 @@ class DeepFuzzerOrchestrator:
                 else:
                     parent_metadata["mutations_since_last_find"] = parent_metadata.get("mutations_since_last_find", 0) + 1
                     # Check for sterility
-                    if parent_metadata["mutations_since_last_find"] > 5000: # Sterility threshold
+                    if parent_metadata["mutations_since_last_find"] > 599: # Sterility threshold
                         parent_metadata["is_sterile"] = True
             except subprocess.TimeoutExpired:
                 print(f"  [!!!] TIMEOUT DETECTED! Saving test case.", file=sys.stderr)
