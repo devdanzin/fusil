@@ -203,7 +203,8 @@ class DeepFuzzerOrchestrator:
             core_code: str,
             baseline_coverage: dict[str, Any],
             execution_time_ms: int,
-            parent_id: str | None
+            parent_id: str | None,
+            mutation_info: dict[str, Any],
     ) -> str:
         """
         Copies a file to the corpus and saves its rich metadata object.
@@ -228,7 +229,8 @@ class DeepFuzzerOrchestrator:
             "file_size_bytes": len(core_code.encode('utf-8')),
             "mutations_since_last_find": 0,
             "total_finds": 0,
-            "is_sterile": False
+            "is_sterile": False,
+            "discovery_mutation": mutation_info,
         }
         self.coverage_state["per_file_coverage"][unique_id] = metadata
         return unique_id
@@ -319,16 +321,20 @@ class DeepFuzzerOrchestrator:
             subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT)
 
         # Analyze it for coverage
-        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0)
+        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0, {})
 
-    def _run_deterministic_stage(self, base_ast: ast.AST, seed: int, **kwargs) -> ast.AST:
+    def _run_deterministic_stage(self, base_ast: ast.AST, seed: int, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
-        Applies a single, seeded, deterministic mutation.
-        The dispatcher passes a deepcopy, so we don't need to copy again.
+        Applies a single, seeded, deterministic mutation and returns info about it.
         """
-        return self.ast_mutator.mutate_ast(base_ast, seed=seed)
+        mutated_ast, transformers_used = self.ast_mutator.mutate_ast(base_ast, seed=seed)
+        mutation_info = {
+            "strategy": "deterministic",
+            "transformers": [t.__name__ for t in transformers_used]
+        }
+        return mutated_ast, mutation_info
 
-    def _run_havoc_stage(self, base_ast: ast.AST, **kwargs) -> ast.AST:
+    def _run_havoc_stage(self, base_ast: ast.AST, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
         Applies a random stack of many different mutations to the AST to
         induce significant "havoc".
@@ -336,21 +342,18 @@ class DeepFuzzerOrchestrator:
         print("  [~] Running HAVOC stage...", file=sys.stderr)
         tree = ast.Module(body=base_ast, type_ignores=[])  # Start with the copied tree from the dispatcher
         num_havoc_mutations = RANDOM.randint(15, 50)
-
-        available_transformers = self.ast_mutator.transformers
-        if not available_transformers:
-            return tree.body
+        transformers_applied = []
 
         for _ in range(num_havoc_mutations):
-            transformer_class = RANDOM.choice(available_transformers)
-            transformer_instance = transformer_class()
-            # Apply mutations cumulatively
-            tree = transformer_instance.visit(tree)
+            transformer_class = RANDOM.choice(self.ast_mutator.transformers)
+            transformers_applied.append(transformer_class.__name__)
+            tree = transformer_class().visit(tree)
 
         ast.fix_missing_locations(tree)
-        return tree.body
+        mutation_info = {"strategy": "havoc", "transformers": transformers_applied}
+        return tree.body, mutation_info
 
-    def _run_spam_stage(self, base_ast: ast.AST, **kwargs) -> ast.AST:
+    def _run_spam_stage(self, base_ast: ast.AST, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
         Repeatedly applies the *same type* of mutation to the AST to
         thoroughly exercise one transformation.
@@ -359,21 +362,17 @@ class DeepFuzzerOrchestrator:
         tree = ast.Module(body=base_ast, type_ignores=[])
         num_spam_mutations = RANDOM.randint(20, 50)
 
-        available_transformers = self.ast_mutator.transformers
-        if not available_transformers:
-            return tree.body
-
         # Choose one single type of mutation to spam
-        chosen_transformer_class = RANDOM.choice(available_transformers)
+        chosen_transformer_class = RANDOM.choice(self.ast_mutator.transformers)
         print(f"    -> Spamming with: {chosen_transformer_class.__name__}", file=sys.stderr)
 
         for _ in range(num_spam_mutations):
             # Apply a new instance of the same transformer each time
-            transformer_instance = chosen_transformer_class()
-            tree = transformer_instance.visit(tree)
+            tree = chosen_transformer_class().visit(tree)
 
         ast.fix_missing_locations(tree)
-        return tree.body
+        mutation_info = {"strategy": "spam", "transformers": [chosen_transformer_class.__name__] * num_spam_mutations}
+        return tree.body, mutation_info
 
     def _analyze_setup_ast(self, setup_nodes: list[ast.stmt]) -> dict[str, str]:
         """
@@ -461,7 +460,7 @@ class DeepFuzzerOrchestrator:
 
         return new_core_ast
 
-    def apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200) -> Generator[ast.AST, None, None]:
+    def apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200) -> Generator[tuple[ast.AST, dict[str, Any]], None, None]:
         """
         A generator that yields a sequence of mutated ASTs, using a
         probabilistic mix of different mutation strategies.
@@ -473,9 +472,9 @@ class DeepFuzzerOrchestrator:
             self._run_deterministic_stage,
             self._run_havoc_stage,
             self._run_spam_stage,
-            self._run_splicing_stage,
+            # self._run_splicing_stage,
         ]
-        weights = [0.80, 0.10, 0.05, 0.05]
+        weights = [0.85, 0.10, 0.05]
 
         for i in range(max_mutations):
             tree_copy = copy.deepcopy(base_ast)
@@ -483,9 +482,9 @@ class DeepFuzzerOrchestrator:
 
             # The `seed` argument is used by the deterministic stage and
             # ignored by the others thanks to the **kwargs signature.
-            mutated_ast = chosen_strategy(tree_copy, seed=i)
+            mutated_ast, mutation_info = chosen_strategy(tree_copy, seed=i)
 
-            yield mutated_ast
+            yield mutated_ast, mutation_info
 
     def execute_mutation_and_analysis_cycle(self, parent_path: Path, parent_score: float, session_id: int):
         """
@@ -551,7 +550,7 @@ class DeepFuzzerOrchestrator:
             "PYTHON_LLTRACE": "4",
             "PYTHON_OPT_DEBUG": "4",
         })
-        for i, mutated_body_ast in enumerate(mutation_generator):
+        for i, (mutated_body_ast, mutation_info) in enumerate(mutation_generator):
             print(f"  \\-> Running mutation #{i + 1} for {parent_path.name}...")
 
             # 1. Re-assemble the full source code for the child.
@@ -592,6 +591,7 @@ class DeepFuzzerOrchestrator:
                     parent_baseline_coverage,
                     parent_id,
                     execution_time_ms,
+                    mutation_info,
                 )
                 if analysis_result == "NEW_COVERAGE":
                     print(f"  [***] SUCCESS! Mutation #{i + 1} found new coverage. Moving to next parent.")
@@ -632,6 +632,7 @@ class DeepFuzzerOrchestrator:
             parent_baseline_coverage: dict[str, Any],
             parent_id: str,
             execution_time_ms: int,
+            mutation_info: dict[str, Any],
     ) -> AnalysisResult:
         """
         Analyzes a run for crashes (via exit code or log keywords) and new
@@ -722,7 +723,8 @@ class DeepFuzzerOrchestrator:
                 core_code_to_save,
                 child_coverage,
                 execution_time_ms,
-                parent_id
+                parent_id,
+                mutation_info,
             )
             print(f"[+] Saved interesting mutation as {new_file_id}")
             save_coverage_state(self.coverage_state)

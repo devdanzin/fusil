@@ -207,7 +207,7 @@ class ASTMutator:
             # StatementDuplicator,
         ]
 
-    def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> ast.AST:
+    def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
         """
         Applies a random pipeline of AST mutations directly to an AST object.
 
@@ -237,7 +237,7 @@ class ASTMutator:
             tree = transformer_instance.visit(tree)
 
         ast.fix_missing_locations(tree)
-        return tree.body
+        return tree.body, chosen_transformers
 
     def mutate(self, code_string: str, seed: int = None, mutations: int | None = None) -> str:
         """
@@ -261,7 +261,7 @@ class ASTMutator:
         except SyntaxError:
             return f"# Original code failed to parse:\n# {'#'.join(code_string.splitlines())}"
 
-        mutated_tree = self.mutate_ast(tree, seed=seed, mutations=mutations)
+        mutated_tree, _ = self.mutate_ast(tree, seed=seed, mutations=mutations)
 
         try:
             return ast.unparse(mutated_tree)
