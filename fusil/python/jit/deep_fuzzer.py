@@ -28,6 +28,8 @@ TMP_DIR = PROJECT_ROOT / "tmp_fuzz_run"
 
 CRASHES_DIR = PROJECT_ROOT / "crashes"
 TIMEOUTS_DIR = PROJECT_ROOT / "timeouts"
+LOGS_DIR = PROJECT_ROOT / "logs"
+RUN_STATS_FILE = PROJECT_ROOT / "fuzz_run_stats.json"
 
 COVERAGE_DIR = PROJECT_ROOT / "coverage"
 COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
@@ -149,6 +151,59 @@ class CorpusScheduler:
         return scores
 
 
+def load_run_stats() -> dict[str, Any]:
+    """
+    Loads the persistent run statistics from the JSON file.
+    Returns a default structure if the file doesn't exist.
+    """
+    if not RUN_STATS_FILE.is_file():
+        return {
+            "start_time": datetime.now(timezone.utc).isoformat(),
+            "last_update_time": None,
+            "total_sessions": 0,
+            "total_mutations": 0,
+            "corpus_size": 0,
+            "crashes_found": 0,
+            "timeouts_found": 0,
+            "new_coverage_finds": 0,
+        }
+    try:
+        with open(RUN_STATS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Could not load run stats file. Starting fresh. Error: {e}", file=sys.stderr)
+        return {} # Return empty to trigger default creation
+
+def save_run_stats(stats: dict[str, Any]):
+    """
+    Saves the updated run statistics to the JSON file.
+    """
+    with open(RUN_STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2, sort_keys=True)
+
+
+class TeeLogger:
+    """
+    A file-like object that writes to both a file and another stream
+    (like the original stdout), and flushes immediately.
+    """
+    def __init__(self, file_path, original_stream):
+        self.original_stream = original_stream
+        self.log_file = open(file_path, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.original_stream.write(message)
+        self.log_file.write(message)
+        self.flush()
+
+    def flush(self):
+        self.original_stream.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
+
+
 class DeepFuzzerOrchestrator:
     """
     The "brain" of the feedback-driven fuzzer.
@@ -161,6 +216,7 @@ class DeepFuzzerOrchestrator:
     def __init__(self):
         self.ast_mutator = ASTMutator()
         self.coverage_state = load_coverage_state()
+        self.run_stats = load_run_stats()
         self.boilerplate_code = None
         self.scheduler = CorpusScheduler(self.coverage_state)
 
@@ -169,6 +225,7 @@ class DeepFuzzerOrchestrator:
         TMP_DIR.mkdir(exist_ok=True)
         CRASHES_DIR.mkdir(exist_ok=True)
         TIMEOUTS_DIR.mkdir(exist_ok=True)
+        LOGS_DIR.mkdir(exist_ok=True)
 
     def _extract_and_cache_boilerplate(self, source_code: str):
         """
@@ -266,26 +323,40 @@ class DeepFuzzerOrchestrator:
         This method contains the infinite loop that drives the fuzzer.
         """
         print("[+] Starting Deep Fuzzer Evolutionary Loop. Press Ctrl+C to stop.")
+        try:
+            while True:
+                self.run_stats["total_sessions"] = self.run_stats.get("total_sessions", 0) + 1
+                print(f"\n--- Fuzzing Session #{self.run_stats['total_sessions']} ---")
 
-        session_count = 0
-        while True:
-            session_count += 1
-            print(f"\n--- Fuzzing Session #{session_count} ---")
+                # 1. Selection
+                selection = self.select_parent_from_corpus()
 
-            # 1. Selection
-            selection = self.select_parent_from_corpus()
+                if selection is None:
+                    print("[-] Corpus is empty. Running a generation run to seed the corpus.")
+                    self.run_generation_session()
+                else:
+                    parent_path, parent_score = selection
+                    print(f"[+] Selected parent for mutation: {parent_path.name} (Score: {parent_score:.2f})")
+                    self.execute_mutation_and_analysis_cycle(parent_path, parent_score, self.run_stats['total_sessions'])
 
-            if selection is None:
-                print("[-] Corpus is empty. Running a generation run to seed the corpus.")
-                self.run_generation_session()
-                continue
+                    # Update dynamic stats after each session
+                self.update_and_save_run_stats()
+        finally:
+            print("\n[+] Fuzzing loop terminating. Saving final stats...")
+            self.update_and_save_run_stats()
 
-            parent_path, parent_score = selection
-            print(f"[+] Selected parent for mutation: {parent_path.name} (Score: {parent_score:.2f})")
+    def update_and_save_run_stats(self):
+        """
+        Helper to update dynamic stats and save the stats file.
+        """
+        self.run_stats["last_update_time"] = datetime.now(timezone.utc).isoformat()
+        self.run_stats["corpus_size"] = len(self.coverage_state.get("per_file_coverage", {}))
+        global_cov = self.coverage_state.get("global_coverage", {})
+        self.run_stats["global_uops"] = len(global_cov.get("uops", {}))
+        self.run_stats["global_edges"] = len(global_cov.get("edges", {}))
+        self.run_stats["global_rare_events"] = len(global_cov.get("rare_events", {}))
 
-            # This is where the logic from Step 3.2 will go.
-            # For now, we'll just show a placeholder for the next step.
-            self.execute_mutation_and_analysis_cycle(parent_path, parent_score, session_count)
+        save_run_stats(self.run_stats)
 
     def run_generation_session(self):
         """
@@ -551,6 +622,7 @@ class DeepFuzzerOrchestrator:
             "PYTHON_OPT_DEBUG": "4",
         })
         for i, (mutated_body_ast, mutation_info) in enumerate(mutation_generator):
+            self.run_stats["total_mutations"] = self.run_stats.get("total_mutations", 0) + 1
             print(f"  \\-> Running mutation #{i + 1} for {parent_path.name}...")
 
             # 1. Re-assemble the full source code for the child.
@@ -593,7 +665,11 @@ class DeepFuzzerOrchestrator:
                     execution_time_ms,
                     mutation_info,
                 )
-                if analysis_result == "NEW_COVERAGE":
+                if analysis_result == "CRASH":
+                    self.run_stats["crashes_found"] = self.run_stats.get("crashes_found", 0) + 1
+                    continue
+                elif analysis_result == "NEW_COVERAGE":
+                    self.run_stats["new_coverage_finds"] = self.run_stats.get("new_coverage_finds", 0) + 1
                     print(f"  [***] SUCCESS! Mutation #{i + 1} found new coverage. Moving to next parent.")
                     parent_metadata["total_finds"] = parent_metadata.get("total_finds", 0) + 1
                     parent_metadata["mutations_since_last_find"] = 0
@@ -605,9 +681,12 @@ class DeepFuzzerOrchestrator:
                     if parent_metadata["mutations_since_last_find"] > 599: # Sterility threshold
                         parent_metadata["is_sterile"] = True
             except subprocess.TimeoutExpired:
+                self.run_stats["timeouts_found"] = self.run_stats.get("timeouts_found", 0) + 1
                 print(f"  [!!!] TIMEOUT DETECTED! Saving test case.", file=sys.stderr)
-                timeout_path = TIMEOUTS_DIR / f"timeout_{session_id}_{i + 1}_{parent_path.name}"
-                shutil.copy(child_source_path, timeout_path)
+                timeout_source_path = TIMEOUTS_DIR / f"timeout_{session_id}_{i+1}_{parent_path.name}"
+                timeout_log_path = timeout_source_path.with_suffix(".log")
+                shutil.copy(child_source_path, timeout_source_path)
+                shutil.copy(child_log_path, timeout_log_path)
                 continue
             except Exception as e:
                 print(f"  [!] Error executing child process: {e}", file=sys.stderr)
@@ -641,23 +720,26 @@ class DeepFuzzerOrchestrator:
         # --- Lightweight Crash Monitoring ---
         # 1. Check for non-zero exit code first.
         if return_code != 0:
-            print(f"  [!!!] CRASH DETECTED! Exit code: {return_code}. Saving test case.", file=sys.stderr)
-            crash_path = CRASHES_DIR / f"crash_retcode_{source_path.name}"
-            shutil.copy(source_path, crash_path)
+            print(f"  [!!!] CRASH DETECTED! Exit code: {return_code}. Saving test case and log.", file=sys.stderr)
+            crash_source_path = CRASHES_DIR / f"crash_retcode_{source_path.name}"
+            crash_log_path = crash_source_path.with_suffix(".log")
+            shutil.copy(source_path, crash_source_path)
+            shutil.copy(log_path, crash_log_path)
             return "CRASH"
-
         # 2. If exit code is clean, scan the log for crash keywords.
         try:
             log_content = log_path.read_text()
             for keyword in CRASH_KEYWORDS:
                 if keyword.lower() in log_content.lower():
-                    print(f"  [!!!] CRASH DETECTED! Found keyword '{keyword}'. Saving test case.", file=sys.stderr)
-                    crash_path = CRASHES_DIR / f"crash_keyword_{source_path.name}"
-                    shutil.copy(source_path, crash_path)
+                    print(f"  [!!!] CRASH DETECTED! Found keyword '{keyword}'. Saving test case and log.",
+                          file=sys.stderr)
+                    crash_source_path = CRASHES_DIR / f"crash_keyword_{source_path.name}"
+                    crash_log_path = crash_source_path.with_suffix(".log")
+                    shutil.copy(source_path, crash_source_path)
+                    shutil.copy(log_path, crash_log_path)
                     return "CRASH"
         except IOError as e:
             print(f"  [!] Warning: Could not read log file for crash analysis: {e}", file=sys.stderr)
-
 
         # --- Coverage Analysis ---
         # This part only runs if no crash was detected.
@@ -737,8 +819,38 @@ def main():
     """
     Main entry point to set up and run the Deep Fuzzer Orchestrator.
     """
-    orchestrator = DeepFuzzerOrchestrator()
-    orchestrator.run_evolutionary_loop()
+    LOGS_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    orchestrator_log_path = LOGS_DIR / f"deep_fuzzer_run_{timestamp}.log"
+
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    # This initial print goes only to the console
+    print(f"[+] Starting deep fuzzer. Full log will be at: {orchestrator_log_path}")
+
+    # Use the TeeLogger to write to both console and file simultaneously.
+    # We redirect both stdout and stderr to the same logger instance.
+    tee_logger = TeeLogger(orchestrator_log_path, original_stdout)
+    sys.stdout = tee_logger
+    sys.stderr = tee_logger
+
+    try:
+        orchestrator = DeepFuzzerOrchestrator()
+        orchestrator.run_evolutionary_loop()
+    except KeyboardInterrupt:
+        print("\n[!] Fuzzing stopped by user.")
+    except Exception as e:
+        # Use original stderr for the final error message so it's always visible.
+        print(f"\n[!!!] An unexpected error occurred in the orchestrator: {e}", file=original_stderr)
+        import traceback
+        traceback.print_exc(file=original_stderr)
+    finally:
+        # Cleanly close the log file and restore streams.
+        tee_logger.close()
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        print(f"[+] Fuzzing session finished. Full log saved to: {orchestrator_log_path}")
 
 
 if __name__ == "__main__":
