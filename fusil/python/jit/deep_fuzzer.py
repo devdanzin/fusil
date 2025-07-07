@@ -320,17 +320,82 @@ class DeepFuzzerOrchestrator:
         # Analyze it for coverage
         self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0)
 
-    def apply_mutation_strategy(self, tree: ast.AST, max_mutations: int = 200) -> Generator[AST, None, None]:
-        print(f"[+] Applying mutation strategy to base AST, generating {max_mutations} variants...",
-              file=sys.stderr)
-        for i in range(max_mutations):
-            # It is CRITICAL to deepcopy the base AST before each mutation.
-            # This ensures each mutation starts from the same pristine state,
-            # and we are only testing the effect of the current seed.
-            tree_copy = copy.deepcopy(tree)
+    def _run_deterministic_stage(self, base_ast: ast.AST, seed: int, **kwargs) -> ast.AST:
+        """
+        Applies a single, seeded, deterministic mutation.
+        The dispatcher passes a deepcopy, so we don't need to copy again.
+        """
+        return self.ast_mutator.mutate_ast(base_ast, seed=seed)
 
-            # Use the loop counter `i` as the seed for deterministic mutation.
-            mutated_ast = self.ast_mutator.mutate_ast(tree_copy, seed=i)
+    def _run_havoc_stage(self, base_ast: ast.AST, **kwargs) -> ast.AST:
+        """
+        Applies a random stack of many different mutations to the AST to
+        induce significant "havoc".
+        """
+        print("  [~] Running HAVOC stage...", file=sys.stderr)
+        tree = ast.Module(body=base_ast, type_ignores=[])  # Start with the copied tree from the dispatcher
+        num_havoc_mutations = RANDOM.randint(15, 50)
+
+        available_transformers = self.ast_mutator.transformers
+        if not available_transformers:
+            return tree.body
+
+        for _ in range(num_havoc_mutations):
+            transformer_class = RANDOM.choice(available_transformers)
+            transformer_instance = transformer_class()
+            # Apply mutations cumulatively
+            tree = transformer_instance.visit(tree)
+
+        ast.fix_missing_locations(tree)
+        return tree.body
+
+    def _run_spam_stage(self, base_ast: ast.AST, **kwargs) -> ast.AST:
+        """
+        Repeatedly applies the *same type* of mutation to the AST to
+        thoroughly exercise one transformation.
+        """
+        print("  [~] Running SPAM stage...", file=sys.stderr)
+        tree = ast.Module(body=base_ast, type_ignores=[])
+        num_spam_mutations = RANDOM.randint(20, 50)
+
+        available_transformers = self.ast_mutator.transformers
+        if not available_transformers:
+            return tree.body
+
+        # Choose one single type of mutation to spam
+        chosen_transformer_class = RANDOM.choice(available_transformers)
+        print(f"    -> Spamming with: {chosen_transformer_class.__name__}", file=sys.stderr)
+
+        for _ in range(num_spam_mutations):
+            # Apply a new instance of the same transformer each time
+            transformer_instance = chosen_transformer_class()
+            tree = transformer_instance.visit(tree)
+
+        ast.fix_missing_locations(tree)
+        return tree.body
+
+    def apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200) -> Generator[ast.AST, None, None]:
+        """
+        A generator that yields a sequence of mutated ASTs, using a
+        probabilistic mix of different mutation strategies.
+        """
+        print(f"[+] Applying mutation strategy to base AST, generating up to {max_mutations} variants...",
+              file=sys.stderr)
+
+        strategies = [
+            self._run_deterministic_stage,
+            self._run_havoc_stage,
+            self._run_spam_stage
+        ]
+        weights = [0.85, 0.10, 0.05]
+
+        for i in range(max_mutations):
+            tree_copy = copy.deepcopy(base_ast)
+            chosen_strategy = RANDOM.choices(strategies, weights=weights, k=1)[0]
+
+            # The `seed` argument is used by the deterministic stage and
+            # ignored by the others thanks to the **kwargs signature.
+            mutated_ast = chosen_strategy(tree_copy, seed=i)
 
             yield mutated_ast
 

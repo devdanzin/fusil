@@ -185,7 +185,7 @@ class ASTMutator:
             GuardInjector,
             ContainerChanger,
             VariableSwapper,
-            StatementDuplicator,
+            # StatementDuplicator,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> ast.AST:
