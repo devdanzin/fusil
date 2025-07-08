@@ -16,10 +16,8 @@ UOP_REGEX = re.compile(r"(?:ADD_TO_TRACE|OPTIMIZED): (_[A-Z0-9_]+)(?=\s|\n|$)")
 RARE_EVENT_REGEX = re.compile(r"(_DEOPT|_GUARD_FAIL)")
 
 # Define paths for the coverage directory and the new state file.
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-COVERAGE_DIR = PROJECT_ROOT / "coverage"
+COVERAGE_DIR = Path("coverage")
 COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
-
 
 def parse_log_for_edge_coverage(log_path: Path) -> dict[str, dict[str, Counter]]:
     """

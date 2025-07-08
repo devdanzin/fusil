@@ -23,21 +23,21 @@ from fusil.python.jit.ast_mutator import ASTMutator, VariableRenamer
 
 RANDOM = random.Random()
 
-# Define paths relative to this file's location
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-
-CORPUS_DIR = PROJECT_ROOT / "corpus" / "jit_interesting_tests"
-TMP_DIR = PROJECT_ROOT / "tmp_fuzz_run"
-
-CRASHES_DIR = PROJECT_ROOT / "crashes"
-TIMEOUTS_DIR = PROJECT_ROOT / "timeouts"
-LOGS_DIR = PROJECT_ROOT / "logs"
-RUN_STATS_FILE = PROJECT_ROOT / "fuzz_run_stats.json"
-
-COVERAGE_DIR = PROJECT_ROOT / "coverage"
+# --- Paths for Fuzzer Outputs (relative to current working directory) ---
+# This allows running multiple fuzzer instances from different directories.
+CORPUS_DIR = Path("corpus") / "jit_interesting_tests"
+TMP_DIR = Path("tmp_fuzz_run")
+CRASHES_DIR = Path("crashes")
+TIMEOUTS_DIR = Path("timeouts")
+LOGS_DIR = Path("logs")
+RUN_STATS_FILE = Path("fuzz_run_stats.json")
+COVERAGE_DIR = Path("coverage")
 COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
 
-# Path to the fusil executable itself
+# --- Paths for Fuzzer Tooling (relative to this script's location) ---
+# This ensures the fuzzer can find its own executable regardless of the CWD.
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent
 FUSIL_PATH = str(PROJECT_ROOT / "fuzzers" / "fusil-python-threaded")
 
 CRASH_KEYWORDS = [
