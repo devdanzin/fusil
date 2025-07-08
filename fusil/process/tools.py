@@ -47,7 +47,12 @@ def limitUserProcess(nproc, hard=False):
 
 
 def allowCoreDump(hard=False):
-    return _setrlimit(RLIMIT_CORE, -1, hard)
+    ret_code = None
+    try:
+        ret_code = _setrlimit(RLIMIT_CORE, -1, hard)
+    except Exception as e:
+        print(f"{e.__class__.__name__}: {e}")
+    return ret_code
 
 
 def limitCpuTime(seconds, hard=False):
