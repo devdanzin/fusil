@@ -4,9 +4,11 @@ import hashlib
 import json
 import math
 import os
+import platform
 import random
 import shutil
 import subprocess
+import socket
 import sys
 import time
 from _ast import AST
@@ -1018,8 +1020,11 @@ def main():
     Main entry point to set up and run the Deep Fuzzer Orchestrator.
     """
     LOGS_DIR.mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    orchestrator_log_path = LOGS_DIR / f"deep_fuzzer_run_{timestamp}.log"
+    # Use a consistent timestamp for the whole run
+    run_start_time = datetime.now()
+    timestamp_iso = run_start_time.isoformat()
+    safe_timestamp = timestamp_iso.replace(":", "-").replace("+", "Z")
+    orchestrator_log_path = LOGS_DIR / f"deep_fuzzer_run_{safe_timestamp}.log"
 
     original_stdout = sys.stdout
     original_stderr = sys.stderr
@@ -1027,23 +1032,82 @@ def main():
     # This initial print goes only to the console
     print(f"[+] Starting deep fuzzer. Full log will be at: {orchestrator_log_path}")
 
-    # Use the TeeLogger to write to both console and file simultaneously.
-    # We redirect both stdout and stderr to the same logger instance.
     tee_logger = TeeLogger(orchestrator_log_path, original_stdout)
     sys.stdout = tee_logger
     sys.stderr = tee_logger
 
+    termination_reason = "Completed" # Default reason
+    start_stats = load_run_stats() # Capture stats at the start
+
     try:
+        # --- Create and Write the Informative Header ---
+        header = f"""
+================================================================================
+FUSIL DEEP FUZZER RUN
+================================================================================
+- Hostname:         {socket.gethostname()}
+- Platform:         {platform.platform()}
+- Process ID:       {os.getpid()}
+- Python Version:   {sys.version.replace(chr(10), ' ')}
+- Working Dir:      {Path.cwd()}
+- Log File:         {orchestrator_log_path}
+- Start Time:       {timestamp_iso}
+- Command:          {' '.join(sys.argv)}
+--------------------------------------------------------------------------------
+Initial Stats:
+{json.dumps(start_stats, indent=4)}
+================================================================================
+
+"""
+        print(dedent(header))
+        # --- End of Header ---
+
         orchestrator = DeepFuzzerOrchestrator()
         orchestrator.run_evolutionary_loop()
     except KeyboardInterrupt:
         print("\n[!] Fuzzing stopped by user.")
+        termination_reason = "KeyboardInterrupt"
     except Exception as e:
+        termination_reason = f"Error: {e}"
         # Use original stderr for the final error message so it's always visible.
         print(f"\n[!!!] An unexpected error occurred in the orchestrator: {e}", file=original_stderr)
         import traceback
         traceback.print_exc(file=original_stderr)
     finally:
+        # --- Create and Write the Summary Footer ---
+        print("\n" + "="*80)
+        print("FUZZING RUN SUMMARY")
+        print("="*80)
+
+        end_time = datetime.now()
+        duration = end_time - run_start_time
+        end_stats = load_run_stats()
+
+        mutations_this_run = end_stats.get("total_mutations", 0) - start_stats.get("total_mutations", 0)
+        finds_this_run = end_stats.get("new_coverage_finds", 0) - start_stats.get("new_coverage_finds", 0)
+        crashes_this_run = end_stats.get("crashes_found", 0) - start_stats.get("crashes_found", 0)
+        duration_secs = duration.total_seconds()
+        exec_per_sec = mutations_this_run / duration_secs if duration_secs > 0 else 0
+
+        summary = f"""
+- Termination:      {termination_reason}
+- End Time:         {end_time.isoformat()}
+- Total Duration:   {str(duration)}
+
+--- Discoveries This Run ---
+- New Coverage:     {finds_this_run}
+- New Crashes:      {crashes_this_run}
+
+--- Performance This Run ---
+- Total Executions: {mutations_this_run}
+- Execs per Second: {exec_per_sec:.2f}
+
+--- Final Campaign Stats ---
+{json.dumps(end_stats, indent=4)}
+================================================================================
+"""
+        print(dedent(summary))
+
         # Cleanly close the log file and restore streams.
         tee_logger.close()
         sys.stdout = original_stdout
