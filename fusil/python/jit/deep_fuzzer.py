@@ -1,5 +1,6 @@
 import ast
 import copy
+import hashlib
 import json
 import math
 import os
@@ -230,6 +231,12 @@ class DeepFuzzerOrchestrator:
         self.scheduler = CorpusScheduler(self.coverage_state)
         self.mutations_since_last_find = 0
         self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
+        self.known_hashes = {
+            metadata.get("content_hash")
+            for metadata in self.coverage_state.get("per_file_coverage", {}).values()
+            if "content_hash" in metadata
+        }
+        print(f"[+] Initialized with {len(self.known_hashes)} known file hashes.")
 
         # Ensure temporary and corpus directories exist
         CORPUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -280,6 +287,7 @@ class DeepFuzzerOrchestrator:
             parent_id: str | None,
             mutation_info: dict[str, Any],
             mutation_seed: int,
+            content_hash: str,
     ) -> str:
         """
         Copies a file to the corpus and saves its rich metadata object.
@@ -307,8 +315,10 @@ class DeepFuzzerOrchestrator:
             "is_sterile": False,
             "discovery_mutation": mutation_info,
             "mutation_seed": mutation_seed,
+            "content_hash": content_hash,
         }
         self.coverage_state["per_file_coverage"][unique_id] = metadata
+        self.known_hashes.add(content_hash)
         return unique_id
 
     def select_parent_from_corpus(self) -> tuple[Path, float] | None:
@@ -848,6 +858,12 @@ class DeepFuzzerOrchestrator:
             full_source_code = source_path.read_text()
             # Extract just the core part for saving to the corpus
             core_code_to_save = self._get_core_code(full_source_code)
+            content_hash = hashlib.sha256(core_code_to_save.encode('utf-8')).hexdigest()
+
+            # The core duplication check:
+            if content_hash in self.known_hashes:
+                print(f"  [~] New coverage found, but content is a known duplicate (Hash: {content_hash[:10]}...). Skipping.", file=sys.stderr)
+                return "NO_CHANGE"
 
             new_file_id = self._add_new_file_to_corpus(
                 core_code_to_save,
@@ -856,6 +872,7 @@ class DeepFuzzerOrchestrator:
                 parent_id,
                 mutation_info,
                 mutation_seed=mutation_seed,
+                content_hash=content_hash,
             )
             print(f"[+] Saved interesting mutation as {new_file_id}")
             save_coverage_state(self.coverage_state)
