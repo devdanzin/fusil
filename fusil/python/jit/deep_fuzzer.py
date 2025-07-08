@@ -170,6 +170,7 @@ def load_run_stats() -> dict[str, Any]:
             "sum_of_mutations_per_find": 0,
             "average_mutations_per_find": 0.0,
             "global_seed_counter": 0,
+            "corpus_file_counter": 0,
         }
     try:
         with open(RUN_STATS_FILE, "r", encoding="utf-8") as f:
@@ -178,6 +179,7 @@ def load_run_stats() -> dict[str, Any]:
             stats.setdefault("sum_of_mutations_per_find", 0)
             stats.setdefault("average_mutations_per_find", 0.0)
             stats.setdefault("global_seed_counter", 0)
+            stats.setdefault("corpus_file_counter", 0)
             return stats
     except (json.JSONDecodeError, IOError) as e:
         print(f"Warning: Could not load run stats file. Starting fresh. Error: {e}", file=sys.stderr)
@@ -231,6 +233,7 @@ class DeepFuzzerOrchestrator:
         self.scheduler = CorpusScheduler(self.coverage_state)
         self.mutations_since_last_find = 0
         self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
+        self.corpus_file_counter = self.run_stats.get("corpus_file_counter", 0)
         self.known_hashes = {
             metadata.get("content_hash")
             for metadata in self.coverage_state.get("per_file_coverage", {}).values()
@@ -296,12 +299,14 @@ class DeepFuzzerOrchestrator:
         parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {}) if parent_id else {}
         lineage_depth = parent_metadata.get("lineage_depth", 0) + 1
 
-        unique_id = f"id_{RANDOM.randint(10000, 99999)}_{parent_id.replace('.py', '') if parent_id else 'seed'}.py"
-        corpus_filepath = CORPUS_DIR / unique_id
+        # Increment the global counter and generate the new simple filename.
+        self.corpus_file_counter += 1
+        new_filename = f"{self.corpus_file_counter}.py"
+        corpus_filepath = CORPUS_DIR / new_filename
 
         # Save only the core code, not the boilerplate.
         corpus_filepath.write_text(core_code)
-        print(f"[+] Added minimized file to corpus: {unique_id}")
+        print(f"[+] Added minimized file to corpus: {new_filename}")
 
         metadata = {
             "baseline_coverage": baseline_coverage,
@@ -317,9 +322,9 @@ class DeepFuzzerOrchestrator:
             "mutation_seed": mutation_seed,
             "content_hash": content_hash,
         }
-        self.coverage_state["per_file_coverage"][unique_id] = metadata
+        self.coverage_state["per_file_coverage"][new_filename] = metadata
         self.known_hashes.add(content_hash)
-        return unique_id
+        return new_filename
 
     def select_parent_from_corpus(self) -> tuple[Path, float] | None:
         """
@@ -391,6 +396,7 @@ class DeepFuzzerOrchestrator:
         self.run_stats["global_edges"] = len(global_cov.get("edges", {}))
         self.run_stats["global_rare_events"] = len(global_cov.get("rare_events", {}))
         self.run_stats["global_seed_counter"] = self.global_seed_counter
+        self.run_stats["corpus_file_counter"] = self.corpus_file_counter
 
         total_finds = self.run_stats.get("new_coverage_finds", 0)
         if total_finds > 0:
