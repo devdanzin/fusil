@@ -1,3 +1,4 @@
+import argparse
 import ast
 import copy
 import hashlib
@@ -11,12 +12,11 @@ import subprocess
 import socket
 import sys
 import time
-from _ast import AST
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Generator, Literal
+from typing import Any, Literal
 
 from fusil.python.jit.jit_coverage_parser import parse_log_for_edge_coverage
 from fusil.python.jit.ast_mutator import ASTMutator, VariableRenamer
@@ -233,12 +233,13 @@ class DeepFuzzerOrchestrator:
     mutated children, and analyzing the results for new coverage.
     """
 
-    def __init__(self):
+    def __init__(self, min_corpus_files: int = 1):
         self.ast_mutator = ASTMutator()
         self.coverage_state = load_coverage_state()
         self.run_stats = load_run_stats()
         self.boilerplate_code = None
         self.scheduler = CorpusScheduler(self.coverage_state)
+        self.min_corpus_files = min_corpus_files
         self.mutations_since_last_find = 0
         self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
         self.corpus_file_counter = self.run_stats.get("corpus_file_counter", 0)
@@ -458,8 +459,20 @@ class DeepFuzzerOrchestrator:
     def run_evolutionary_loop(self):
         """
         The main entry point for the deep fuzzing process.
-        This method contains the infinite loop that drives the fuzzer.
+
+        This method first ensures the corpus has the minimum number of files,
+        then enters the infinite loop that drives the fuzzer.
         """
+        # --- Bootstrap the corpus if it's smaller than the minimum required size ---
+        initial_corpus_size = len(self.coverage_state["per_file_coverage"])
+        if initial_corpus_size < self.min_corpus_files:
+            print(f"[*] Corpus size ({initial_corpus_size}) is less than minimum ({self.min_corpus_files}).")
+            print("[*] Starting corpus generation phase...")
+            while len(self.coverage_state["per_file_coverage"]) < self.min_corpus_files:
+                # The call to run_generation_session will add one new file to the state.
+                self.run_generation_session()
+            print(f"[+] Corpus generation complete. New size: {len(self.coverage_state['per_file_coverage'])}.")
+
         print("[+] Starting Deep Fuzzer Evolutionary Loop. Press Ctrl+C to stop.")
         try:
             while True:
@@ -470,13 +483,15 @@ class DeepFuzzerOrchestrator:
                 # 1. Selection
                 selection = self.select_parent_from_corpus()
 
+                # This should now only happen if min_corpus_files is 0 and corpus is empty.
                 if selection is None:
-                    print("[-] Corpus is empty. Running a generation run to seed the corpus.")
-                    self.run_generation_session()
+                    print("[!] Corpus is empty and no minimum size was set. Halting.")
+                    return
                 else:
                     parent_path, parent_score = selection
                     print(f"[+] Selected parent for mutation: {parent_path.name} (Score: {parent_score:.2f})")
-                    self.execute_mutation_and_analysis_cycle(parent_path, parent_score, self.run_stats['total_sessions'])
+                    self.execute_mutation_and_analysis_cycle(parent_path, parent_score,
+                                                             self.run_stats['total_sessions'])
 
                 # Update dynamic stats after each session
                 self.update_and_save_run_stats()
@@ -486,8 +501,7 @@ class DeepFuzzerOrchestrator:
         finally:
             print("\n[+] Fuzzing loop terminating. Saving final stats...")
             self.update_and_save_run_stats()
-            self._log_timeseries_datapoint() # Log one final data point on exit
-
+            self._log_timeseries_datapoint()  # Log one final data point on exit
 
     def update_and_save_run_stats(self):
         """
@@ -1019,6 +1033,15 @@ def main():
     """
     Main entry point to set up and run the Deep Fuzzer Orchestrator.
     """
+    parser = argparse.ArgumentParser(description="Fusil's feedback-driven JIT fuzzer.")
+    parser.add_argument(
+        '--min-corpus-files',
+        type=int,
+        default=1,
+        help='Ensure the corpus has at least N files before starting the main fuzzing loop. (Default: 1)'
+    )
+    args = parser.parse_args()
+
     LOGS_DIR.mkdir(exist_ok=True)
     # Use a consistent timestamp for the whole run
     run_start_time = datetime.now()
@@ -1062,7 +1085,7 @@ Initial Stats:
         print(dedent(header))
         # --- End of Header ---
 
-        orchestrator = DeepFuzzerOrchestrator()
+        orchestrator = DeepFuzzerOrchestrator(min_corpus_files=args.min_corpus_files)
         orchestrator.run_evolutionary_loop()
     except KeyboardInterrupt:
         print("\n[!] Fuzzing stopped by user.")
