@@ -530,7 +530,7 @@ class DeepFuzzerOrchestrator:
             "--objects-number=0",
             "--sessions=1",
             "--python=/home/danzin/venvs/jit_cpython_venv/bin/python",
-            "-v",
+            "--no-jit-external-references",
             "--no-threads",
             "--no-async",
             "--jit-loop-iterations=300",

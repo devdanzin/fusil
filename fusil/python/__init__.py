@@ -310,6 +310,13 @@ class Fuzzer(Application):
             type='str',
             default=None,
         )
+        jit_options.add_option(
+            '--no-jit-external-references',
+            help='Prevent argument generators from creating references to boilerplate-defined names. Use for minimized corpus generation. (Default: allows references)',
+            action='store_false',
+            dest='jit_external_references',
+            default=True,
+        )
 
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(

@@ -108,7 +108,12 @@ class WritePythonCode(WriteCode):
         self.h5py_writer = WriteH5PyCode(self) if use_h5py and _ARG_GEN_USE_H5PY else None
 
         self.arg_generator = ArgumentGenerator(
-            self.options, self.filenames, _ARG_GEN_USE_NUMPY, _ARG_GEN_USE_TEMPLATES, _ARG_GEN_USE_H5PY
+            self.options,
+            self.filenames,
+            _ARG_GEN_USE_NUMPY,
+            _ARG_GEN_USE_TEMPLATES,
+            _ARG_GEN_USE_H5PY,
+            allow_external_references=self.options.jit_external_references,
         )
         self.jit_writer = WriteJITCode(self)
 

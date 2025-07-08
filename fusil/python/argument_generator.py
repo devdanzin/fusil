@@ -66,6 +66,7 @@ class ArgumentGenerator:
         use_numpy: bool = False,
         use_templates: bool = True,
         use_h5py: bool = True,
+        allow_external_references: bool = True,
     ):
         """
         Initialize the ArgumentGenerator.
@@ -94,61 +95,53 @@ class ArgumentGenerator:
         self.float_int_generator = IntegerGenerator(4)
         self.float_float_generator = UnsignedGenerator(4)
 
-        # Define categories of argument generators
-        self.hashable_argument_generators: tuple[Callable[[], list[str]], ...] = (
-            self.genNone,
-            self.genBool,
-            self.genSmallUint,
-            self.genInt,
-            self.genLetterDigit,
-            self.genBytes,
-            self.genString,
-            self.genSurrogates,
-            self.genAsciiString,
-            self.genUnixPath,
-            self.genFloat,
-            self.genExistingFilename,
-            self.genErrback,
-            self.genException,
-            self.genRawString,
-            self.genWeirdType,
-        )
-        self.simple_argument_generators: tuple[Callable[[], list[str]], ...] = (
-            self.hashable_argument_generators
-            + (
-                self.genBufferObject,
-                self.genInterestingValues,
-                self.genWeirdClass,
-                self.genWeirdInstance,
-                self.genWeirdUnion,
-                self.genTrickyObjects,
-            )
-        )
-        if not self.options.no_numpy and use_numpy and H5PyArgumentGenerator:
-            self.simple_argument_generators += (self.genTrickyNumpy,) * 50
-            assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
-            self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
-        self.complex_argument_generators: tuple[Callable[[], list[str]], ...] = (
-            self.genList,
-            self.genTuple,
-            self.genDict,
-            self.genTricky,
-            self.genInterestingValues,
-            self.genWeirdClass,
-            self.genWeirdInstance,
-            self.genWeirdType,
-            self.genWeirdUnion,
-            self.genTrickyObjects,
+        # Define categories of generators
+        safe_hashable_generators = (
+            self.genNone, self.genBool, self.genSmallUint, self.genInt,
+            self.genLetterDigit, self.genBytes, self.genString, self.genSurrogates,
+            self.genAsciiString, self.genUnixPath, self.genFloat,
+            self.genExistingFilename, self.genException, self.genRawString,
         )
 
-        if not self.options.no_numpy and use_numpy:
-            if use_h5py and H5PyArgumentGenerator:
-                assert  isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
-                self.simple_argument_generators += (
-                    self.h5py_argument_generator.genH5PyObject,
-                ) * 50
-            self.complex_argument_generators += (self.genTrickyNumpy,) * 50
-        if not self.options.no_tstrings and use_templates and TEMPLATES:
+        safe_simple_generators = safe_hashable_generators + (self.genBufferObject,)
+
+        # These generators produce references to names defined in boilerplate
+        external_reference_generators = (
+            self.genErrback, self.genWeirdType, self.genWeirdClass,
+            self.genWeirdInstance, self.genWeirdUnion, self.genTricky,
+            self.genInterestingValues, self.genTrickyObjects,
+        )
+
+        self.hashable_argument_generators = safe_hashable_generators
+        if allow_external_references:
+            # The 'errback' name is hashable but is an external reference
+            self.hashable_argument_generators += (self.genErrback,)
+
+        # Build the final lists based on the flag
+        self.simple_argument_generators = safe_simple_generators
+        if allow_external_references:
+            self.simple_argument_generators += external_reference_generators
+
+        self.complex_argument_generators = (
+            self.genList, self.genTuple, self.genDict, self.genSet
+        )
+        if allow_external_references:
+            # Add complex generators that rely on external refs
+             self.complex_argument_generators += (
+                self.genTricky, self.genInterestingValues, self.genWeirdClass,
+                self.genWeirdInstance, self.genWeirdType, self.genWeirdUnion,
+                self.genTrickyObjects,
+            )
+
+        # Handle NumPy, h5py, and t-strings conditionally
+        if not self.options.no_numpy and use_numpy and H5PyArgumentGenerator:
+            if allow_external_references:
+                self.simple_argument_generators += (self.genTrickyNumpy,) * 50
+                self.complex_argument_generators += (self.genTrickyNumpy,) * 50
+            assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
+            self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
+
+        if not self.options.no_tstrings and use_templates and TEMPLATES and allow_external_references:
             self.complex_argument_generators += (self.genTrickyTemplate,)
 
     def _create_argument_from_list(
