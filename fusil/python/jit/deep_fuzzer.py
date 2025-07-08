@@ -168,6 +168,7 @@ def load_run_stats() -> dict[str, Any]:
             "new_coverage_finds": 0,
             "sum_of_mutations_per_find": 0,
             "average_mutations_per_find": 0.0,
+            "global_seed_counter": 0,
         }
     try:
         with open(RUN_STATS_FILE, "r", encoding="utf-8") as f:
@@ -175,6 +176,7 @@ def load_run_stats() -> dict[str, Any]:
             # Add new fields if loading an older stats file
             stats.setdefault("sum_of_mutations_per_find", 0)
             stats.setdefault("average_mutations_per_find", 0.0)
+            stats.setdefault("global_seed_counter", 0)
             return stats
     except (json.JSONDecodeError, IOError) as e:
         print(f"Warning: Could not load run stats file. Starting fresh. Error: {e}", file=sys.stderr)
@@ -227,6 +229,7 @@ class DeepFuzzerOrchestrator:
         self.boilerplate_code = None
         self.scheduler = CorpusScheduler(self.coverage_state)
         self.mutations_since_last_find = 0
+        self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
 
         # Ensure temporary and corpus directories exist
         CORPUS_DIR.mkdir(parents=True, exist_ok=True)
@@ -276,6 +279,7 @@ class DeepFuzzerOrchestrator:
             execution_time_ms: int,
             parent_id: str | None,
             mutation_info: dict[str, Any],
+            mutation_seed: int,
     ) -> str:
         """
         Copies a file to the corpus and saves its rich metadata object.
@@ -302,6 +306,7 @@ class DeepFuzzerOrchestrator:
             "total_finds": 0,
             "is_sterile": False,
             "discovery_mutation": mutation_info,
+            "mutation_seed": mutation_seed,
         }
         self.coverage_state["per_file_coverage"][unique_id] = metadata
         return unique_id
@@ -375,6 +380,7 @@ class DeepFuzzerOrchestrator:
         self.run_stats["global_uops"] = len(global_cov.get("uops", {}))
         self.run_stats["global_edges"] = len(global_cov.get("edges", {}))
         self.run_stats["global_rare_events"] = len(global_cov.get("rare_events", {}))
+        self.run_stats["global_seed_counter"] = self.global_seed_counter
 
         total_finds = self.run_stats.get("new_coverage_finds", 0)
         if total_finds > 0:
@@ -418,7 +424,7 @@ class DeepFuzzerOrchestrator:
             subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT)
 
         # Analyze it for coverage
-        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0, {})
+        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0, {}, mutation_seed=0)
 
     def _run_deterministic_stage(self, base_ast: ast.AST, seed: int, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
@@ -557,13 +563,24 @@ class DeepFuzzerOrchestrator:
 
         return new_core_ast
 
-    def apply_mutation_strategy(self, base_ast: ast.AST, max_mutations: int = 200) -> Generator[tuple[ast.AST, dict[str, Any]], None, None]:
+    def apply_mutation_strategy(self, base_ast: ast.AST, seed: int) -> tuple[ast.AST, dict[str, Any]]:
         """
-        A generator that yields a sequence of mutated ASTs, using a
-        probabilistic mix of different mutation strategies.
+        Applies a single, seeded mutation strategy to an AST.
+
+        This method takes a base AST and a seed, seeds the fuzzer's random
+        number generator, and then probabilistically chooses and applies one
+        of the available mutation strategies (e.g., deterministic, havoc).
+
+        Args:
+            base_ast: The Abstract Syntax Tree to mutate.
+            seed: The integer seed to use for all randomized decisions.
+
+        Returns:
+            A tuple containing the mutated AST and a dictionary of information
+            about the mutation that was performed.
         """
-        print(f"[+] Applying mutation strategy to base AST, generating up to {max_mutations} variants...",
-              file=sys.stderr)
+        RANDOM.seed(seed)
+        random.seed(seed)
 
         strategies = [
             self._run_deterministic_stage,
@@ -573,15 +590,14 @@ class DeepFuzzerOrchestrator:
         ]
         weights = [0.85, 0.10, 0.05]
 
-        for i in range(max_mutations):
-            tree_copy = copy.deepcopy(base_ast)
-            chosen_strategy = RANDOM.choices(strategies, weights=weights, k=1)[0]
+        tree_copy = copy.deepcopy(base_ast)
+        chosen_strategy = RANDOM.choices(strategies, weights=weights, k=1)[0]
 
-            # The `seed` argument is used by the deterministic stage and
-            # ignored by the others thanks to the **kwargs signature.
-            mutated_ast, mutation_info = chosen_strategy(tree_copy, seed=i)
-
-            yield mutated_ast, mutation_info
+        # The `seed` argument is used by the deterministic stage for its own
+        # seeding, and the other stages use the globally seeded RANDOM instance.
+        mutated_ast, mutation_info = chosen_strategy(tree_copy, seed=seed)
+        mutation_info['seed'] = seed
+        return mutated_ast, mutation_info
 
     def execute_mutation_and_analysis_cycle(self, parent_path: Path, parent_score: float, session_id: int):
         """
@@ -589,7 +605,7 @@ class DeepFuzzerOrchestrator:
         based on its score, and then executes and analyzes each child.
         """
         # --- Step 3.2: Implement Dynamic Mutation Count ---
-        base_mutations = 200
+        base_mutations = 100
         # Normalize the score relative to a baseline of 100 to calculate a multiplier
         score_multiplier = parent_score / 100.0
 
@@ -636,40 +652,44 @@ class DeepFuzzerOrchestrator:
             print(f"[-] No harness function found in {parent_path.name}. Skipping.", file=sys.stderr)
             return
 
-        # Get the stream of mutated variants from our strategy generator.
         core_logic_to_mutate = base_harness_node.body
-        # Pass the dynamically calculated mutation count to the strategy generator
-        mutation_generator = self.apply_mutation_strategy(core_logic_to_mutate, max_mutations=max_mutations)
-
-        # Loop through a set number of mutations for this parent.
         env = os.environ.copy()
         env.update({
             "PYTHON_LLTRACE": "4",
             "PYTHON_OPT_DEBUG": "4",
         })
-        for i, (mutated_body_ast, mutation_info) in enumerate(mutation_generator):
+
+        # Loop through a set number of mutations for this parent.
+        for i in range(max_mutations):
             self.run_stats["total_mutations"] = self.run_stats.get("total_mutations", 0) + 1
             self.mutations_since_last_find += 1
-            print(f"  \\-> Running mutation #{i + 1} for {parent_path.name}...")
 
-            # 1. Re-assemble the full source code for the child.
-            # We create a full copy of the parent's AST and then swap in the
-            # mutated body to the correct harness function.
+            # Increment and use the global seed for this mutation attempt.
+            self.global_seed_counter += 1
+            current_seed = self.global_seed_counter
+            print(f"  \\-> Running mutation #{i + 1} (Seed: {current_seed}) for {parent_path.name}...")
+
+            # 1. Get the mutated AST from our refactored strategy function.
+            mutated_body_ast, mutation_info = self.apply_mutation_strategy(
+                core_logic_to_mutate,
+                seed=current_seed
+            )
+
+            # 2. Re-assemble the full source code for the child.
             child_core_tree = copy.deepcopy(parent_core_tree)
             for node in child_core_tree.body:
                 if isinstance(node, ast.FunctionDef) and node.name == base_harness_node.name:
                     node.body = mutated_body_ast
                     break
 
-            # ast.fix_missing_locations(child_core_tree)
             mutated_core_code = ast.unparse(child_core_tree)
             child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
 
-            # 2. Define temporary file paths for this specific child.
+            # 3. Define temporary file paths for this specific child.
             child_source_path = TMP_DIR / f"child_{session_id}_{i + 1}.py"
             child_log_path = TMP_DIR / f"child_{session_id}_{i + 1}.log"
 
-            # 3. Write and execute the child process.
+            # 4. Write and execute the child process.
             try:
                 child_source_path.write_text(child_full_source)
                 with open(child_log_path, "w") as log_file:
@@ -691,6 +711,7 @@ class DeepFuzzerOrchestrator:
                     parent_id,
                     execution_time_ms,
                     mutation_info,
+                    mutation_seed=current_seed,
                 )
                 if analysis_result == "CRASH":
                     self.run_stats["crashes_found"] = self.run_stats.get("crashes_found", 0) + 1
@@ -721,9 +742,6 @@ class DeepFuzzerOrchestrator:
                 print(f"  [!] Error executing child process: {e}", file=sys.stderr)
                 continue  # Move to the next mutation
             finally:
-                # --- NEW: Temporary File Cleanup ---
-                # This block ensures that the temporary files for this child
-                # are deleted after they are used, even if errors occur.
                 try:
                     if child_source_path.exists():
                         child_source_path.unlink()
@@ -741,6 +759,7 @@ class DeepFuzzerOrchestrator:
             parent_id: str,
             execution_time_ms: int,
             mutation_info: dict[str, Any],
+            mutation_seed: int,
     ) -> AnalysisResult:
         """
         Analyzes a run for crashes (via exit code or log keywords) and new
@@ -836,6 +855,7 @@ class DeepFuzzerOrchestrator:
                 execution_time_ms,
                 parent_id,
                 mutation_info,
+                mutation_seed=mutation_seed,
             )
             print(f"[+] Saved interesting mutation as {new_file_id}")
             save_coverage_state(self.coverage_state)
