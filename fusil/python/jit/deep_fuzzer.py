@@ -532,8 +532,11 @@ class DeepFuzzerOrchestrator:
         tmp_source = TMP_DIR / "gen_run.py"
         tmp_log = TMP_DIR / "gen_run.log"
 
+        python_executable = sys.executable
         # Use fusil to generate a new file
         subprocess.run([
+            "sudo",
+            python_executable,
             FUSIL_PATH,
             "--jit-fuzz",
             "--jit-target-uop=ALL",
@@ -543,7 +546,7 @@ class DeepFuzzerOrchestrator:
             "--methods-number=0",
             "--objects-number=0",
             "--sessions=1",
-            "--python=/home/danzin/venvs/jit_cpython_venv/bin/python",
+            f"--python={python_executable}",
             "--no-jit-external-references",
             "--no-threads",
             "--no-async",
