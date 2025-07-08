@@ -235,6 +235,12 @@ class DeepFuzzerOrchestrator:
         TIMEOUTS_DIR.mkdir(exist_ok=True)
         LOGS_DIR.mkdir(exist_ok=True)
 
+        run_timestamp = self.run_stats.get("start_time", datetime.now(timezone.utc).isoformat())
+        # Sanitize timestamp for use in filename
+        safe_timestamp = run_timestamp.replace(":", "-").replace("+", "Z")
+        self.timeseries_log_path = LOGS_DIR / f"timeseries_{safe_timestamp}.jsonl"
+        print(f"[+] Time-series analytics for this run will be saved to: {self.timeseries_log_path}")
+
     def _extract_and_cache_boilerplate(self, source_code: str):
         """
         Parses a full source file to find, extract, and cache the
@@ -334,6 +340,7 @@ class DeepFuzzerOrchestrator:
         try:
             while True:
                 self.run_stats["total_sessions"] = self.run_stats.get("total_sessions", 0) + 1
+                session_num = self.run_stats["total_sessions"]
                 print(f"\n--- Fuzzing Session #{self.run_stats['total_sessions']} ---")
 
                 # 1. Selection
@@ -347,11 +354,16 @@ class DeepFuzzerOrchestrator:
                     print(f"[+] Selected parent for mutation: {parent_path.name} (Score: {parent_score:.2f})")
                     self.execute_mutation_and_analysis_cycle(parent_path, parent_score, self.run_stats['total_sessions'])
 
-                    # Update dynamic stats after each session
+                # Update dynamic stats after each session
                 self.update_and_save_run_stats()
+                if session_num % 10 == 0:
+                    print(f"[*] Logging time-series data point at session {session_num}...")
+                    self._log_timeseries_datapoint()
         finally:
             print("\n[+] Fuzzing loop terminating. Saving final stats...")
             self.update_and_save_run_stats()
+            self._log_timeseries_datapoint() # Log one final data point on exit
+
 
     def update_and_save_run_stats(self):
         """
@@ -830,6 +842,22 @@ class DeepFuzzerOrchestrator:
             return "NEW_COVERAGE"
 
         return "NO_CHANGE"
+
+    def _log_timeseries_datapoint(self):
+        """
+        Step 1.2: Implement the Data Point Logger.
+        Appends a snapshot of the current run statistics to the time-series log file.
+        """
+        # Create a snapshot of the current stats for logging.
+        datapoint = self.run_stats.copy()
+        datapoint["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        try:
+            # Open in append mode and write the JSON object as a single line.
+            with open(self.timeseries_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(datapoint) + "\n")
+        except IOError as e:
+            print(f"[!] Warning: Could not write to time-series log file: {e}", file=sys.stderr)
 
 
 def main():
