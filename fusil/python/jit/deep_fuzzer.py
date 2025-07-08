@@ -52,6 +52,12 @@ CRASH_KEYWORDS = [
 BOILERPLATE_START_MARKER = "# FUSIL_BOILERPLATE_START"
 BOILERPLATE_END_MARKER = "# FUSIL_BOILERPLATE_END"
 
+ENV = os.environ.copy()
+ENV.update({
+    "PYTHON_LLTRACE": "4",
+    "PYTHON_OPT_DEBUG": "4",
+})
+
 AnalysisResult = Literal["CRASH", "NEW_COVERAGE", "NO_CHANGE"]
 
 
@@ -234,11 +240,7 @@ class DeepFuzzerOrchestrator:
         self.mutations_since_last_find = 0
         self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
         self.corpus_file_counter = self.run_stats.get("corpus_file_counter", 0)
-        self.known_hashes = {
-            metadata.get("content_hash")
-            for metadata in self.coverage_state.get("per_file_coverage", {}).values()
-            if "content_hash" in metadata
-        }
+        self.known_hashes = set()
         print(f"[+] Initialized with {len(self.known_hashes)} known file hashes.")
 
         # Ensure temporary and corpus directories exist
@@ -253,6 +255,106 @@ class DeepFuzzerOrchestrator:
         safe_timestamp = run_timestamp.replace(":", "-").replace("+", "Z")
         self.timeseries_log_path = LOGS_DIR / f"timeseries_{safe_timestamp}.jsonl"
         print(f"[+] Time-series analytics for this run will be saved to: {self.timeseries_log_path}")
+
+        # Synchronize the corpus and state at startup.
+        self._synchronize_corpus_and_state()
+
+        # Re-populate known_hashes after synchronization is complete.
+        self.known_hashes = {
+            metadata.get("content_hash")
+            for metadata in self.coverage_state.get("per_file_coverage", {}).values()
+            if "content_hash" in metadata
+        }
+        print(f"[+] Fuzzer is ready with {len(self.known_hashes)} known file hashes.")
+
+    def _synchronize_corpus_and_state(self):
+        """
+        Reconciles the state file with the corpus directory on disk.
+
+        This method ensures the fuzzer's state is consistent with the
+        actual files in the corpus. It handles three cases:
+        1. Files in the state file but not on disk (deleted).
+        2. Files on disk but not in the state file (new).
+        3. Files in both whose content hash has changed (modified).
+        """
+        print("[*] Synchronizing corpus directory with state file...")
+        if not CORPUS_DIR.exists():
+            CORPUS_DIR.mkdir(parents=True, exist_ok=True)
+
+        disk_files = {p.name for p in CORPUS_DIR.glob("*.py")}
+        state_files = set(self.coverage_state["per_file_coverage"].keys())
+
+        # 1. Prune state for files that were deleted from disk.
+        missing_from_disk = state_files - disk_files
+        if missing_from_disk:
+            print(f"[-] Found {len(missing_from_disk)} files in state but not on disk. Pruning state.")
+            for filename in missing_from_disk:
+                del self.coverage_state["per_file_coverage"][filename]
+
+        # 2. Identify new or modified files to be analyzed.
+        files_to_analyze = set()
+        for filename in disk_files:
+            file_path = CORPUS_DIR / filename
+            if filename not in state_files:
+                print(f"[+] Discovered new file in corpus: {filename}")
+                files_to_analyze.add(filename)
+            else:
+                # File exists in both, verify its hash.
+                try:
+                    content = file_path.read_text()
+                    current_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+                    if self.coverage_state["per_file_coverage"][filename].get("content_hash") != current_hash:
+                        print(f"[~] File content has changed for {filename}. Re-analyzing.")
+                        del self.coverage_state["per_file_coverage"][filename]
+                        files_to_analyze.add(filename)
+                except (IOError, KeyError) as e:
+                    print(f"[!] Error processing existing file {filename}: {e}. Re-analyzing.")
+                    if filename in self.coverage_state["per_file_coverage"]:
+                        del self.coverage_state["per_file_coverage"][filename]
+                    files_to_analyze.add(filename)
+
+        # 3. Run analysis on all new/modified files to generate their metadata.
+        if files_to_analyze:
+            print(f"[*] Analyzing {len(files_to_analyze)} new or modified corpus files...")
+            for filename in sorted(list(files_to_analyze)):
+                source_path = CORPUS_DIR / filename
+                log_path = TMP_DIR / f"sync_{source_path.stem}.log"
+                print(f"  -> Analyzing {filename}...")
+                try:
+                    with open(log_path, "w") as log_file:
+                        start_time = time.monotonic()
+                        result = subprocess.run(
+                            ["python3", str(source_path)],
+                            stdout=log_file, stderr=subprocess.STDOUT, timeout=10, env=ENV
+                        )
+                        end_time = time.monotonic()
+                    execution_time_ms = int((end_time - start_time) * 1000)
+                    self.analyze_run(
+                        log_path, source_path, result.returncode,
+                        parent_baseline_coverage={}, parent_id=None,
+                        execution_time_ms=execution_time_ms,
+                        mutation_info={"strategy": "seed"}, mutation_seed=0
+                    )
+                except Exception as e:
+                    print(f"  [!] Failed to analyze seed file {filename}: {e}", file=sys.stderr)
+
+        # 4. Synchronize the global file counter to prevent overwrites.
+        current_max_id = 0
+        for filename in disk_files:
+            try:
+                file_id = int(Path(filename).stem)
+                if file_id > current_max_id:
+                    current_max_id = file_id
+            except (ValueError, IndexError):
+                continue  # Ignore non-integer filenames
+
+        if current_max_id > self.corpus_file_counter:
+            print(f"[*] Advancing file counter from {self.corpus_file_counter} to {current_max_id} to match corpus.")
+            self.corpus_file_counter = current_max_id
+
+        # 5. Save the synchronized state.
+        save_coverage_state(self.coverage_state)
+        print("[*] Corpus synchronization complete.")
 
     def _extract_and_cache_boilerplate(self, source_code: str):
         """
@@ -437,10 +539,19 @@ class DeepFuzzerOrchestrator:
 
         # Execute it to get a log
         with open(tmp_log, "w") as log_file:
-            subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT)
+            subprocess.run(["python3", tmp_source], stdout=log_file, stderr=subprocess.STDOUT, env=ENV)
 
         # Analyze it for coverage
-        self.analyze_run(tmp_log, tmp_source, 0, {}, "SEED", 0, {}, mutation_seed=0)
+        self.analyze_run(
+            tmp_log,
+            tmp_source,
+            0,
+            {},
+            parent_id=None,
+            execution_time_ms=0,
+            mutation_info={"strategy": "generative_seed"},
+            mutation_seed=0,
+        )
 
     def _run_deterministic_stage(self, base_ast: ast.AST, seed: int, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
@@ -669,11 +780,6 @@ class DeepFuzzerOrchestrator:
             return
 
         core_logic_to_mutate = base_harness_node.body
-        env = os.environ.copy()
-        env.update({
-            "PYTHON_LLTRACE": "4",
-            "PYTHON_OPT_DEBUG": "4",
-        })
 
         # Loop through a set number of mutations for this parent.
         for i in range(max_mutations):
@@ -715,7 +821,7 @@ class DeepFuzzerOrchestrator:
                         stdout=log_file,
                         stderr=subprocess.STDOUT,
                         timeout=10,
-                        env=env,
+                        env=ENV,
                     )
                     end_time = time.monotonic()
                     execution_time_ms = int((end_time - start_time) * 1000)
@@ -772,7 +878,7 @@ class DeepFuzzerOrchestrator:
             source_path: Path,
             return_code: int,
             parent_baseline_coverage: dict[str, Any],
-            parent_id: str,
+            parent_id: str | None,
             execution_time_ms: int,
             mutation_info: dict[str, Any],
             mutation_seed: int,
@@ -808,8 +914,12 @@ class DeepFuzzerOrchestrator:
         # --- Coverage Analysis ---
         # This part only runs if no crash was detected.
         child_coverage = parse_log_for_edge_coverage(log_path)
-        is_interesting = False
+        is_generative_seed = mutation_info.get("strategy") in ("generative_seed", "seed")
+        if not child_coverage and parent_id is None and not is_generative_seed:
+            print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
+            return "NO_CHANGE"
 
+        is_interesting = False
         global_coverage = self.coverage_state["global_coverage"]
 
         for harness_id, child_data in child_coverage.items():
@@ -859,7 +969,7 @@ class DeepFuzzerOrchestrator:
                 global_coverage["rare_events"].setdefault(event, 0)
                 global_coverage["rare_events"][event] += count
 
-        if is_interesting or parent_id == "SEED":
+        if is_interesting or parent_id is None:
             # Read the full source code that was just run
             full_source_code = source_path.read_text()
             # Extract just the core part for saving to the corpus
