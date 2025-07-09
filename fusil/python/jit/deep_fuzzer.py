@@ -7,6 +7,7 @@ import math
 import os
 import platform
 import random
+import secrets
 import shutil
 import subprocess
 import socket
@@ -91,11 +92,29 @@ def load_coverage_state() -> dict[str, Any]:
 
 def save_coverage_state(state: dict[str, Any]):
     """
-    Saves the updated global and per-file coverage state to the JSON file.
+    Saves the updated coverage state to its JSON file atomically.
+
+    This function writes the state to a temporary file first, and then
+    atomically renames it to the final destination. This prevents the state
+    file from becoming corrupted if the process is terminated mid-write.
     """
     COVERAGE_DIR.mkdir(exist_ok=True)
-    with open(COVERAGE_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, sort_keys=True)
+    # Create a unique temporary file path in the same directory.
+    tmp_path = COVERAGE_STATE_FILE.with_suffix(f".json.tmp.{secrets.token_hex(4)}")
+
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+        # The write was successful, now atomically rename the file.
+        os.rename(tmp_path, COVERAGE_STATE_FILE)
+    except (IOError, OSError) as e:
+        print(f"[!] Error during atomic save of coverage state: {e}", file=sys.stderr)
+        # If an error occurred, try to clean up the temporary file.
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError as e_unlink:
+                print(f"[!] Warning: Could not remove temporary state file {tmp_path}: {e_unlink}", file=sys.stderr)
 
 
 class CorpusScheduler:
