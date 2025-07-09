@@ -924,8 +924,7 @@ class DeepFuzzerOrchestrator:
         """
         Analyzes a run for crashes and new coverage against the full lineage.
         """
-        # --- Lightweight Crash Monitoring ---
-        # 1. Check for non-zero exit code first.
+        # --- Lightweight Crash Monitoring (no change) ---
         if return_code != 0:
             print(f"  [!!!] CRASH DETECTED! Exit code: {return_code}. Saving test case and log.", file=sys.stderr)
             crash_source_path = CRASHES_DIR / f"crash_retcode_{source_path.name}"
@@ -933,7 +932,6 @@ class DeepFuzzerOrchestrator:
             shutil.copy(source_path, crash_source_path)
             shutil.copy(log_path, crash_log_path)
             return "CRASH"
-        # 2. If exit code is clean, scan the log for crash keywords.
         try:
             log_content = log_path.read_text()
             for keyword in CRASH_KEYWORDS:
@@ -948,78 +946,54 @@ class DeepFuzzerOrchestrator:
         except IOError as e:
             print(f"  [!] Warning: Could not read log file for crash analysis: {e}", file=sys.stderr)
 
-        # --- Coverage Analysis ---
-        # This part only runs if no crash was detected.
+        # --- Unified Coverage Analysis ---
         child_coverage = parse_log_for_edge_coverage(log_path)
-        is_generative_seed = mutation_info.get("strategy") in ("generative_seed", "seed")
-        if not child_coverage and parent_id is None and not is_generative_seed:
-            print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
-            return "NO_CHANGE"
-
         is_interesting = False
+
         global_coverage = self.coverage_state["global_coverage"]
 
+        # This loop runs for ALL files to update global counts and check for newness.
+        for harness_id, child_data in child_coverage.items():
+            lineage_harness_data = parent_lineage_profile.get(harness_id, {})
+
+            # Helper lambda to process each coverage type (uops, edges, rare_events)
+            def process_coverage_type(cov_type: str):
+                nonlocal is_interesting
+                lineage_set = lineage_harness_data.get(cov_type, set())
+                child_dict = child_data.get(cov_type, {})
+
+                for item, count in child_dict.items():
+                    is_globally_new = item not in global_coverage.get(cov_type, {})
+                    is_new_to_lineage = item not in lineage_set
+
+                    if is_globally_new:
+                        print(f"[NEW GLOBAL {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                              file=sys.stderr)
+                        is_interesting = True
+                    elif is_new_to_lineage and parent_id is not None:
+                        print(f"[NEW RELATIVE {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                              file=sys.stderr)
+                        is_interesting = True
+
+                    # ALWAYS update global coverage counts for every item seen.
+                    global_coverage.setdefault(cov_type, {})
+                    global_coverage[cov_type].setdefault(item, 0)
+                    global_coverage[cov_type][item] += count
+
+            process_coverage_type("uops")
+            process_coverage_type("edges")
+            process_coverage_type("rare_events")
+
+        # For mutations, is_interesting is now correctly set.
+        # For seeds, we apply a different rule.
         if parent_id is None:
-            # Logic for SEED FILES (manual or generative)
             is_generative_seed = mutation_info.get("strategy") == "generative_seed"
-            if child_coverage:
-                is_interesting = True
-            elif is_generative_seed:
+            # A seed is interesting if it produced any coverage, OR it's the bootstrap seed.
+            if child_coverage or is_generative_seed:
                 is_interesting = True
             else:
                 print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
-        else:
-            # --- Logic for MUTATED FILES ---
-            # Compare child against the parent's entire lineage profile.
-            for harness_id, child_data in child_coverage.items():
-                lineage_harness_data = parent_lineage_profile.get(harness_id, {})
-
-                # --- Check UOPs ---
-                child_uops = child_data.get("uops", {})
-                lineage_uops = lineage_harness_data.get("uops", set())
-                for uop, count in child_uops.items():
-                    if uop not in global_coverage["uops"]:
-                        print(f"[NEW GLOBAL UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-                    elif uop not in lineage_uops:
-                        print(f"[NEW RELATIVE UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-
-                    global_coverage["uops"].setdefault(uop, 0)
-                    global_coverage["uops"][uop] += count
-
-                # --- Check Edges ---
-                child_edges = child_data.get("edges", {})
-                lineage_edges = lineage_harness_data.get("edges", set())
-                for edge, count in child_edges.items():
-                    if edge not in global_coverage["edges"]:
-                        print(f"[NEW GLOBAL EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-                    elif edge not in lineage_edges:
-                        print(f"[NEW RELATIVE EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-
-                    # Update global state
-                    global_coverage["edges"].setdefault(edge, 0)
-                    global_coverage["edges"][edge] += count
-
-                # --- Check Rare Events ---
-                child_events = child_data.get("rare_events", {})
-                lineage_events = lineage_harness_data.get("rare_events", set())
-                for event, count in child_events.items():
-                    if event not in global_coverage["rare_events"]:
-                        print(f"[NEW GLOBAL RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-                    elif event not in lineage_events:
-                        print(f"[NEW RELATIVE RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
-                        is_interesting = True
-
-                    # Update global state
-                    global_coverage["rare_events"].setdefault(event, 0)
-                    global_coverage["rare_events"][event] += count
-
-                if is_interesting:
-                    break  # Found new coverage, no need to check other harnesses.
+                is_interesting = False  # Explicitly set to false
 
         if is_interesting:
             # Read the full source code that was just run
@@ -1030,7 +1004,9 @@ class DeepFuzzerOrchestrator:
 
             # The core duplication check:
             if content_hash in self.known_hashes:
-                print(f"  [~] New coverage found, but content is a known duplicate (Hash: {content_hash[:10]}...). Skipping.", file=sys.stderr)
+                print(
+                    f"  [~] New coverage found, but content is a known duplicate (Hash: {content_hash[:10]}...). Skipping.",
+                    file=sys.stderr)
                 return "NO_CHANGE"
 
             new_file_id = self._add_new_file_to_corpus(
@@ -1042,7 +1018,7 @@ class DeepFuzzerOrchestrator:
                 mutation_seed=mutation_seed,
                 content_hash=content_hash,
             )
-            print(f"[+] Saved interesting mutation as {new_file_id}")
+            print(f"[+] Saved interesting file as {new_file_id}")
             save_coverage_state(self.coverage_state)
             return "NEW_COVERAGE"
 
