@@ -418,6 +418,9 @@ class DeepFuzzerOrchestrator:
         # --- Step 1.2: Implement Metadata Tracking ---
         parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {}) if parent_id else {}
         lineage_depth = parent_metadata.get("lineage_depth", 0) + 1
+        parent_lineage_profile = parent_metadata.get("lineage_coverage_profile", {})
+
+        new_lineage_profile = self._build_lineage_profile(parent_lineage_profile, baseline_coverage)
 
         # Increment the global counter and generate the new simple filename.
         self.corpus_file_counter += 1
@@ -430,6 +433,7 @@ class DeepFuzzerOrchestrator:
 
         metadata = {
             "baseline_coverage": baseline_coverage,
+            "lineage_coverage_profile": new_lineage_profile,
             "parent_id": parent_id,
             "lineage_depth": lineage_depth,
             "discovery_time": datetime.now(timezone.utc).isoformat(),
@@ -785,7 +789,7 @@ class DeepFuzzerOrchestrator:
 
         parent_id = parent_path.name
         parent_metadata = self.coverage_state["per_file_coverage"].get(parent_id, {})
-        parent_baseline_coverage = parent_metadata.get("baseline_coverage", {})
+        parent_lineage_profile = parent_metadata.get("lineage_coverage_profile", {})
 
         try:
             parent_source = parent_path.read_text()
@@ -863,7 +867,7 @@ class DeepFuzzerOrchestrator:
                     child_log_path,
                     child_source_path,
                     result.returncode,
-                    parent_baseline_coverage,
+                    parent_lineage_profile,
                     parent_id,
                     execution_time_ms,
                     mutation_info,
@@ -911,15 +915,14 @@ class DeepFuzzerOrchestrator:
             log_path: Path,
             source_path: Path,
             return_code: int,
-            parent_baseline_coverage: dict[str, Any],
+            parent_lineage_profile: dict[str, Any],
             parent_id: str | None,
             execution_time_ms: int,
             mutation_info: dict[str, Any],
             mutation_seed: int,
     ) -> AnalysisResult:
         """
-        Analyzes a run for crashes (via exit code or log keywords) and new
-        coverage. Saves interesting files and returns the run's status.
+        Analyzes a run for crashes and new coverage against the full lineage.
         """
         # --- Lightweight Crash Monitoring ---
         # 1. Check for non-zero exit code first.
@@ -956,54 +959,69 @@ class DeepFuzzerOrchestrator:
         is_interesting = False
         global_coverage = self.coverage_state["global_coverage"]
 
-        for harness_id, child_data in child_coverage.items():
-            parent_harness_data = parent_baseline_coverage.get(harness_id, {})
+        if parent_id is None:
+            # Logic for SEED FILES (manual or generative)
+            is_generative_seed = mutation_info.get("strategy") == "generative_seed"
+            if child_coverage:
+                is_interesting = True
+            elif is_generative_seed:
+                is_interesting = True
+            else:
+                print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
+        else:
+            # --- Logic for MUTATED FILES ---
+            # Compare child against the parent's entire lineage profile.
+            for harness_id, child_data in child_coverage.items():
+                lineage_harness_data = parent_lineage_profile.get(harness_id, {})
 
-            # --- Check UOPs ---
-            child_uops = child_data.get("uops", {})
-            parent_uops = parent_harness_data.get("uops", {})
-            for uop, count in child_uops.items():
-                if uop not in global_coverage["uops"]:
-                    print(f"[NEW GLOBAL UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
-                elif uop not in parent_uops:
-                    print(f"[NEW RELATIVE UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
+                # --- Check UOPs ---
+                child_uops = child_data.get("uops", {})
+                lineage_uops = lineage_harness_data.get("uops", set())
+                for uop, count in child_uops.items():
+                    if uop not in global_coverage["uops"]:
+                        print(f"[NEW GLOBAL UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
+                    elif uop not in lineage_uops:
+                        print(f"[NEW RELATIVE UOP] '{uop}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
 
-                global_coverage["uops"].setdefault(uop, 0)
-                global_coverage["uops"][uop] += count
+                    global_coverage["uops"].setdefault(uop, 0)
+                    global_coverage["uops"][uop] += count
 
-            # --- Check Edges ---
-            child_edges = child_data.get("edges", {})
-            parent_edges = parent_harness_data.get("edges", {})
-            for edge, count in child_edges.items():
-                if edge not in global_coverage["edges"]:
-                    print(f"[NEW GLOBAL EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
-                elif edge not in parent_edges:
-                    print(f"[NEW RELATIVE EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
+                # --- Check Edges ---
+                child_edges = child_data.get("edges", {})
+                lineage_edges = lineage_harness_data.get("edges", set())
+                for edge, count in child_edges.items():
+                    if edge not in global_coverage["edges"]:
+                        print(f"[NEW GLOBAL EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
+                    elif edge not in lineage_edges:
+                        print(f"[NEW RELATIVE EDGE] '{edge}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
 
-                # Update global state
-                global_coverage["edges"].setdefault(edge, 0)
-                global_coverage["edges"][edge] += count
+                    # Update global state
+                    global_coverage["edges"].setdefault(edge, 0)
+                    global_coverage["edges"][edge] += count
 
-            # --- Check Rare Events ---
-            child_events = child_data.get("rare_events", {})
-            parent_events = parent_harness_data.get("rare_events", {})
-            for event, count in child_events.items():
-                if event not in global_coverage["rare_events"]:
-                    print(f"[NEW GLOBAL RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
-                elif event not in parent_events:
-                    print(f"[NEW RELATIVE RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
-                    is_interesting = True
+                # --- Check Rare Events ---
+                child_events = child_data.get("rare_events", {})
+                lineage_events = lineage_harness_data.get("rare_events", set())
+                for event, count in child_events.items():
+                    if event not in global_coverage["rare_events"]:
+                        print(f"[NEW GLOBAL RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
+                    elif event not in lineage_events:
+                        print(f"[NEW RELATIVE RARE EVENT] '{event}' in harness '{harness_id}'", file=sys.stderr)
+                        is_interesting = True
 
-                # Update global state
-                global_coverage["rare_events"].setdefault(event, 0)
-                global_coverage["rare_events"][event] += count
+                    # Update global state
+                    global_coverage["rare_events"].setdefault(event, 0)
+                    global_coverage["rare_events"][event] += count
 
-        if is_interesting or parent_id is None:
+                if is_interesting:
+                    break  # Found new coverage, no need to check other harnesses.
+
+        if is_interesting:
             # Read the full source code that was just run
             full_source_code = source_path.read_text()
             # Extract just the core part for saving to the corpus
@@ -1045,6 +1063,26 @@ class DeepFuzzerOrchestrator:
                 f.write(json.dumps(datapoint) + "\n")
         except IOError as e:
             print(f"[!] Warning: Could not write to time-series log file: {e}", file=sys.stderr)
+
+    def _build_lineage_profile(self, parent_lineage_profile: dict, child_baseline_profile: dict) -> dict:
+        """
+        Creates a new lineage profile by taking the union of a parent's
+        lineage and a child's own baseline coverage.
+
+        The lineage profile stores sets of coverage keys for efficient lookups,
+        not hit counts.
+        """
+        # Start with a deep copy of the parent's lineage to avoid side effects.
+        lineage = copy.deepcopy(parent_lineage_profile)
+        for harness_id, child_data in child_baseline_profile.items():
+            # Ensure the harness entry exists in the new lineage profile.
+            lineage_harness = lineage.setdefault(harness_id, {"uops": set(), "edges": set(), "rare_events": set()})
+            for key in ["uops", "edges", "rare_events"]:
+                # Get the set of items from the parent's lineage.
+                lineage_set = lineage_harness.setdefault(key, set())
+                # Add all the keys from the child's new coverage to the set.
+                lineage_set.update(child_data.get(key, {}).keys())
+        return lineage
 
 
 def main():
