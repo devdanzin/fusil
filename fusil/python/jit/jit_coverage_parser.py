@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import pickle
 import re
 import secrets
 import sys
@@ -19,7 +20,17 @@ RARE_EVENT_REGEX = re.compile(r"(_DEOPT|_GUARD_FAIL)")
 
 # Define paths for the coverage directory and the new state file.
 COVERAGE_DIR = Path("coverage")
-COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
+COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.pkl"
+
+
+def _create_empty_harness_coverage():
+    """Factory for creating an empty coverage dictionary for a harness."""
+    return {
+        "uops": Counter(),
+        "edges": Counter(),
+        "rare_events": Counter()
+    }
+
 
 def parse_log_for_edge_coverage(log_path: Path) -> dict[str, dict[str, Counter]]:
     """
@@ -31,11 +42,8 @@ def parse_log_for_edge_coverage(log_path: Path) -> dict[str, dict[str, Counter]]
         return {}
 
     # The new data structure uses Counters for hit tracking.
-    coverage_by_harness = defaultdict(lambda: {
-        "uops": Counter(),
-        "edges": Counter(),
-        "rare_events": Counter()
-    })
+    coverage_by_harness = defaultdict(_create_empty_harness_coverage)
+
     current_harness_id = None
     previous_uop = None
 
@@ -73,33 +81,33 @@ def parse_log_for_edge_coverage(log_path: Path) -> dict[str, dict[str, Counter]]
 
 def load_coverage_state() -> dict[str, dict[str, int]]:
     """
-    Loads the global coverage state from the JSON file.
+    Loads the global coverage state from the pickle file.
     Returns a default structure if the file doesn't exist.
     """
     if not COVERAGE_STATE_FILE.is_file():
         return {"uops": {}, "edges": {}, "rare_events": {}}
     try:
-        with open(COVERAGE_STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
+        with open(COVERAGE_STATE_FILE, "rb") as f: # Open in binary read mode
+            return pickle.load(f)
+    except (pickle.UnpicklingError, IOError, EOFError) as e:
         print(f"Warning: Could not load coverage state file. Starting fresh. Error: {e}", file=sys.stderr)
         return {"uops": {}, "edges": {}, "rare_events": {}}
 
 
 def save_coverage_state(state: dict[str, dict[str, int]]):
     """
-    Saves the updated global coverage state to the JSON file atomically.
+    Saves the updated global coverage state to the pickle file atomically.
     """
     COVERAGE_DIR.mkdir(exist_ok=True)
     # Create a unique temporary file path in the same directory.
-    tmp_path = COVERAGE_STATE_FILE.with_suffix(f".json.tmp.{secrets.token_hex(4)}")
+    tmp_path = COVERAGE_STATE_FILE.with_suffix(f".pkl.tmp.{secrets.token_hex(4)}")
 
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, sort_keys=True)
+        with open(tmp_path, "wb") as f: # Open in binary write mode
+            pickle.dump(state, f)
         # The write was successful, now atomically rename the file.
         os.rename(tmp_path, COVERAGE_STATE_FILE)
-    except (IOError, OSError) as e:
+    except (IOError, OSError, pickle.PicklingError) as e:
         print(f"[!] Error during atomic save of coverage state: {e}", file=sys.stderr)
         # If an error occurred, try to clean up the temporary file.
         if tmp_path.exists():

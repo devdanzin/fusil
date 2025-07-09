@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import pickle
 import platform
 import random
 import secrets
@@ -33,7 +34,7 @@ TIMEOUTS_DIR = Path("timeouts")
 LOGS_DIR = Path("logs")
 RUN_STATS_FILE = Path("fuzz_run_stats.json")
 COVERAGE_DIR = Path("coverage")
-COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.json"
+COVERAGE_STATE_FILE = COVERAGE_DIR / "coverage_state.pkl"
 
 # --- Paths for Fuzzer Tooling (relative to this script's location) ---
 # This ensures the fuzzer can find its own executable regardless of the CWD.
@@ -66,23 +67,22 @@ AnalysisResult = Literal["CRASH", "NEW_COVERAGE", "NO_CHANGE"]
 
 def load_coverage_state() -> dict[str, Any]:
     """
-    Loads the global and per-file coverage state from the JSON file.
+    Loads the global and per-file coverage state from the pickle file.
     Returns a default structure if the file doesn't exist.
     """
     if not COVERAGE_STATE_FILE.is_file():
-        # --- Step 1.1: Evolve coverage_state.json structure ---
         return {
             "global_coverage": {"uops": {}, "edges": {}, "rare_events": {}},
             "per_file_coverage": {}
         }
     try:
-        with open(COVERAGE_STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
+        with open(COVERAGE_STATE_FILE, "rb") as f: # Open in binary read mode
+            state = pickle.load(f)
             # Ensure both keys are present for backward compatibility
             state.setdefault("global_coverage", {"uops": {}, "edges": {}, "rare_events": {}})
             state.setdefault("per_file_coverage", {})
             return state
-    except (json.JSONDecodeError, IOError) as e:
+    except (pickle.UnpicklingError, IOError, EOFError) as e:
         print(f"Warning: Could not load coverage state file. Starting fresh. Error: {e}", file=sys.stderr)
         return {
             "global_coverage": {"uops": {}, "edges": {}, "rare_events": {}},
@@ -92,22 +92,18 @@ def load_coverage_state() -> dict[str, Any]:
 
 def save_coverage_state(state: dict[str, Any]):
     """
-    Saves the updated coverage state to its JSON file atomically.
-
-    This function writes the state to a temporary file first, and then
-    atomically renames it to the final destination. This prevents the state
-    file from becoming corrupted if the process is terminated mid-write.
+    Saves the updated coverage state to its pickle file atomically.
     """
     COVERAGE_DIR.mkdir(exist_ok=True)
     # Create a unique temporary file path in the same directory.
-    tmp_path = COVERAGE_STATE_FILE.with_suffix(f".json.tmp.{secrets.token_hex(4)}")
+    tmp_path = COVERAGE_STATE_FILE.with_suffix(f".pkl.tmp.{secrets.token_hex(4)}")
 
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, sort_keys=True)
+        with open(tmp_path, "wb") as f: # Open in binary write mode
+            pickle.dump(state, f)
         # The write was successful, now atomically rename the file.
         os.rename(tmp_path, COVERAGE_STATE_FILE)
-    except (IOError, OSError) as e:
+    except (IOError, OSError, pickle.PicklingError) as e:
         print(f"[!] Error during atomic save of coverage state: {e}", file=sys.stderr)
         # If an error occurred, try to clean up the temporary file.
         if tmp_path.exists():
