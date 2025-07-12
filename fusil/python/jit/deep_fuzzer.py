@@ -830,10 +830,14 @@ class DeepFuzzerOrchestrator:
             print(f"  \\-> Running mutation #{i + 1} (Seed: {current_seed}) for {parent_path.name}...")
 
             # 1. Get the mutated AST from our refactored strategy function.
-            mutated_body_ast, mutation_info = self.apply_mutation_strategy(
-                core_logic_to_mutate,
-                seed=current_seed
-            )
+            try:
+                mutated_body_ast, mutation_info = self.apply_mutation_strategy(
+                    core_logic_to_mutate,
+                    seed=current_seed
+                )
+            except RecursionError:
+                print(f"  [!] Warning: Skipping mutation due to RecursionError during AST transformation. The mutator created a tree that was too deep.", file=sys.stderr)
+                continue # Skip to the next mutation
 
             # 2. Re-assemble the full source code for the child.
             child_core_tree = copy.deepcopy(parent_core_tree)
@@ -842,16 +846,19 @@ class DeepFuzzerOrchestrator:
                     node.body = mutated_body_ast
                     break
 
-            mutated_core_code = ast.unparse(child_core_tree)
-            child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
-
             # 3. Define temporary file paths for this specific child.
             child_source_path = TMP_DIR / f"child_{session_id}_{i + 1}.py"
             child_log_path = TMP_DIR / f"child_{session_id}_{i + 1}.log"
 
             # 4. Write and execute the child process.
             try:
-                child_source_path.write_text(child_full_source)
+                try:
+                    mutated_core_code = ast.unparse(child_core_tree)
+                    child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
+                    child_source_path.write_text(child_full_source)
+                except RecursionError:
+                    print(f"  [!] Warning: Skipping mutation due to RecursionError during ast.unparse. Likely too many nested statements.", file=sys.stderr)
+                    continue # Skip to the next mutation
                 with open(child_log_path, "w") as log_file:
                     start_time = time.monotonic()
                     result = subprocess.run(
