@@ -307,6 +307,168 @@ class StressPatternInjector(ast.NodeTransformer):
         return node
 
 
+class TypeInstabilityInjector(ast.NodeTransformer):
+    """
+    Attacks the JIT's type speculation by finding a variable in a hot loop
+    and periodically re-assigning it to an incompatible type.
+    """
+
+    def visit_For(self, node: ast.For) -> ast.For:
+        # First, visit children to process any nested loops.
+        self.generic_visit(node)
+
+        # We need a loop variable to key the corruption off of.
+        if not isinstance(node.target, ast.Name):
+            return node
+
+        # Find a variable assigned to within the loop to be our target.
+        assigned_vars = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+        if not assigned_vars:
+            return node  # No variables to corrupt.
+
+        target_var_name = random.choice(list(assigned_vars))
+        loop_var_name = node.target.id
+
+        print(f"    -> Injecting type instability pattern targeting '{target_var_name}' in loop", file=sys.stderr)
+
+        # 1. Create the poison assignment: target_var = "corrupted"
+        poison_assignment = ast.Assign(
+            targets=[ast.Name(id=target_var_name, ctx=ast.Store())],
+            value=ast.Constant(value="corrupted by type instability")
+        )
+        # 2. Create the trigger: if i == N: ...
+        trigger_if = ast.If(
+            test=ast.Compare(
+                left=ast.Name(id=loop_var_name, ctx=ast.Load()),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=random.randint(100, 400))]
+            ),
+            body=[poison_assignment],
+            orelse=[]
+        )
+
+        # 3. Create the recovery assignment: target_var = i
+        recovery_assignment = ast.Assign(
+            targets=[ast.Name(id=target_var_name, ctx=ast.Store())],
+            value=ast.Name(id=loop_var_name, ctx=ast.Load())
+        )
+
+        # 4. Wrap the entire original loop body in a try...except... block
+        new_body = [trigger_if] + node.body
+        try_block = ast.Try(
+            body=new_body,
+            handlers=[ast.ExceptHandler(
+                type=ast.Name(id='TypeError', ctx=ast.Load()),
+                name=None,
+                body=[recovery_assignment]
+            )],
+            orelse=[],
+            finalbody=[]
+        )
+
+        node.body = [try_block]
+        return node
+
+
+class GuardExhaustionGenerator(ast.NodeTransformer):
+    """
+    Attacks JIT guard tables by injecting a loop with a long chain of
+    isinstance() checks against a polymorphic variable.
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+        if random.random() < 0.1:  # Low probability of injecting
+            print(f"    -> Injecting guard exhaustion pattern into '{node.name}'", file=sys.stderr)
+
+            # 1. Create the setup code as an AST
+            setup_code = dedent("""
+                poly_list = [1, "a", 3.0, [], (), {}, True, b'bytes']
+            """)
+            setup_ast = ast.parse(setup_code).body
+
+            # 2. Create the loop with the isinstance chain
+            isinstance_chain = dedent("""
+                x = poly_list[i % len(poly_list)]
+                if isinstance(x, int):
+                    y = 1
+                elif isinstance(x, str):
+                    y = 2
+                elif isinstance(x, float):
+                    y = 3
+                elif isinstance(x, list):
+                    y = 4
+                elif isinstance(x, tuple):
+                    y = 5
+                elif isinstance(x, dict):
+                    y = 6
+                elif isinstance(x, bool):
+                    y = 7
+                else:
+                    y = 8
+            """)
+
+            loop_node = ast.For(
+                target=ast.Name(id='i', ctx=ast.Store()),
+                iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[ast.Constant(value=500)], keywords=[]),
+                body=ast.parse(isinstance_chain).body,
+                orelse=[]
+            )
+
+            # 3. Prepend the setup and the loop to the function's body
+            node.body = setup_ast + [loop_node] + node.body
+
+        return node
+
+
+class InlineCachePolluter(ast.NodeTransformer):
+    """
+    Attacks JIT inline caches by injecting a megamorphic call site
+    (a method call on objects of many different types).
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+        if random.random() < 0.1:  # Low probability of injecting
+            print(f"    -> Injecting inline cache pollution pattern into '{node.name}'", file=sys.stderr)
+
+            # 1. Create the class definitions and instance list as an AST
+            p_prefix = f"p_{random.randint(1000, 9999)}"
+            setup_code = dedent(f"""
+                class Polluter_A_{p_prefix}:
+                    def do_it(self): return 1
+                class Polluter_B_{p_prefix}:
+                    def do_it(self): return 'foo'
+                class Polluter_C_{p_prefix}:
+                    def do_it(self): return None
+                class Polluter_D_{p_prefix}:
+                    def do_it(self): return [1, 2]
+
+                polluters = [Polluter_A_{p_prefix}(), Polluter_B_{p_prefix}(), Polluter_C_{p_prefix}(), Polluter_D_{p_prefix}()]
+            """)
+            setup_ast = ast.parse(setup_code).body
+
+            # 2. Create the loop that makes the polymorphic calls
+            call_loop_code = dedent(f"""
+                p = polluters[i % len(polluters)]
+                try:
+                    p.do_it()
+                except Exception:
+                    pass
+            """)
+            loop_node = ast.For(
+                target=ast.Name(id='i', ctx=ast.Store()),
+                iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[ast.Constant(value=500)], keywords=[]),
+                body=ast.parse(call_loop_code).body,
+                orelse=[]
+            )
+
+            # 3. Prepend the setup and the loop to the function's body
+            node.body = setup_ast + [loop_node] + node.body
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -329,6 +491,10 @@ class ASTMutator:
             GuardInjector,
             ContainerChanger,
             VariableSwapper,
+            StressPatternInjector,
+            TypeInstabilityInjector,
+            GuardExhaustionGenerator,
+            InlineCachePolluter,
             # StatementDuplicator,
         ]
 
