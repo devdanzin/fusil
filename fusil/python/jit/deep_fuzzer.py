@@ -17,7 +17,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from textwrap import dedent
+from textwrap import dedent, indent
 from typing import Any, Literal
 
 from fusil.python.jit.jit_coverage_parser import parse_log_for_edge_coverage
@@ -31,6 +31,7 @@ CORPUS_DIR = Path("corpus") / "jit_interesting_tests"
 TMP_DIR = Path("tmp_fuzz_run")
 CRASHES_DIR = Path("crashes")
 TIMEOUTS_DIR = Path("timeouts")
+DIVERGENCES_DIR = Path("divergences")
 LOGS_DIR = Path("logs")
 RUN_STATS_FILE = Path("fuzz_run_stats.json")
 COVERAGE_DIR = Path("coverage")
@@ -62,7 +63,7 @@ ENV.update({
     "PYTHON_OPT_DEBUG": "4",
 })
 
-AnalysisResult = Literal["CRASH", "NEW_COVERAGE", "NO_CHANGE"]
+AnalysisResult = Literal["CRASH", "NEW_COVERAGE", "NO_CHANGE", "DIVERGENCE"]
 
 
 def load_coverage_state() -> dict[str, Any]:
@@ -189,6 +190,7 @@ def load_run_stats() -> dict[str, Any]:
             "corpus_size": 0,
             "crashes_found": 0,
             "timeouts_found": 0,
+            "divergences_found": 0,
             "new_coverage_finds": 0,
             "sum_of_mutations_per_find": 0,
             "average_mutations_per_find": 0.0,
@@ -203,6 +205,7 @@ def load_run_stats() -> dict[str, Any]:
             stats.setdefault("average_mutations_per_find", 0.0)
             stats.setdefault("global_seed_counter", 0)
             stats.setdefault("corpus_file_counter", 0)
+            stats.setdefault("divergences_found", 0)
             return stats
     except (json.JSONDecodeError, IOError) as e:
         print(f"Warning: Could not load run stats file. Starting fresh. Error: {e}", file=sys.stderr)
@@ -248,13 +251,14 @@ class DeepFuzzerOrchestrator:
     mutated children, and analyzing the results for new coverage.
     """
 
-    def __init__(self, min_corpus_files: int = 1):
+    def __init__(self, min_corpus_files: int = 1, differential_testing: bool = False):
         self.ast_mutator = ASTMutator()
         self.coverage_state = load_coverage_state()
         self.run_stats = load_run_stats()
         self.boilerplate_code = None
         self.scheduler = CorpusScheduler(self.coverage_state)
         self.min_corpus_files = min_corpus_files
+        self.differential_testing = differential_testing
         self.mutations_since_last_find = 0
         self.global_seed_counter = self.run_stats.get("global_seed_counter", 0)
         self.corpus_file_counter = self.run_stats.get("corpus_file_counter", 0)
@@ -266,6 +270,7 @@ class DeepFuzzerOrchestrator:
         TMP_DIR.mkdir(exist_ok=True)
         CRASHES_DIR.mkdir(exist_ok=True)
         TIMEOUTS_DIR.mkdir(exist_ok=True)
+        DIVERGENCES_DIR.mkdir(exist_ok=True)
         LOGS_DIR.mkdir(exist_ok=True)
 
         run_timestamp = self.run_stats.get("start_time", datetime.now(timezone.utc).isoformat())
@@ -769,7 +774,7 @@ class DeepFuzzerOrchestrator:
         Takes a parent test case, dynamically determines the number of mutations
         based on its score, and then executes and analyzes each child.
         """
-        # --- Step 3.2: Implement Dynamic Mutation Count ---
+        # --- Implement Dynamic Mutation Count ---
         base_mutations = 100
         # Normalize the score relative to a baseline of 100 to calculate a multiplier
         score_multiplier = parent_score / 100.0
@@ -793,109 +798,143 @@ class DeepFuzzerOrchestrator:
 
         try:
             parent_source = parent_path.read_text()
-
-            # If boilerplate isn't cached yet, this must be a full generation file.
             if self.boilerplate_code is None:
                 self._extract_and_cache_boilerplate(parent_source)
-
-            # Get the core code for mutation. This works for both full and minimized files.
             parent_core_code = self._get_core_code(parent_source)
             parent_core_tree = ast.parse(parent_core_code)
         except (IOError, SyntaxError) as e:
             print(f"[!] Error processing parent file {parent_path.name}: {e}", file=sys.stderr)
             return
 
-        # Find the first harness function to use as the mutation target.
-        # A more advanced strategy could mutate all harnesses.
         base_harness_node = None
+        setup_nodes = []
         for node in parent_core_tree.body:
             if isinstance(node, ast.FunctionDef) and node.name.startswith('uop_harness_'):
                 base_harness_node = node
-                break
+            elif base_harness_node is None:
+                # Collect setup nodes that appear before the harness function
+                setup_nodes.append(node)
 
         if not base_harness_node:
             print(f"[-] No harness function found in {parent_path.name}. Skipping.", file=sys.stderr)
             return
 
+        setup_code = ast.unparse(setup_nodes)
         core_logic_to_mutate = base_harness_node.body
+        prefix = base_harness_node.name.replace('uop_harness_', '')
 
-        # Loop through a set number of mutations for this parent.
+        # --- Main Mutation Loop ---
         for i in range(max_mutations):
             self.run_stats["total_mutations"] = self.run_stats.get("total_mutations", 0) + 1
             self.mutations_since_last_find += 1
-
-            # Increment and use the global seed for this mutation attempt.
             self.global_seed_counter += 1
             current_seed = self.global_seed_counter
             print(f"  \\-> Running mutation #{i + 1} (Seed: {current_seed}) for {parent_path.name}...")
 
-            # 1. Get the mutated AST from our refactored strategy function.
             try:
-                mutated_body_ast, mutation_info = self.apply_mutation_strategy(
-                    core_logic_to_mutate,
-                    seed=current_seed
-                )
+                mutated_body_ast, mutation_info = self.apply_mutation_strategy(core_logic_to_mutate, seed=current_seed)
             except RecursionError:
-                print(f"  [!] Warning: Skipping mutation due to RecursionError during AST transformation. The mutator created a tree that was too deep.", file=sys.stderr)
-                continue # Skip to the next mutation
+                print(f"  [!] Warning: Skipping mutation due to RecursionError during AST transformation.", file=sys.stderr)
+                continue
 
-            # 2. Re-assemble the full source code for the child.
-            child_core_tree = copy.deepcopy(parent_core_tree)
-            for node in child_core_tree.body:
-                if isinstance(node, ast.FunctionDef) and node.name == base_harness_node.name:
-                    node.body = mutated_body_ast
-                    break
-
-            # 3. Define temporary file paths for this specific child.
             child_source_path = TMP_DIR / f"child_{session_id}_{i + 1}.py"
             child_log_path = TMP_DIR / f"child_{session_id}_{i + 1}.log"
 
-            # 4. Write and execute the child process.
             try:
-                try:
+                # --- SCRIPT GENERATION: Switch between modes ---
+                if self.differential_testing:
+                    # --- Differential Testing Mode ---
+                    mutated_core_code = ast.unparse(mutated_body_ast)
+                    # Add the return statement to get the final state of local variables
+                    mutated_core_code += "\nreturn locals().copy()"
+
+                    diff_boilerplate = self._get_differential_test_boilerplate()
+
+                    child_full_source = f"""
+# Fuzzer-generated differential test
+# Seed: {current_seed}, Parent: {parent_id}
+from gc import collect
+import sys
+from textwrap import indent
+{self.boilerplate_code}
+{diff_boilerplate}
+{setup_code}
+
+def jit_target_{prefix}():
+{indent(mutated_core_code, '    ')}
+
+def control_{prefix}():
+{indent(mutated_core_code, '    ')}
+
+# --- Execute the 'Twin Execution' harness ---
+try:
+    jit_harness(jit_target_{prefix}, 500)
+    jit_result = jit_target_{prefix}()
+    control_result = no_jit_harness(control_{prefix})
+
+    if not compare_results(jit_result, control_result):
+        # Use repr() to get a more detailed string representation of the dicts
+        raise JITCorrectnessError(f"JIT DIVERGENCE! JIT: {{repr(jit_result)}}, Control: {{repr(control_result)}}")
+except JITCorrectnessError:
+    # Re-raise our specific error to be caught by the log scanner
+    raise
+except Exception:
+    # Ignore other benign errors in the generated code
+    pass
+"""
+                    child_source_path.write_text(dedent(child_full_source))
+
+                else:
+                    # --- Crash Finding Mode (Original Logic) ---
+                    child_core_tree = copy.deepcopy(parent_core_tree)
+                    for node in child_core_tree.body:
+                        if isinstance(node, ast.FunctionDef) and node.name == base_harness_node.name:
+                            node.body = mutated_body_ast
+                            break
                     mutated_core_code = ast.unparse(child_core_tree)
                     child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
                     child_source_path.write_text(child_full_source)
-                except RecursionError:
-                    print(f"  [!] Warning: Skipping mutation due to RecursionError during ast.unparse. Likely too many nested statements.", file=sys.stderr)
-                    continue # Skip to the next mutation
+
+            except RecursionError:
+                print(f"  [!] Warning: Skipping mutation due to RecursionError during ast.unparse.", file=sys.stderr)
+                continue
+            try:
+                # --- Execute and Analyze Child ---
                 with open(child_log_path, "w") as log_file:
                     start_time = time.monotonic()
-                    result = subprocess.run(
-                        ["python3", str(child_source_path)],
-                        stdout=log_file,
-                        stderr=subprocess.STDOUT,
-                        timeout=10,
-                        env=ENV,
-                    )
+                    result = subprocess.run(["python3", str(child_source_path)], stdout=log_file, stderr=subprocess.STDOUT, timeout=10, env=ENV)
                     end_time = time.monotonic()
                     execution_time_ms = int((end_time - start_time) * 1000)
+
                 analysis_result = self.analyze_run(
-                    child_log_path,
-                    child_source_path,
-                    result.returncode,
-                    parent_lineage_profile,
-                    parent_id,
-                    execution_time_ms,
-                    mutation_info,
+                    child_log_path, child_source_path, result.returncode,
+                    parent_lineage_profile, parent_id,
+                    execution_time_ms, mutation_info,
                     mutation_seed=current_seed,
+                    is_differential_mode=self.differential_testing,
                 )
-                if analysis_result == "CRASH":
+
+                # --- Handle Analysis Result ---
+                if analysis_result == "DIVERGENCE":
+                    self.run_stats["divergences_found"] = self.run_stats.get("divergences_found", 0) + 1
+                    self.mutations_since_last_find = 0
+                    print(f"  [***] SUCCESS! Mutation #{i + 1} found a correctness divergence. Moving to next parent.")
+                    break # A divergence is a major find, move to the next parent
+                elif analysis_result == "CRASH":
                     self.run_stats["crashes_found"] = self.run_stats.get("crashes_found", 0) + 1
                     continue
                 elif analysis_result == "NEW_COVERAGE":
-                    self.run_stats["new_coverage_finds"] = self.run_stats.get("new_coverage_finds", 0) + 1
+                    self.run_stats["new_coverage_finds"] += 1
                     self.run_stats["sum_of_mutations_per_find"] += self.mutations_since_last_find
                     self.mutations_since_last_find = 0
                     print(f"  [***] SUCCESS! Mutation #{i + 1} found new coverage. Moving to next parent.")
                     parent_metadata["total_finds"] = parent_metadata.get("total_finds", 0) + 1
                     parent_metadata["mutations_since_last_find"] = 0
                     save_coverage_state(self.coverage_state)
-                    break # Move to next parent
-                else:
+                    break
+                else: # NO_CHANGE
                     parent_metadata["mutations_since_last_find"] = parent_metadata.get("mutations_since_last_find", 0) + 1
-                    # Check for sterility
-                    if parent_metadata["mutations_since_last_find"] > 599: # Sterility threshold
+                    if parent_metadata["mutations_since_last_find"] > 599:
                         parent_metadata["is_sterile"] = True
             except subprocess.TimeoutExpired:
                 self.run_stats["timeouts_found"] = self.run_stats.get("timeouts_found", 0) + 1
@@ -927,11 +966,25 @@ class DeepFuzzerOrchestrator:
             execution_time_ms: int,
             mutation_info: dict[str, Any],
             mutation_seed: int,
+            is_differential_mode: bool = False,
     ) -> AnalysisResult:
         """
         Analyzes a run for crashes and new coverage against the full lineage.
         """
-        # --- Lightweight Crash Monitoring (no change) ---
+        log_content = ""
+        try:
+            log_content = log_path.read_text()
+        except IOError as e:
+            print(f"  [!] Warning: Could not read log file for analysis: {e}", file=sys.stderr)
+
+        if is_differential_mode and "JITCorrectnessError" in log_content:
+            print(f"  [!!!] DIVERGENCE DETECTED! Saving test case and log.", file=sys.stderr)
+            divergence_path = DIVERGENCES_DIR / f"divergence_{source_path.name}"
+            shutil.copy(source_path, divergence_path)
+            shutil.copy(log_path, divergence_path.with_suffix('.log'))
+            return "DIVERGENCE"
+
+        # --- Lightweight Crash Monitoring ---
         if return_code != 0:
             print(f"  [!!!] CRASH DETECTED! Exit code: {return_code}. Saving test case and log.", file=sys.stderr)
             crash_source_path = CRASHES_DIR / f"crash_retcode_{source_path.name}"
@@ -940,7 +993,6 @@ class DeepFuzzerOrchestrator:
             shutil.copy(log_path, crash_log_path)
             return "CRASH"
         try:
-            log_content = log_path.read_text()
             for keyword in CRASH_KEYWORDS:
                 if keyword.lower() in log_content.lower():
                     print(f"  [!!!] CRASH DETECTED! Found keyword '{keyword}'. Saving test case and log.",
@@ -1067,6 +1119,53 @@ class DeepFuzzerOrchestrator:
                 lineage_set.update(child_data.get(key, {}).keys())
         return lineage
 
+    def _get_differential_test_boilerplate(self) -> str:
+        """
+        Returns the boilerplate code required for differential testing.
+        This includes the custom error and the result comparison helper.
+        """
+        return dedent("""
+            import math
+            import types
+
+            # Define a custom exception to distinguish our check from others.
+            class JITCorrectnessError(AssertionError): pass
+
+            # This function is called only once, so it will not be JIT-compiled.
+            def no_jit_harness(func, *args, **kwargs):
+                return func(*args, **kwargs)
+
+            # This function calls its target in a loop to make it 'hot' for the JIT.
+            def jit_harness(func, iterations, *args, **kwargs):
+                for _ in range(iterations):
+                    func(*args, **kwargs)
+
+            # Helper for correctness testing that handles NaN, lambdas, and complex numbers.
+            def compare_results(a, b):
+                if isinstance(a, types.FunctionType) and a.__name__ == '<lambda>' and \\
+                   isinstance(b, types.FunctionType) and b.__name__ == '<lambda>':
+                    return True # Treat two lambdas as equal for our purposes
+
+                if isinstance(a, complex) and isinstance(b, complex):
+                    a_real_nan = math.isnan(a.real)
+                    b_real_nan = math.isnan(b.real)
+                    a_imag_nan = math.isnan(a.imag)
+                    b_imag_nan = math.isnan(b.imag)
+                    real_match = (a.real == b.real) or (a_real_nan and b_real_nan)
+                    imag_match = (a.imag == b.imag) or (a_imag_nan and b_imag_nan)
+                    return real_match and imag_match
+
+                if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+                    return True
+
+                # For generic objects, we can't reliably compare, so we assume they are equivalent
+                # if they are not one of the well-defined types we can compare.
+                if type(a).__module__ != 'builtins' or type(b).__module__ != 'builtins':
+                    return True
+
+                return a == b
+        """)
+
 
 def main():
     """
@@ -1078,6 +1177,11 @@ def main():
         type=int,
         default=1,
         help='Ensure the corpus has at least N files before starting the main fuzzing loop. (Default: 1)'
+    )
+    parser.add_argument(
+        '--differential-testing',
+        action='store_true',
+        help='Enable differential testing mode to find correctness bugs (JIT vs. Interpreter).'
     )
     args = parser.parse_args()
 
@@ -1124,7 +1228,10 @@ Initial Stats:
         print(dedent(header))
         # --- End of Header ---
 
-        orchestrator = DeepFuzzerOrchestrator(min_corpus_files=args.min_corpus_files)
+        orchestrator = DeepFuzzerOrchestrator(
+            min_corpus_files=args.min_corpus_files,
+            differential_testing=args.differential_testing,
+        )
         orchestrator.run_evolutionary_loop()
     except KeyboardInterrupt:
         print("\n[!] Fuzzing stopped by user.")
