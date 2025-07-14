@@ -17,12 +17,17 @@ UOP_REGEX = re.compile(r"(?:ADD_TO_TRACE|OPTIMIZED): (_[A-Z0-9_]+)(?=\s|\n|$)")
 
 # Regex to find "rare" but highly interesting JIT events.
 RARE_EVENT_REGEX = re.compile(
-    r"(_DEOPT|_GUARD_FAIL|Bailing on recursive call|Bailing due to dynamic target|"
-    r"Bailing because co_version != func_version|Bail, new_code == NULL|"
-    r"Unsupported opcode|JUMP_BACKWARD not to top ends trace|Trace stack overflow|"
-    r"No room for|Out of space in abstract interpreter|"
-    r"out of space for symbolic expression type|Hit bottom in abstract interpreter|"
-    r"Encountered error in abstract interpreter|Confidence too low)"
+    r"(_DEOPT|_GUARD_FAIL"
+    # Low-level bailout reasons from C-code analysis
+    r"|Bailing on recursive call|Bailing due to dynamic target"
+    r"|Bailing because co_version != func_version|Bail, new_code == NULL"
+    r"|Unsupported opcode|JUMP_BACKWARD not to top ends trace|Trace stack overflow"
+    r"|No room for|Out of space in abstract interpreter"
+    r"|out of space for symbolic expression type|Hit bottom in abstract interpreter"
+    r"|Encountered error in abstract interpreter|Confidence too low"
+    # High-level semantic events from summarize_stats.py analysis
+    r"|Rare event set class|Rare event set bases|Rare event func modification"
+    r"|Rare event builtin dict|Rare event watched globals modification)"
 )
 
 # Define paths for the coverage directory and the new state file.
