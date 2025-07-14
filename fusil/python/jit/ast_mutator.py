@@ -19,6 +19,7 @@ import ast
 import builtins
 import random
 import copy
+import sys
 from textwrap import dedent
 
 
@@ -179,6 +180,130 @@ class VariableRenamer(ast.NodeTransformer):
         """
         if node.id in self.remapping_dict:
             node.id = self.remapping_dict[node.id]
+        return node
+
+
+# ==============================================================================
+# Stress Pattern Injection Engine
+# ==============================================================================
+
+# Note: These functions are adapted from ASTPatternGenerator and made generic.
+
+def _create_type_corruption_node(target_var: str, **kwargs) -> list[ast.stmt]:
+    """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
+    corruption_value = random.choice([
+        ast.Constant(value="corrupted by string"),
+        ast.Constant(value=None),
+        ast.Constant(value=123.456),
+    ])
+    return [ast.Assign(targets=[ast.Name(id=target_var, ctx=ast.Store())], value=corruption_value)]
+
+
+def _create_uop_attribute_deletion_node(target_var: str, **kwargs) -> list[ast.stmt]:
+    """Generates code to delete an attribute (e.g., `del obj.x`)."""
+    attr_to_delete = random.choice(['value', 'x', 'y'])
+    return [ast.Delete(targets=[ast.Attribute(
+        value=ast.Name(id=target_var, ctx=ast.Load()),
+        attr=attr_to_delete,
+        ctx=ast.Del()
+    )])]
+
+
+def _create_method_patch_node(target_var: str, **kwargs) -> list[ast.stmt]:
+    """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
+    method_to_patch = random.choice(['get_value', 'meth', '__repr__'])
+    lambda_payload = ast.Lambda(
+        args=ast.arguments(posonlyargs=[], args=[], vararg=ast.arg(arg='a'), kwarg=ast.arg(arg='kw'), kw_defaults=[],
+                           defaults=[]),
+        body=ast.Constant(value='patched!')
+    )
+    return [ast.Assign(
+        targets=[ast.Attribute(
+            value=ast.Attribute(value=ast.Name(id=target_var, ctx=ast.Load()), attr='__class__', ctx=ast.Load()),
+            attr=method_to_patch,
+            ctx=ast.Store()
+        )],
+        value=lambda_payload
+    )]
+
+
+def _create_dict_swap_node(var1_name: str, var2_name: str, **kwargs) -> list[ast.stmt]:
+    """Generates AST for: obj1.__dict__, obj2.__dict__ = obj2.__dict__, obj1.__dict__"""
+    return [ast.Assign(
+        targets=[ast.Tuple(
+            elts=[
+                ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store()),
+                ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store())
+            ],
+            ctx=ast.Store()
+        )],
+        value=ast.Tuple(
+            elts=[
+                ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load()),
+                ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load())
+            ],
+            ctx=ast.Load()
+        )
+    )]
+
+
+def _create_class_reassignment_node(target_var: str, **kwargs) -> list[ast.stmt]:
+    """Generates AST for: class NewClass: pass; obj.__class__ = NewClass"""
+    new_class_name = f"SwappedClass_{random.randint(1000, 9999)}"
+    class_def_node = ast.ClassDef(
+        name=new_class_name, bases=[], keywords=[], body=[ast.Pass()], decorator_list=[]
+    )
+    assign_node = ast.Assign(
+        targets=[ast.Attribute(value=ast.Name(id=target_var, ctx=ast.Load()), attr='__class__', ctx=ast.Store())],
+        value=ast.Name(id=new_class_name, ctx=ast.Load())
+    )
+    return [class_def_node, assign_node]
+
+
+class StressPatternInjector(ast.NodeTransformer):
+    """
+    A NodeTransformer that, with a small probability, injects a hand-crafted
+    "evil" stress pattern into a function's body.
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        # First, visit children to allow them to be transformed.
+        self.generic_visit(node)
+
+        # Probabilistically decide whether to inject a pattern into this function.
+        if random.random() < 0.15:  # 15% chance
+            # 1. Find all variables that are assigned to in this function's scope.
+            local_vars = {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+            if not local_vars:
+                return node  # No variables to target.
+
+            target_var = random.choice(list(local_vars))
+
+            # 2. Choose an evil action to perform.
+            # Note: _create_dict_swap_node requires two variables.
+            single_target_actions = [
+                _create_type_corruption_node, _create_uop_attribute_deletion_node,
+                _create_method_patch_node, _create_class_reassignment_node
+            ]
+            if len(local_vars) >= 2:
+                action = random.choice(single_target_actions + [_create_dict_swap_node])
+            else:
+                action = random.choice(single_target_actions)
+
+            print(f"    -> Injecting stress pattern '{action.__name__}' targeting '{target_var}'", file=sys.stderr)
+
+            # 3. Generate the evil snippet's AST nodes.
+            if action == _create_dict_swap_node:
+                var1, var2 = random.sample(list(local_vars), 2)
+                snippet_nodes = action(var1_name=var1, var2_name=var2)
+            else:
+                snippet_nodes = action(target_var=target_var)
+
+            # 4. Insert the snippet at a random point in the function body.
+            if node.body:
+                insert_pos = random.randint(0, len(node.body))
+                node.body[insert_pos:insert_pos] = snippet_nodes
+
         return node
 
 
