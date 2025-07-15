@@ -1014,42 +1014,41 @@ except Exception:
         child_coverage = parse_log_for_edge_coverage(log_path)
         is_interesting = False
 
-        # --- PASS 1: Read-only check for interestingness ---
-        # We collect new coverage items here but do NOT modify the global state.
-        new_coverage_this_run = defaultdict(lambda: defaultdict(list))
+        # --- PASS 1: Unified Read-Only Check for Interestingness ---
+        # This loop now runs for ALL files to check for newness and generate logs.
+        for harness_id, child_data in child_coverage.items():
+            lineage_harness_data = parent_lineage_profile.get(harness_id, {})
+            for cov_type in ["uops", "edges", "rare_events"]:
+                lineage_set = lineage_harness_data.get(cov_type, set())
+                global_set = self.coverage_state["global_coverage"].get(cov_type, {})
 
-        if parent_id is not None:
-            # Logic for MUTATED files
-            for harness_id, child_data in child_coverage.items():
-                lineage_harness_data = parent_lineage_profile.get(harness_id, {})
-                for cov_type in ["uops", "edges", "rare_events"]:
-                    lineage_set = lineage_harness_data.get(cov_type, set())
-                    global_set = self.coverage_state["global_coverage"].get(cov_type, {})
+                for item in child_data.get(cov_type, {}):
+                    # For all files, we check if their coverage is globally new.
+                    if item not in global_set:
+                        print(f"[NEW GLOBAL {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                              file=sys.stderr)
+                        is_interesting = True
+                    # For mutated files, we also check if coverage is new to their lineage.
+                    elif parent_id is not None and item not in lineage_set:
+                        print(f"[NEW RELATIVE {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                              file=sys.stderr)
+                        is_interesting = True
 
-                    for item, count in child_data.get(cov_type, {}).items():
-                        is_globally_new = item not in global_set
-                        is_new_to_lineage = item not in lineage_set
+            # For mutated files, we can break early once any new coverage is found.
+            if is_interesting and parent_id is not None:
+                break
 
-                        if is_globally_new:
-                            print(f"[NEW GLOBAL {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
-                                  file=sys.stderr)
-                            is_interesting = True
-                            new_coverage_this_run[harness_id][cov_type].append((item, count))
-                        elif is_new_to_lineage:
-                            print(f"[NEW RELATIVE {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
-                                  file=sys.stderr)
-                            is_interesting = True
-
-        # After the check, apply special rules for SEED files
+        # After the check, apply special rules for SEED files.
+        # A seed is interesting if it has any coverage at all, even if not globally new,
+        # or if it's the special bootstrap seed which may have no coverage.
         if parent_id is None:
             is_generative_seed = mutation_info.get("strategy") == "generative_seed"
             if child_coverage or is_generative_seed:
                 is_interesting = True
-            else:
+            elif not is_interesting:  # Only print if it wasn't already deemed interesting by finding a new global item
                 print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
-                is_interesting = False
 
-        # --- Main commit block ---
+        # --- Main Commit Block ---
         if is_interesting:
             full_source_code = source_path.read_text()
             core_code_to_save = self._get_core_code(full_source_code)
@@ -1064,17 +1063,11 @@ except Exception:
             # --- PASS 2: Commit Phase ---
             # It's a genuinely new, interesting file. Now, update the global state.
             global_coverage = self.coverage_state["global_coverage"]
-
-            # If it's a seed, all its coverage is new to the global state.
-            coverage_to_commit = child_coverage if parent_id is None else new_coverage_this_run
-
-            for harness_id, data in coverage_to_commit.items():
+            for harness_id, data in child_coverage.items():
                 for cov_type in ["uops", "edges", "rare_events"]:
                     global_coverage.setdefault(cov_type, {})
-                    # The items to add can be a dict (from child_coverage) or a list of tuples (from new_coverage_this_run)
-                    items_to_add = data.get(cov_type, {}).items() if isinstance(data.get(cov_type), dict) else data.get(
-                        cov_type, [])
-                    for item, count in items_to_add:
+                    for item, count in data.get(cov_type, {}).items():
+                        # We only add to the hit count; newness was already determined.
                         global_coverage[cov_type].setdefault(item, 0)
                         global_coverage[cov_type][item] += count
 
