@@ -585,6 +585,69 @@ class SideEffectInjector(ast.NodeTransformer):
         return node
 
 
+def _is_simple_statement(node: ast.stmt) -> bool:
+    """
+    Walks a statement's AST to ensure it doesn't contain any nodes
+    that would make it unsafe to blindly wrap in a loop.
+    """
+    for sub_node in ast.walk(node):
+        if isinstance(sub_node, (ast.Return, ast.Break, ast.Continue, ast.Delete)):
+            return False
+    return True
+
+
+class ForLoopInjector(ast.NodeTransformer):
+    """
+    A mutator that finds simple statements and wraps them in a for loop
+    to make them "hot" for the JIT.
+    """
+
+    def _try_inject_loop(self, node: ast.stmt) -> ast.stmt | ast.For:
+        # Low probability for this mutation
+        if random.random() < 0.05 and _is_simple_statement(node):
+            print(f"    -> Injecting for loop around a statement.", file=sys.stderr)
+
+            # Choose a random iterable for the loop
+            loop_var_name = f"i_loop_{random.randint(1000, 9999)}"
+
+            # Choose between range(), a list, or a tuple
+            iterable_type = random.choice(['range', 'list', 'tuple'])
+
+            if iterable_type == 'range':
+                iterator_node = ast.Call(
+                    func=ast.Name(id='range', ctx=ast.Load()),
+                    args=[ast.Constant(value=random.randint(50, 200))],
+                    keywords=[]
+                )
+            else:  # list or tuple
+                elements = [ast.Constant(value=i) for i in range(random.randint(5, 20))]
+                if iterable_type == 'list':
+                    iterator_node = ast.List(elts=elements, ctx=ast.Load())
+                else:  # tuple
+                    iterator_node = ast.Tuple(elts=elements, ctx=ast.Load())
+
+            # Create the new For node, with the original statement as its body
+            for_node = ast.For(
+                target=ast.Name(id=loop_var_name, ctx=ast.Store()),
+                iter=iterator_node,
+                body=[node],
+                orelse=[]
+            )
+            return for_node
+        return node
+
+    def visit_Assign(self, node: ast.Assign) -> ast.stmt:
+        self.generic_visit(node)
+        return self._try_inject_loop(node)
+
+    def visit_Expr(self, node: ast.Expr) -> ast.stmt:
+        self.generic_visit(node)
+        # We only want to loop simple expressions, not complex ones that define classes etc.
+        if isinstance(node.value, ast.Call):
+            return self._try_inject_loop(node)
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -613,6 +676,7 @@ class ASTMutator:
             InlineCachePolluter,
             SideEffectInjector,
             # StatementDuplicator,
+            ForLoopInjector,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
