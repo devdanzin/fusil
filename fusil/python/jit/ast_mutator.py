@@ -648,6 +648,157 @@ class ForLoopInjector(ast.NodeTransformer):
         return node
 
 
+class GlobalInvalidator(ast.NodeTransformer):
+    """
+    Injects a statement that modifies the globals() dictionary to attack
+    the JIT's global versioning caches.
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        # First, visit children to allow them to be transformed.
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        # Low probability for this mutation
+        if random.random() < 0.1:
+            if not node.body:  # Don't inject into an empty function
+                return node
+
+            print(f"    -> Injecting global invalidation pattern into '{node.name}'", file=sys.stderr)
+
+            # 1. Create the AST for: globals()['fuzzer_...'] = None
+            key_name = f"fuzzer_invalidation_key_{random.randint(1000, 99999)}"
+
+            invalidation_node = ast.Assign(
+                targets=[
+                    ast.Subscript(
+                        value=ast.Call(
+                            func=ast.Name(id='globals', ctx=ast.Load()),
+                            args=[],
+                            keywords=[]
+                        ),
+                        slice=ast.Constant(value=key_name),
+                        ctx=ast.Store()
+                    )
+                ],
+                value=ast.Constant(value=None)
+            )
+
+            # 2. Insert the statement at a random point in the function body.
+            insert_pos = random.randint(0, len(node.body))
+            node.body.insert(insert_pos, invalidation_node)
+            ast.fix_missing_locations(node)
+
+        return node
+
+
+class LoadAttrPolluter(ast.NodeTransformer):
+    """
+    Attacks JIT LOAD_ATTR caches by injecting a polymorphic access site.
+    It creates several classes with the same attribute name but different
+    underlying kinds (data, property, slot, etc.) and accesses them in a loop.
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        # Low probability for this complex injection
+        if random.random() < 0.1:
+            print(f"    -> Injecting LOAD_ATTR cache pollution pattern into '{node.name}'", file=sys.stderr)
+
+            p_prefix = f"la_{random.randint(1000, 9999)}"
+
+            # 1. Define the entire scenario as a Python code string.
+            # This is easier and cleaner than building each class with AST calls.
+            scenario_code = dedent(f"""
+                # --- LOAD_ATTR Cache Pollution Scenario ---
+                print('[{p_prefix}] Running LOAD_ATTR cache pollution scenario...', file=sys.stderr)
+
+                # a) Define classes with conflicting 'payload' attributes.
+                class ShapeA_{p_prefix}:
+                    payload = 123
+                class ShapeB_{p_prefix}:
+                    @property
+                    def payload(self):
+                        return 'property_payload'
+                class ShapeC_{p_prefix}:
+                    def payload(self):
+                        return id(self)
+                class ShapeD_{p_prefix}:
+                    __slots__ = ['payload']
+                    def __init__(self):
+                        self.payload = 'slot_payload'
+
+                # b) Create a list of instances to iterate over.
+                shapes_{p_prefix} = [ShapeA_{p_prefix}(), ShapeB_{p_prefix}(), ShapeC_{p_prefix}(), ShapeD_{p_prefix}()]
+
+                # c) In a hot loop, polymorphically access the 'payload' attribute.
+                for i in range(500):
+                    obj = shapes_{p_prefix}[i % len(shapes_{p_prefix})]
+                    try:
+                        # This polymorphic access forces the JIT to constantly check
+                        # the object's type and the version of its attribute cache.
+                        payload_val = obj.payload
+                        # If the payload is a method, call it to make the access meaningful.
+                        if callable(payload_val):
+                            payload_val()
+                    except Exception:
+                        pass
+            """)
+
+            # 2. Parse the string into a list of AST nodes.
+            try:
+                scenario_nodes = ast.parse(scenario_code).body
+            except SyntaxError:
+                return node  # Should not happen with a fixed template
+
+            # 3. Prepend the entire scenario to the function's body.
+            node.body = scenario_nodes + node.body
+            ast.fix_missing_locations(node)
+
+        return node
+
+
+class ManyVarsInjector(ast.NodeTransformer):
+    """
+    Injects a large number of local variable declarations at the start of
+    a function to stress EXTENDED_ARG handling and register allocation.
+    """
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        # Low probability for this mutation as it adds a lot of code.
+        if random.random() < 0.05:
+            print(f"    -> Injecting many local variables into '{node.name}'", file=sys.stderr)
+
+            num_vars_to_add = 260  # More than 256 to force EXTENDED_ARG
+            p_prefix = f"mv_{random.randint(1000, 9999)}"
+
+            new_var_nodes = []
+            for i in range(num_vars_to_add):
+                var_name = f"{p_prefix}_{i}"
+                assign_node = ast.Assign(
+                    targets=[ast.Name(id=var_name, ctx=ast.Store())],
+                    value=ast.Constant(value=i)
+                )
+                new_var_nodes.append(assign_node)
+
+            # Prepend the new variable declarations to the function's body.
+            node.body = new_var_nodes + node.body
+            ast.fix_missing_locations(node)
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -677,6 +828,9 @@ class ASTMutator:
             SideEffectInjector,
             # StatementDuplicator,
             ForLoopInjector,
+            GlobalInvalidator,
+            LoadAttrPolluter,
+            ManyVarsInjector,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
