@@ -613,7 +613,7 @@ class DeepFuzzerOrchestrator:
         induce significant "havoc".
         """
         print("  [~] Running HAVOC stage...", file=sys.stderr)
-        tree = ast.Module(body=base_ast, type_ignores=[])  # Start with the copied tree from the dispatcher
+        tree = base_ast  # Start with the copied tree from the dispatcher
         num_havoc_mutations = RANDOM.randint(15, 50)
         transformers_applied = []
 
@@ -624,7 +624,7 @@ class DeepFuzzerOrchestrator:
 
         ast.fix_missing_locations(tree)
         mutation_info = {"strategy": "havoc", "transformers": transformers_applied}
-        return tree.body, mutation_info
+        return tree, mutation_info
 
     def _run_spam_stage(self, base_ast: ast.AST, **kwargs) -> tuple[ast.AST, dict[str, Any]]:
         """
@@ -632,7 +632,7 @@ class DeepFuzzerOrchestrator:
         thoroughly exercise one transformation.
         """
         print("  [~] Running SPAM stage...", file=sys.stderr)
-        tree = ast.Module(body=base_ast, type_ignores=[])
+        tree = base_ast
         num_spam_mutations = RANDOM.randint(20, 50)
 
         # Choose one single type of mutation to spam
@@ -645,7 +645,7 @@ class DeepFuzzerOrchestrator:
 
         ast.fix_missing_locations(tree)
         mutation_info = {"strategy": "spam", "transformers": [chosen_transformer_class.__name__] * num_spam_mutations}
-        return tree.body, mutation_info
+        return tree, mutation_info
 
     def _analyze_setup_ast(self, setup_nodes: list[ast.stmt]) -> dict[str, str]:
         """
@@ -820,7 +820,7 @@ class DeepFuzzerOrchestrator:
             return
 
         setup_code = ast.unparse(setup_nodes)
-        core_logic_to_mutate = base_harness_node.body
+        core_logic_to_mutate = base_harness_node
         prefix = base_harness_node.name.replace('uop_harness_', '')
 
         # --- Main Mutation Loop ---
@@ -833,6 +833,8 @@ class DeepFuzzerOrchestrator:
 
             try:
                 mutated_body_ast, mutation_info = self.apply_mutation_strategy(core_logic_to_mutate, seed=current_seed)
+                # self.debug_mutation_differences(core_logic_to_mutate, mutated_body_ast, current_seed)
+
             except RecursionError:
                 print(f"  [!] Warning: Skipping mutation due to RecursionError during AST transformation.", file=sys.stderr)
                 continue
@@ -887,9 +889,11 @@ except Exception:
                 else:
                     # --- Crash Finding Mode (Original Logic) ---
                     child_core_tree = copy.deepcopy(parent_core_tree)
-                    for node in child_core_tree.body:
+                    # Find the index of the old harness function and replace the entire node.
+                    for i, node in enumerate(child_core_tree.body):
                         if isinstance(node, ast.FunctionDef) and node.name == base_harness_node.name:
-                            node.body = mutated_body_ast
+                            # The mutated AST is now the full FunctionDef, so we replace the old one.
+                            child_core_tree.body[i] = mutated_body_ast
                             break
                     mutated_core_code = ast.unparse(child_core_tree)
                     child_full_source = f"{self.boilerplate_code}\n{mutated_core_code}"
@@ -950,6 +954,7 @@ except Exception:
             finally:
                 try:
                     if child_source_path.exists():
+                        # self.verify_jit_determinism(child_source_path, 25)
                         child_source_path.unlink()
                     if child_log_path.exists():
                         child_log_path.unlink()
@@ -1009,73 +1014,73 @@ except Exception:
         child_coverage = parse_log_for_edge_coverage(log_path)
         is_interesting = False
 
-        global_coverage = self.coverage_state["global_coverage"]
+        # --- PASS 1: Read-only check for interestingness ---
+        # We collect new coverage items here but do NOT modify the global state.
+        new_coverage_this_run = defaultdict(lambda: defaultdict(list))
 
-        # This loop runs for ALL files to update global counts and check for newness.
-        for harness_id, child_data in child_coverage.items():
-            lineage_harness_data = parent_lineage_profile.get(harness_id, {})
+        if parent_id is not None:
+            # Logic for MUTATED files
+            for harness_id, child_data in child_coverage.items():
+                lineage_harness_data = parent_lineage_profile.get(harness_id, {})
+                for cov_type in ["uops", "edges", "rare_events"]:
+                    lineage_set = lineage_harness_data.get(cov_type, set())
+                    global_set = self.coverage_state["global_coverage"].get(cov_type, {})
 
-            # Helper lambda to process each coverage type (uops, edges, rare_events)
-            def process_coverage_type(cov_type: str):
-                nonlocal is_interesting
-                lineage_set = lineage_harness_data.get(cov_type, set())
-                child_dict = child_data.get(cov_type, {})
+                    for item, count in child_data.get(cov_type, {}).items():
+                        is_globally_new = item not in global_set
+                        is_new_to_lineage = item not in lineage_set
 
-                for item, count in child_dict.items():
-                    is_globally_new = item not in global_coverage.get(cov_type, {})
-                    is_new_to_lineage = item not in lineage_set
+                        if is_globally_new:
+                            print(f"[NEW GLOBAL {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                                  file=sys.stderr)
+                            is_interesting = True
+                            new_coverage_this_run[harness_id][cov_type].append((item, count))
+                        elif is_new_to_lineage:
+                            print(f"[NEW RELATIVE {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
+                                  file=sys.stderr)
+                            is_interesting = True
 
-                    if is_globally_new:
-                        print(f"[NEW GLOBAL {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
-                              file=sys.stderr)
-                        is_interesting = True
-                    elif is_new_to_lineage and parent_id is not None:
-                        print(f"[NEW RELATIVE {cov_type.upper()[:-1]}] '{item}' in harness '{harness_id}'",
-                              file=sys.stderr)
-                        is_interesting = True
-
-                    # ALWAYS update global coverage counts for every item seen.
-                    global_coverage.setdefault(cov_type, {})
-                    global_coverage[cov_type].setdefault(item, 0)
-                    global_coverage[cov_type][item] += count
-
-            process_coverage_type("uops")
-            process_coverage_type("edges")
-            process_coverage_type("rare_events")
-
-        # For mutations, is_interesting is now correctly set.
-        # For seeds, we apply a different rule.
+        # After the check, apply special rules for SEED files
         if parent_id is None:
             is_generative_seed = mutation_info.get("strategy") == "generative_seed"
-            # A seed is interesting if it produced any coverage, OR it's the bootstrap seed.
             if child_coverage or is_generative_seed:
                 is_interesting = True
             else:
                 print(f"  [~] Seed file {source_path.name} produced no JIT coverage. Skipping.", file=sys.stderr)
-                is_interesting = False  # Explicitly set to false
+                is_interesting = False
 
+        # --- Main commit block ---
         if is_interesting:
-            # Read the full source code that was just run
             full_source_code = source_path.read_text()
-            # Extract just the core part for saving to the corpus
             core_code_to_save = self._get_core_code(full_source_code)
             content_hash = hashlib.sha256(core_code_to_save.encode('utf-8')).hexdigest()
 
-            # The core duplication check:
             if content_hash in self.known_hashes:
                 print(
                     f"  [~] New coverage found, but content is a known duplicate (Hash: {content_hash[:10]}...). Skipping.",
                     file=sys.stderr)
                 return "NO_CHANGE"
 
+            # --- PASS 2: Commit Phase ---
+            # It's a genuinely new, interesting file. Now, update the global state.
+            global_coverage = self.coverage_state["global_coverage"]
+
+            # If it's a seed, all its coverage is new to the global state.
+            coverage_to_commit = child_coverage if parent_id is None else new_coverage_this_run
+
+            for harness_id, data in coverage_to_commit.items():
+                for cov_type in ["uops", "edges", "rare_events"]:
+                    global_coverage.setdefault(cov_type, {})
+                    # The items to add can be a dict (from child_coverage) or a list of tuples (from new_coverage_this_run)
+                    items_to_add = data.get(cov_type, {}).items() if isinstance(data.get(cov_type), dict) else data.get(
+                        cov_type, [])
+                    for item, count in items_to_add:
+                        global_coverage[cov_type].setdefault(item, 0)
+                        global_coverage[cov_type][item] += count
+
             new_file_id = self._add_new_file_to_corpus(
-                core_code_to_save,
-                child_coverage,
-                execution_time_ms,
-                parent_id,
-                mutation_info,
-                mutation_seed=mutation_seed,
-                content_hash=content_hash,
+                core_code_to_save, child_coverage, execution_time_ms,
+                parent_id, mutation_info, mutation_seed, content_hash
             )
             print(f"[+] Saved interesting file as {new_file_id}")
             save_coverage_state(self.coverage_state)
@@ -1165,6 +1170,68 @@ except Exception:
 
                 return a == b
         """)
+
+    def debug_mutation_differences(self, original_ast: ast.AST, mutated_ast: ast.AST, seed: int):
+        """
+        Debug helper to verify that mutations are actually producing different code.
+        """
+        original_str = ast.unparse(original_ast)
+        mutated_str = ast.unparse(mutated_ast)
+
+        if original_str == mutated_str:
+            print(f"  [WARNING] Mutation with seed {seed} produced identical code!")
+            return False
+
+        # Compute hashes to see if different ASTs produce same unparsed code
+        original_hash = hashlib.sha256(original_str.encode('utf-8')).hexdigest()[:10]
+        mutated_hash = hashlib.sha256(mutated_str.encode('utf-8')).hexdigest()[:10]
+
+        print(f"  [DEBUG] Seed {seed}: Original hash: {original_hash}, Mutated hash: {mutated_hash}")
+
+        # Show a diff summary (just line counts for brevity)
+        original_lines = original_str.count('\n')
+        mutated_lines = mutated_str.count('\n')
+        print(f"  [DEBUG] Line count change: {original_lines} -> {mutated_lines}")
+
+        return True
+
+    def verify_jit_determinism(self, test_file_path: Path, num_runs: int = 5):
+        """
+        Run the same file multiple times to check if coverage is deterministic.
+        """
+        print(f"\n[*] Testing JIT determinism for {test_file_path.name}...")
+
+        coverage_sets = []
+        for run in range(num_runs):
+            log_path = TMP_DIR / f"determinism_test_run_{run}.log"
+
+            with open(log_path, "w") as log_file:
+                subprocess.run(
+                    ["python3", str(test_file_path)],
+                    stdout=log_file, stderr=subprocess.STDOUT, timeout=10, env=ENV
+                )
+
+            coverage = parse_log_for_edge_coverage(log_path)
+
+            # Collect all edges from all harnesses
+            all_edges = set()
+            for harness_data in coverage.values():
+                all_edges.update(harness_data.get("edges", {}).keys())
+
+            coverage_sets.append(all_edges)
+            print(f"  Run {run + 1}: {len(all_edges)} unique edges")
+
+        # Check if all runs produced identical coverage
+        if all(s == coverage_sets[0] for s in coverage_sets):
+            print("  [✓] Coverage is deterministic across all runs")
+        else:
+            print("  [!] Coverage is NON-DETERMINISTIC!")
+            # Show which edges are inconsistent
+            all_edges_union = set().union(*coverage_sets)
+            for edge in all_edges_union:
+                appearances = sum(1 for s in coverage_sets if edge in s)
+                if appearances != num_runs:
+                    print(f"    Edge '{edge}' appeared in {appearances}/{num_runs} runs")
 
 
 def main():

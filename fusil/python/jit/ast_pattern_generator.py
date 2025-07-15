@@ -372,7 +372,7 @@ class ASTPatternGenerator:
             self._create_call_node: 0.2,
             self._create_attribute_assignment_node: 0.2,
             self._create_attribute_deletion_node: 0.1,
-            self._create_if_node: 0.15,
+            # self._create_if_node: 0.15,
             self._create_for_node: 0.15,
         }
 
