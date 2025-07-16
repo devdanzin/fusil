@@ -1057,6 +1057,110 @@ for i_hash in range(100):
         return node
 
 
+class NumericMutator(ast.NodeTransformer):
+    """
+    Attacks JIT optimizations for common numeric built-in functions
+    by injecting tricky arguments or self-contained stress scenarios.
+    """
+
+    # --- Strategy 1: Safe Argument Replacement ---
+
+    def _mutate_pow_args(self, node: ast.Call) -> ast.Call:
+        """Replaces arguments to pow() with pairs known to produce different types."""
+        print("    -> Mutating pow() arguments", file=sys.stderr)
+        tricky_pairs = [
+            (10, -2),  # Returns float
+            (-10, 0.5),  # Returns complex
+            (2, 128),  # Tests overflow on some platforms
+        ]
+        chosen_pair = random.choice(tricky_pairs)
+        node.args = [ast.Constant(value=chosen_pair[0]), ast.Constant(value=chosen_pair[1])]
+        node.keywords = []  # Clear keywords to be safe
+        return node
+
+    def _mutate_chr_args(self, node: ast.Call) -> ast.Call:
+        """Replaces the argument to chr() with values that test error handling."""
+        print("    -> Mutating chr() arguments", file=sys.stderr)
+        tricky_values = [-1, 1114112, 0xD800]  # ValueError, ValueError, TypeError
+        node.args = [ast.Constant(value=random.choice(tricky_values))]
+        node.keywords = []
+        return node
+
+    def _mutate_ord_args(self, node: ast.Call) -> ast.Call:
+        """Replaces the argument to ord() with values that test error handling."""
+        print("    -> Mutating ord() arguments", file=sys.stderr)
+        tricky_values = ["", "ab", b"c"]  # TypeError, TypeError, TypeError
+        node.args = [ast.Constant(value=random.choice(tricky_values))]
+        node.keywords = []
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        if not isinstance(node.func, ast.Name):
+            return node
+
+        mutator_map = {
+            'pow': self._mutate_pow_args,
+            'chr': self._mutate_chr_args,
+            'ord': self._mutate_ord_args,
+        }
+
+        mutator_func = mutator_map.get(node.func.id)
+        if mutator_func and random.random() < 0.1:
+            return mutator_func(node)
+
+        return node
+
+    # --- Strategy 2: Self-Contained Scenario Injection ---
+
+    def _create_abs_attack_scenario(self, prefix: str) -> list[ast.stmt]:
+        """Generates a scenario that attacks abs() with a stateful object."""
+        attack_code = dedent(f"""
+            # abs() attack injected by fuzzer
+            print('[{prefix}] Running abs() attack scenario...', file=sys.stderr)
+            class StatefulAbs_{prefix}:
+                def __init__(self):
+                    self.count = 0
+                def __abs__(self):
+                    self.count += 1
+                    if self.count > 50:
+                        # Change the return type mid-loop
+                        return 123.45
+                    return 123
+
+            evil_abs_obj = StatefulAbs_{prefix}()
+            for _ in range(100):
+                try:
+                    abs(evil_abs_obj)
+                except Exception:
+                    pass
+        """)
+        return ast.parse(attack_code).body
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        # Low probability for this injection
+        if random.random() < 0.05:
+            print(f"    -> Injecting numeric attack scenario into '{node.name}'", file=sys.stderr)
+
+            # For now, we only have one scenario, but this can be expanded.
+            attack_generators = [self._create_abs_attack_scenario]
+            chosen_generator = random.choice(attack_generators)
+
+            prefix = f"{node.name}_{random.randint(1000, 9999)}"
+            nodes_to_inject = chosen_generator(prefix)
+
+            # Prepend the scenario to the function's body
+            node.body = nodes_to_inject + node.body
+            ast.fix_missing_locations(node)
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -1091,6 +1195,7 @@ class ASTMutator:
             ManyVarsInjector,
             TypeIntrospectionMutator,
             MagicMethodMutator,
+            NumericMutator,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:

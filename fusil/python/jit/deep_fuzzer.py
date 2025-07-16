@@ -354,7 +354,7 @@ class DeepFuzzerOrchestrator:
                     execution_time_ms = int((end_time - start_time) * 1000)
                     self.analyze_run(
                         log_path, source_path, result.returncode,
-                        parent_baseline_coverage={}, parent_id=None,
+                        parent_lineage_profile={}, parent_id=None,
                         execution_time_ms=execution_time_ms,
                         mutation_info={"strategy": "seed"}, mutation_seed=0
                     )
