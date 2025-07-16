@@ -799,6 +799,152 @@ class ManyVarsInjector(ast.NodeTransformer):
         return node
 
 
+class TypeIntrospectionMutator(ast.NodeTransformer):
+    """
+    Attacks JIT optimizations for introspection builtins by injecting
+    self-contained stress-testing scenarios into functions.
+    """
+
+    def _create_isinstance_polymorphic_attack(self, original_call: ast.Call) -> list[ast.stmt]:
+        """
+        Generates a self-contained loop where a variable is rapidly
+        reassigned to objects of different types before an isinstance call.
+        """
+        print("    -> Injecting isinstance (polymorphic) attack...", file=sys.stderr)
+        type_to_check_node = original_call.args[1]
+        type_to_check_str = ast.unparse(type_to_check_node)
+
+        # This attack is now fully self-contained.
+        attack_code = dedent(f"""
+            # Polymorphic isinstance attack injected by fuzzer
+            _poly_list = [1, "a", 3.0, [], (), {{}}, True, b'bytes']
+            for i_poly_isinstance in range(300):
+                poly_variable = _poly_list[i_poly_isinstance % len(_poly_list)]
+                try:
+                    # The JIT must guard this call against the changing type
+                    isinstance(poly_variable, {type_to_check_str})
+                except Exception:
+                    pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_isinstance_invalidation_attack(self, original_call: ast.Call) -> list[ast.stmt]:
+        """
+        Generates a train-then-invalidate scenario where an object's
+        __class__ is changed after a hot loop.
+        """
+        print("    -> Injecting isinstance (invalidation) attack...", file=sys.stderr)
+        type_to_check_node = original_call.args[1]
+        type_to_check_str = ast.unparse(type_to_check_node)
+
+        p_prefix = f"inv_{random.randint(1000, 9999)}"
+        # The attack is self-contained and uses its own classes.
+        attack_code = dedent(f"""
+            # Invalidation attack for isinstance injected by fuzzer
+            try:
+                class OriginalClass_{p_prefix}: pass
+                class SwappedClass_{p_prefix}: pass
+
+                x_{p_prefix} = OriginalClass_{p_prefix}()
+
+                # 1. Train the JIT to assume isinstance is always True
+                for _ in range(500):
+                    isinstance(x_{p_prefix}, OriginalClass_{p_prefix})
+
+                # 2. Invalidate the assumption by swapping the class
+                x_{p_prefix}.__class__ = SwappedClass_{p_prefix}
+
+                # 3. Final check to see if JIT deoptimizes correctly
+                isinstance(x_{p_prefix}, OriginalClass_{p_prefix})
+            except Exception:
+                pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_hasattr_invalidation_attack(self, original_call: ast.Call) -> list[ast.stmt]:
+        """
+        Generates a loop that repeatedly adds and removes an attribute
+        from an object's type to stress hasattr caches.
+        """
+        print("    -> Injecting hasattr (invalidation) attack...", file=sys.stderr)
+        if not isinstance(original_call.args[0], ast.Name):
+            return []  # Can't easily determine the object to attack
+
+        target_obj_name = original_call.args[0].id
+
+        # Use a random attribute name for the attack
+        attr_name_str = f"fuzzer_attr_{random.randint(1000, 9999)}"
+
+        attack_code = dedent(f"""
+            # hasattr invalidation attack injected by fuzzer
+            for i_hasattr in range(300):
+                try:
+                    target_obj_for_hasattr = {target_obj_name}
+                    target_type = type(target_obj_for_hasattr)
+                    if i_hasattr % 2 == 0:
+                        setattr(target_type, "{attr_name_str}", "fuzzer_added_value")
+                    else:
+                        if hasattr(target_type, "{attr_name_str}"):
+                            delattr(target_type, "{attr_name_str}")
+
+                    hasattr(target_obj_for_hasattr, "{attr_name_str}")
+                except Exception:
+                    pass
+        """)
+        return ast.parse(attack_code).body
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        # First, visit children to allow them to be transformed.
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        # Low probability for this invasive set of mutations
+        if random.random() > 0.15:
+            return node
+
+        # Find all calls to our target builtins within this function
+        isinstance_calls = []
+        hasattr_calls = []
+        for sub_node in ast.walk(node):
+            if isinstance(sub_node, ast.Call) and isinstance(sub_node.func, ast.Name):
+                if sub_node.func.id == 'isinstance' and len(sub_node.args) == 2:
+                    isinstance_calls.append(sub_node)
+                elif sub_node.func.id == 'hasattr' and len(sub_node.args) == 2:
+                    hasattr_calls.append(sub_node)
+
+        nodes_to_inject = []
+        # Choose one target type to inject, if any were found
+        if isinstance_calls and hasattr_calls:
+            target_type = random.choice(['isinstance', 'hasattr'])
+        elif isinstance_calls:
+            target_type = 'isinstance'
+        elif hasattr_calls:
+            target_type = 'hasattr'
+        else:
+            return node  # No targets found
+
+        # Generate the attack scenario based on the chosen target type
+        if target_type == 'isinstance':
+            target_call = random.choice(isinstance_calls)
+            # Randomly choose between the two different isinstance attacks
+            if random.random() < 0.5:
+                nodes_to_inject = self._create_isinstance_polymorphic_attack(target_call)
+            else:
+                nodes_to_inject = self._create_isinstance_invalidation_attack(target_call)
+        elif target_type == 'hasattr':
+            target_call = random.choice(hasattr_calls)
+            nodes_to_inject = self._create_hasattr_invalidation_attack(target_call)
+
+        # Prepend the new scenario to the top of the function body
+        if nodes_to_inject:
+            node.body = nodes_to_inject + node.body
+            ast.fix_missing_locations(node)
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -831,6 +977,7 @@ class ASTMutator:
             GlobalInvalidator,
             LoadAttrPolluter,
             ManyVarsInjector,
+            TypeIntrospectionMutator,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
