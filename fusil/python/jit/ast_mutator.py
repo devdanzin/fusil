@@ -949,17 +949,11 @@ class TypeIntrospectionMutator(ast.NodeTransformer):
         return node
 
 
-class MagicMethodMutator(ast.NodeTransformer):
-    """
-    Attacks JIT assumptions about the Python Data Model by injecting
-    scenarios that stress magic methods like __len__, __hash__, __iter__, etc.
-    """
-
-    def _create_len_attack(self, prefix: str) -> list[ast.stmt]:
-        """Generates a self-contained scenario to attack len()."""
-        var_name = f"len_obj_{prefix}"
-        class_def_str = genStatefulLenObject(var_name)
-        attack_code = dedent(f"""
+def _create_len_attack(prefix: str) -> list[ast.stmt]:
+    """Generates a self-contained scenario to attack len()."""
+    var_name = f"len_obj_{prefix}"
+    class_def_str = genStatefulLenObject(var_name)
+    attack_code = dedent(f"""
 # len() attack injected by fuzzer
 {class_def_str}
 {var_name} = StatefulLen_{var_name}()
@@ -968,14 +962,15 @@ for i_len in range(100):
         len({var_name})
     except Exception:
         pass
-        """)
-        return ast.parse(attack_code).body
+    """)
+    return ast.parse(attack_code).body
 
-    def _create_hash_attack(self, prefix: str) -> list[ast.stmt]:
-        """Generates a self-contained scenario to attack hash()."""
-        var_name = f"hash_obj_{prefix}"
-        class_def_str = genUnstableHashObject(var_name)
-        attack_code = dedent(f"""
+
+def _create_hash_attack(prefix: str) -> list[ast.stmt]:
+    """Generates a self-contained scenario to attack hash()."""
+    var_name = f"hash_obj_{prefix}"
+    class_def_str = genUnstableHashObject(var_name)
+    attack_code = dedent(f"""
 # hash() attack injected by fuzzer
 {class_def_str}
 {var_name} = UnstableHash_{var_name}()
@@ -987,25 +982,33 @@ for i_hash in range(100):
     except Exception:
         # Expected if hash changes for existing key
         pass
-        """)
-        return ast.parse(attack_code).body
+    """)
+    return ast.parse(attack_code).body
 
-    def _create_pow_attack(self, prefix: str) -> list[ast.stmt]:
-        """Generates calls to pow() with tricky arguments."""
-        attack_code = dedent(f"""
-            # pow() attack injected by fuzzer
-            try:
-                # This pair produces a float from integers
-                pow(10, -2)
-            except Exception:
-                pass
-            try:
-                # This pair produces a complex number from an integer and float
-                pow(-10, 0.5)
-            except Exception:
-                pass
-        """)
-        return ast.parse(attack_code).body
+
+def _create_pow_attack(prefix: str) -> list[ast.stmt]:
+    """Generates calls to pow() with tricky arguments."""
+    attack_code = dedent(f"""
+        # pow() attack injected by fuzzer
+        try:
+            # This pair produces a float from integers
+            pow(10, -2)
+        except Exception:
+            pass
+        try:
+            # This pair produces a complex number from an integer and float
+            pow(-10, 0.5)
+        except Exception:
+            pass
+    """)
+    return ast.parse(attack_code).body
+
+
+class MagicMethodMutator(ast.NodeTransformer):
+    """
+    Attacks JIT assumptions about the Python Data Model by injecting
+    scenarios that stress magic methods like __len__, __hash__, __iter__, etc.
+    """
 
     def _mutate_for_loop_iter(self, node: ast.FunctionDef) -> bool:
         """Finds a for loop and replaces its iterable with a stateful one."""
@@ -1035,9 +1038,9 @@ for i_hash in range(100):
         if random.random() < 0.15:  # Low probability for these attacks
 
             attack_functions = [
-                self._create_len_attack,
-                self._create_hash_attack,
-                self._create_pow_attack,
+                _create_len_attack,
+                _create_hash_attack,
+                _create_pow_attack,
                 self._mutate_for_loop_iter,  # This one is different
             ]
             chosen_attack = random.choice(attack_functions)
@@ -1164,6 +1167,158 @@ class NumericMutator(ast.NodeTransformer):
         return node
 
 
+class IterableMutator(ast.NodeTransformer):
+    """
+    Attacks JIT assumptions about iterables by injecting scenarios that
+    use misbehaving iterators with built-ins like tuple(), all(), and min(),
+    or by replacing the iterable in an existing for loop.
+    """
+
+    def _create_tuple_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates a scenario attacking tuple() with an unstable-type iterator."""
+        print("    -> Injecting tuple() attack scenario...", file=sys.stderr)
+        # For this attack, we can reuse the StatefulIterObject
+        class_def_str = genStatefulIterObject(prefix)
+        attack_code = dedent(f"""
+# tuple() attack injected by fuzzer
+print('[{prefix}] Running tuple() attack scenario...', file=sys.stderr)
+{class_def_str}
+evil_iterable = StatefulIter_{prefix}()
+try:
+    # The JIT may make assumptions about the types from the iterator
+    # which are then violated on later iterations.
+    for _ in range(100):
+        tuple(evil_iterable)
+except Exception:
+    pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_all_any_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates a scenario attacking all()/any() short-circuiting."""
+        print("    -> Injecting all()/any() attack scenario...", file=sys.stderr)
+        attack_code = dedent(f"""
+            # all()/any() short-circuit attack injected by fuzzer
+            print('[{prefix}] Running all()/any() attack scenario...', file=sys.stderr)
+            side_effect_counter_{prefix} = 0
+            class SideEffectIterator_{prefix}:
+                def __init__(self, iterable):
+                    self._iterator = iter(iterable)
+                def __iter__(self):
+                    return self
+                def __next__(self):
+                    nonlocal side_effect_counter_{prefix}
+                    side_effect_counter_{prefix} += 1
+                    return next(self._iterator)
+
+            # This iterable should cause all() to short-circuit after 3 items
+            iterable_to_test = [True, True, False, True, True]
+            try:
+                all(SideEffectIterator_{prefix}(iterable_to_test))
+                # The JIT might incorrectly run the whole loop. A correct run
+                # will result in the counter being 3.
+                if side_effect_counter_{prefix} != 3:
+                    # This is not a JIT bug per se, but indicates non-standard behavior.
+                    print(f"[{prefix}] Side effect counter has unexpected value: {{side_effect_counter_{prefix}}}", file=sys.stderr)
+            except Exception:
+                pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_min_max_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates a scenario attacking min()/max() with incompatible types."""
+        print("    -> Injecting min()/max() attack scenario...", file=sys.stderr)
+        attack_code = dedent(f"""
+            # min()/max() type-confusion attack injected by fuzzer
+            print('[{prefix}] Running min()/max() attack scenario...', file=sys.stderr)
+            class IncompatibleTypeIterator_{prefix}:
+                def __init__(self):
+                    self.count = 0
+                def __iter__(self):
+                    self.count = 0
+                    return self
+                def __next__(self):
+                    self.count += 1
+                    if self.count < 5:
+                        return self.count * 10
+                    elif self.count == 5:
+                        # After yielding numbers, suddenly yield an incompatible type
+                        return "a_string"
+                    else:
+                        raise StopIteration
+
+            iterator_instance = IncompatibleTypeIterator_{prefix}()
+            try:
+                # The JIT may specialize for integers and then fail on the string.
+                max(iterator_instance)
+            except TypeError:
+                # A TypeError is the expected outcome.
+                pass
+            except Exception:
+                pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _mutate_for_loop_iter(self, func_node: ast.FunctionDef) -> bool:
+        """Finds a for loop and replaces its iterable with a stateful one."""
+        # Find the first for loop in the function body
+        for_node = None
+        for stmt in func_node.body:
+            if isinstance(stmt, ast.For):
+                for_node = stmt
+                break
+
+        if for_node:
+            print(f"    -> Mutating for loop iterator in '{func_node.name}'", file=sys.stderr)
+            prefix = f"iter_{random.randint(1000, 9999)}"
+            class_def_str = genStatefulIterObject(prefix)
+            class_def_node = ast.parse(class_def_str).body[0]
+            # Prepend the class definition to the function
+            func_node.body.insert(0, class_def_node)
+            # Replace the loop's iterable
+            for_node.iter = ast.Call(
+                func=ast.Name(id=class_def_node.name, ctx=ast.Load()),
+                args=[], keywords=[]
+            )
+            return True  # Indicate that a mutation was performed
+        return False
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        if random.random() < 0.15:  # Low probability for these attacks
+
+            attack_functions = [
+                _create_len_attack,
+                _create_hash_attack,
+                _create_pow_attack,
+                self._create_tuple_attack,
+                self._create_all_any_attack,
+                self._create_min_max_attack,
+                self._mutate_for_loop_iter,
+            ]
+            chosen_attack = random.choice(attack_functions)
+
+            nodes_to_inject = []
+            if chosen_attack == self._mutate_for_loop_iter:
+                # This attack modifies the function in-place
+                if self._mutate_for_loop_iter(node):
+                    ast.fix_missing_locations(node)
+            else:
+                # These attacks inject a new, self-contained scenario
+                prefix = f"{node.name}_{random.randint(1000, 9999)}"
+                nodes_to_inject = chosen_attack(prefix)
+
+            if nodes_to_inject:
+                node.body = nodes_to_inject + node.body
+                ast.fix_missing_locations(node)
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -1199,6 +1354,7 @@ class ASTMutator:
             TypeIntrospectionMutator,
             MagicMethodMutator,
             NumericMutator,
+            IterableMutator,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
