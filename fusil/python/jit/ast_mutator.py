@@ -14,6 +14,7 @@ container types, among others.
 This engine is primarily used by the variational fuzzer when the
 `--jit-fuzz-ast-mutation` flag is enabled.
 """
+from __future__ import annotations
 
 import ast
 import builtins
@@ -945,6 +946,117 @@ class TypeIntrospectionMutator(ast.NodeTransformer):
         return node
 
 
+class MagicMethodMutator(ast.NodeTransformer):
+    """
+    Attacks JIT assumptions about the Python Data Model by injecting
+    scenarios that stress magic methods like __len__, __hash__, __iter__, etc.
+    """
+
+    def _create_len_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates a self-contained scenario to attack len()."""
+        var_name = f"len_obj_{prefix}"
+        class_def_str = genStatefulLenObject(var_name)
+        attack_code = dedent(f"""
+# len() attack injected by fuzzer
+{class_def_str}
+{var_name} = StatefulLen_{var_name}()
+for i_len in range(100):
+    try:
+        len({var_name})
+    except Exception:
+        pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_hash_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates a self-contained scenario to attack hash()."""
+        var_name = f"hash_obj_{prefix}"
+        class_def_str = genUnstableHashObject(var_name)
+        attack_code = dedent(f"""
+# hash() attack injected by fuzzer
+{class_def_str}
+{var_name} = UnstableHash_{var_name}()
+d = {{}}
+for i_hash in range(100):
+    try:
+        # Using the object as a dict key repeatedly triggers __hash__
+        d[{var_name}] = i_hash
+    except Exception:
+        # Expected if hash changes for existing key
+        pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _create_pow_attack(self, prefix: str) -> list[ast.stmt]:
+        """Generates calls to pow() with tricky arguments."""
+        attack_code = dedent(f"""
+            # pow() attack injected by fuzzer
+            try:
+                # This pair produces a float from integers
+                pow(10, -2)
+            except Exception:
+                pass
+            try:
+                # This pair produces a complex number from an integer and float
+                pow(-10, 0.5)
+            except Exception:
+                pass
+        """)
+        return ast.parse(attack_code).body
+
+    def _mutate_for_loop_iter(self, node: ast.FunctionDef) -> bool:
+        """Finds a for loop and replaces its iterable with a stateful one."""
+        for i, stmt in enumerate(node.body):
+            if isinstance(stmt, ast.For):
+                print(f"    -> Mutating for loop iterator in '{node.name}'", file=sys.stderr)
+                p_prefix = f"iter_{random.randint(1000, 9999)}"
+                # 1. Get the evil class definition
+                class_def_str = genStatefulIterObject(p_prefix)
+                class_def_node = ast.parse(class_def_str).body[0]
+                # 2. Prepend the class definition to the function
+                node.body.insert(0, class_def_node)
+                # 3. Replace the loop's iterable
+                stmt.iter = ast.Call(
+                    func=ast.Name(id=class_def_node.name, ctx=ast.Load()),
+                    args=[], keywords=[]
+                )
+                return True  # Indicate that a mutation was performed
+        return False
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        self.generic_visit(node)
+
+        if not node.name.startswith("uop_harness"):
+            return node
+
+        if random.random() < 0.15:  # Low probability for these attacks
+
+            attack_functions = [
+                self._create_len_attack,
+                self._create_hash_attack,
+                self._create_pow_attack,
+                self._mutate_for_loop_iter,  # This one is different
+            ]
+            chosen_attack = random.choice(attack_functions)
+
+            nodes_to_inject = []
+            if chosen_attack == self._mutate_for_loop_iter:
+                # This attack modifies the function in-place, so we call it differently
+                if self._mutate_for_loop_iter(node):
+                    ast.fix_missing_locations(node)
+            else:
+                print(f"    -> Injecting data model attack '{chosen_attack.__name__}' into '{node.name}'",
+                      file=sys.stderr)
+                prefix = f"{node.name}_{random.randint(1000, 9999)}"
+                nodes_to_inject = chosen_attack(prefix)
+
+            if nodes_to_inject:
+                node.body = nodes_to_inject + node.body
+                ast.fix_missing_locations(node)
+
+        return node
+
+
 class ASTMutator:
     """
     An engine for structurally modifying Python code at the AST level.
@@ -978,6 +1090,7 @@ class ASTMutator:
             LoadAttrPolluter,
             ManyVarsInjector,
             TypeIntrospectionMutator,
+            MagicMethodMutator,
         ]
 
     def mutate_ast(self, tree: ast.AST, seed: int = None, mutations: int | None = None) -> tuple[ast.AST, list[type]]:
@@ -1040,3 +1153,234 @@ class ASTMutator:
             return ast.unparse(mutated_tree)
         except AttributeError:
             return f"# AST unparsing failed. Original code was:\n# {code_string}"
+
+
+def genLyingEqualityObject(var_name: str) -> str:
+    """
+    Generates a class that lies about equality.
+    __eq__ and __ne__ both always return True.
+    """
+    class_name = f"LyingEquality_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            eq_count = 0
+            ne_count = 0
+            def __eq__(self, other):
+                self.eq_count += 1
+                if self.eq_count < 70:
+                    if not self.eq_count % 20:
+                        print("[EVIL] LyingEquality __eq__ called, returning True", file=sys.stderr)
+                    return True
+            def __ne__(self, other):
+                self.ne_count += 1
+                if self.ne_count < 70:
+                    if not self.ne_count % 20:
+                        print("[EVIL] LyingEquality __ne__ called, returning True", file=sys.stderr)
+                    return True
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulLenObject(var_name: str) -> str:
+    """
+    Generates a class whose __len__ changes on each call.
+    """
+    class_name = f"StatefulLen_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self.len_count = 0
+            def __len__(self):
+                _len = 0 if self.len_count < 70 else 99
+                if not self.len_count % 20:
+                    print(f"[EVIL] StatefulLen __len__ called, returning {{_len}}", file=sys.stderr)
+                self.len_count += 1
+                return _len
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genUnstableHashObject(var_name: str) -> str:
+    """
+    Generates a class whose __hash__ is different on each call.
+    """
+    class_name = f"UnstableHash_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            hash_count = 0
+            def __hash__(self):
+                # Violates the rule that hash must be constant for the object's lifetime.
+                self.hash_count += 1
+                new_hash = 5 if self.hash_count < 70 else randint(0, 2**64 - 1)
+                if not self.hash_count % 20:
+                    print(f"[EVIL] UnstableHash __hash__ called, returning {{new_hash}}", file=sys.stderr)
+                return new_hash
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulStrReprObject(var_name: str) -> str:
+    """
+    Generates a class with stateful __str__ and __repr__ methods.
+    __repr__ will eventually return a non-string type to cause a TypeError.
+    """
+    class_name = f"StatefulStrRepr_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._str_count = 0
+                self._repr_count = 0
+                self._str_options = ['a', 'b', 'c']
+            def __str__(self):
+                val = "a" if self._str_count < 67 else b'a'
+                if not self._str_count % 20:
+                    print(f"[EVIL] StatefulStrRepr __str__ called, returning '{{val}}'", file=sys.stderr)
+                self._str_count += 1
+                return val
+            def __repr__(self):
+                self._repr_count += 1
+                if self._repr_count > 70:
+                    if not self._repr_count % 20:
+                        print("[EVIL] StatefulStrRepr __repr__ called, returning NON-STRING type 123", file=sys.stderr)
+                    return 123  # Violates contract, should raise TypeError
+                val = f"<StatefulRepr run #{{self._repr_count}}>"
+                if not self._repr_count % 20:
+                    print(f"[EVIL] StatefulStrRepr __repr__ called, returning '{{val}}'", file=sys.stderr)
+                return val
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulGetitemObject(var_name: str) -> str:
+    """
+    Generates a class whose __getitem__ returns different types based on call count.
+    """
+    class_name = f"StatefulGetitem_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._getitem_count = 0
+            def __getitem__(self, key):
+                self._getitem_count += 1
+                if self._getitem_count > 67:
+                    if not self._getitem_count % 20:
+                        print(f"[EVIL] StatefulGetitem __getitem__ returning float", file=sys.stderr)
+                    return 99.9
+                if not self._getitem_count % 20:
+                    print(f"[EVIL] StatefulGetitem __getitem__ returning int", file=sys.stderr)
+                return 5
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulGetattrObject(var_name: str) -> str:
+    """
+    Generates a class whose __getattr__ returns different values based on call count.
+    """
+    class_name = f"StatefulGetattr_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._getattr_count = 0
+            def __getattr__(self, name):
+                self._getattr_count += 1
+                if self._getattr_count > 67:
+                    if not self._getattr_count % 20:
+                        print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'evil_attribute'", file=sys.stderr)
+                    return b'evil_attribute'
+                if not self._getattr_count % 20:
+                    print(f"[EVIL] StatefulGetattr __getattr__ for '{{name}}' returning 'normal_attribute'", file=sys.stderr)
+                return 'normal_attribute'
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulBoolObject(var_name: str) -> str:
+    """
+    Generates a class whose __bool__ result flips after a few calls.
+    """
+    class_name = f"StatefulBool_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._bool_count = 0
+            def __bool__(self):
+                self._bool_count += 1
+                if self._bool_count > 70:
+                    if not self._bool_count % 20:
+                        print("[EVIL] StatefulBool __bool__ flipping to False", file=sys.stderr)
+                    return False
+                if not self._bool_count % 20:
+                    print("[EVIL] StatefulBool __bool__ returning True", file=sys.stderr)
+                return True
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulIterObject(var_name: str) -> str:
+    """
+    Generates a class whose __iter__ returns different iterators.
+    """
+    class_name = f"StatefulIter_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._iter_count = 0
+                self._iterable = [1, 2, 3]
+            def __iter__(self):
+                if not self._iter_count % 20:
+                    print(f"[EVIL] StatefulIter __iter__ yielding from {{self._iterable!r}}", file=sys.stderr)
+                self._iter_count += 1
+                if self._iter_count > 67:
+                    return iter((None,))
+                return iter(self._iterable)
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genStatefulIndexObject(var_name: str) -> str:
+    """
+    Generates a class whose __index__ returns different integer values.
+    """
+    class_name = f"StatefulIndex_{var_name}"
+    setup_code = dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self._index_count = 0
+            def __index__(self):
+                self._index_count += 1
+                if self._index_count > 70:
+                    if not self._index_count % 20:
+                        print("[EVIL] StatefulIndex __index__ returning 99", file=sys.stderr)
+                    return 99 # A different, potentially out-of-bounds index
+                if not self._index_count % 20:
+                    print("[EVIL] StatefulIndex __index__ returning 0", file=sys.stderr)
+                return 0
+        {var_name} = {class_name}()
+    """)
+    return setup_code
+
+
+def genSimpleObject(var_name: str) -> str:
+    class_name = f"C_{var_name}"  # We can use var_name because it will be unique
+    setup_code = (dedent(f"""
+        class {class_name}:
+            def __init__(self):
+                self.x = 1
+                self.y = 'y'
+                self.value = "value"
+            def get_value(self):
+                return self.value
+            def __getitem__(self, item):
+                return 5
+        {var_name} = {class_name}()
+    """))
+    return setup_code
