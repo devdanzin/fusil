@@ -321,6 +321,9 @@ class TypeInstabilityInjector(ast.NodeTransformer):
         # First, visit children to process any nested loops.
         self.generic_visit(node)
 
+        if random.random() > 0.1:
+            return node
+
         # We need a loop variable to key the corruption off of.
         if not isinstance(node.target, ast.Name):
             return node
