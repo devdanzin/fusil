@@ -33,18 +33,32 @@ from fusil.unicode_generator import (
     UnixPathGenerator,
     UnsignedGenerator,
 )
-from fusil.python.jit.ast_mutator import (
-    genLyingEqualityObject,
-    genSimpleObject,
-    genStatefulBoolObject,
-    genStatefulGetattrObject,
-    genStatefulGetitemObject,
-    genStatefulIndexObject,
-    genStatefulIterObject,
-    genStatefulLenObject,
-    genStatefulStrReprObject,
-    genUnstableHashObject,
-)
+try:
+    from lafleur.mutator import (
+        genLyingEqualityObject,
+        genSimpleObject,
+        genStatefulBoolObject,
+        genStatefulGetattrObject,
+        genStatefulGetitemObject,
+        genStatefulIndexObject,
+        genStatefulIterObject,
+        genStatefulLenObject,
+        genStatefulStrReprObject,
+        genUnstableHashObject,
+    )
+    HAS_MUTATOR = True
+except ImportError:
+    genLyingEqualityObject = None
+    genSimpleObject = None
+    genStatefulBoolObject = None
+    genStatefulGetattrObject = None
+    genStatefulGetitemObject = None
+    genStatefulIndexObject = None
+    genStatefulIterObject = None
+    genStatefulLenObject = None
+    genStatefulStrReprObject = None
+    genUnstableHashObject = None
+    HAS_MUTATOR = False
 
 ERRBACK_NAME_CONST = "errback"
 
@@ -467,31 +481,36 @@ class ArgumentGenerator:
             'small_int': self.genSmallUint,
         }
 
-        custom_dispatch_table = {
-            'object': genSimpleObject,
-            'object_with_method': genSimpleObject,
-            'object_with_attr': genSimpleObject,
-            'object_with_getitem': genSimpleObject,
-            'lying_eq_object': genLyingEqualityObject,
-            'stateful_len_object': genStatefulLenObject,
-            'unstable_hash_object': genUnstableHashObject,
-            'stateful_str_object': genStatefulStrReprObject,
-            'stateful_getitem_object': genStatefulGetitemObject,
-            'stateful_getattr_object': genStatefulGetattrObject,
-            'stateful_bool_object': genStatefulBoolObject,
-            'stateful_iter_object': genStatefulIterObject,
-            'stateful_index_object': genStatefulIndexObject,
-        }
+        custom_dispatch_table = {}
+        if HAS_MUTATOR:
+            custom_dispatch_table = {
+                'object': genSimpleObject,
+                'object_with_method': genSimpleObject,
+                'object_with_attr': genSimpleObject,
+                'object_with_getitem': genSimpleObject,
+                'lying_eq_object': genLyingEqualityObject,
+                'stateful_len_object': genStatefulLenObject,
+                'unstable_hash_object': genUnstableHashObject,
+                'stateful_str_object': genStatefulStrReprObject,
+                'stateful_getitem_object': genStatefulGetitemObject,
+                'stateful_getattr_object': genStatefulGetattrObject,
+                'stateful_bool_object': genStatefulBoolObject,
+                'stateful_iter_object': genStatefulIterObject,
+                'stateful_index_object': genStatefulIndexObject,
+            }
 
         if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
             # For 'any', we can now also choose one of our new evil objects.
             choices = [
-                'int', 'float', 'str', 'list', 'object', 'object_with_method',
-                'object_with_attr', 'object_with_getitem',
-                'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
-                'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
-                'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+                'int', 'float', 'str', 'list'
             ]
+            if HAS_MUTATOR:
+                choices += [
+                    'object', 'object_with_method', 'object_with_attr', 'object_with_getitem',
+                    'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
+                    'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
+                    'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+                ]
             chosen_type = choice(choices)
             return self.generate_arg_by_type(chosen_type, var_name)
         elif p_type in simple_dispatch_table:

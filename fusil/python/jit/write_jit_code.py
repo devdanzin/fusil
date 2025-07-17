@@ -34,10 +34,14 @@ from sys import stderr
 from typing import TYPE_CHECKING
 
 import fusil.python.values
-from fusil.python.jit.ast_mutator import ASTMutator
 from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator, UOP_RECIPES
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 from fusil.write_code import CodeTemplate as CT
+
+try:
+    from lafleur.mutator import ASTMutator
+except ImportError:
+    ASTMutator = None
 
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
@@ -76,7 +80,12 @@ class WriteJITCode:
         self.arg_generator = parent.arg_generator
         self.module_name = parent.module_name
 
-        self.ast_mutator = ASTMutator()
+        if ASTMutator is not None:
+            self.ast_mutator = ASTMutator()
+        else:
+            self.ast_mutator = None
+            print("[!!!] ASTMutator not available, mutations will not happen. Install lafleur for mutations.")
+
         self.ast_pattern_generator = ASTPatternGenerator(parent)
 
         # Bind the writing methods directly for convenience
@@ -1838,7 +1847,10 @@ collect()
             body_code = pattern['body_code'].format(**mutations)
 
             if self.options.jit_fuzz_ast_mutation:
-                body_code = self.ast_mutator.mutate(body_code)
+                if self.ast_mutator is not None:
+                    body_code = self.ast_mutator.mutate(body_code)
+                else:
+                    print("[!!!] ASTMutator not available, skipping mutation. Install lafleur for mutations.")
 
             env_code = self._write_mutated_code_in_environment(prefix, setup_code, body_code, mutations)
             final_code_blocks.append(env_code)
@@ -2299,7 +2311,11 @@ collect()
         # Get the core logic from the pattern's body and mutate it.
         initial_body_code = dedent(pattern['body_code']).format(**mutations)
         mutation_seed = randint(0, 2**32 - 1)
-        mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
+        if self.ast_mutator is not None:
+            mutated_code = self.ast_mutator.mutate(initial_body_code, seed=mutation_seed)
+        else:
+            print("[!!!] ASTMutator not available, skipping mutation. Install lafleur for mutations.")
+            mutated_code = initial_body_code
         if not mutated_code.strip():
             mutated_code = "pass"
 
@@ -2680,7 +2696,11 @@ if {instance_var}:
 
         # 4. Mutate the core logic using our existing ASTMutator.
         num_mutations = randint(3, 5)
-        core_pattern_code = self.ast_mutator.mutate(ast.unparse(core_ast_to_mutate), mutations=num_mutations)
+        if self.ast_mutator is not None:
+            core_pattern_code = self.ast_mutator.mutate(ast.unparse(core_ast_to_mutate), mutations=num_mutations)
+        else:
+            print("[!!!] ASTMutator not available, skipping mutation. Install lafleur for mutations.")
+            core_pattern_code = ast.unparse(core_ast_to_mutate)
         # core_pattern_code = ast.unparse(mutated_core_ast)
 
         # 5. Assemble the final mutated test case.
@@ -2737,6 +2757,10 @@ if {instance_var}:
             tree_copy = copy.deepcopy(base_ast)
 
             # Use the loop counter `i` as the seed for deterministic mutation.
-            mutated_ast = self.ast_mutator.mutate_ast(tree_copy, seed=i)
+            if self.ast_mutator is not None:
+                mutated_ast = self.ast_mutator.mutate_ast(tree_copy, seed=i)
+            else:
+                print("[!!!] ASTMutator not available, skipping mutation. Install lafleur for mutations.")
+                mutated_ast = tree_copy
 
             yield mutated_ast
