@@ -735,7 +735,7 @@ class ASTPatternGenerator:
                 # And pick one to pass to the evil generator
                 target_var_type = random.choice(target_var_type_hints)
 
-                if target_var_type != 'new_variable':
+                if 0 and target_var_type != 'new_variable':  # Disable
                     evil_print = self.parent.write_print_to_stderr(
                         0, f'"[{self._get_prefix()}] Injecting INTER-PATTERN EVIL!"', return_str=True
                     )
