@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 import re
-import os
 import argparse
 from pathlib import Path
-
-# --- Configuration ---
-# You will need to find the correct file paths within the CPython source tree.
 
 # Dictionary mapping file paths (relative to CPYTHON_SRC_PATH) to the changes.
 JIT_TWEAKS = {
@@ -93,7 +89,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Update the global path based on user input
     CPYTHON_SRC_PATH = Path(args.cpython_dir)
     apply_jit_tweaks(CPYTHON_SRC_PATH, args.dry_run)
     print("[*] Done.")
