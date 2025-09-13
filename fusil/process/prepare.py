@@ -40,6 +40,8 @@ def prepareProcess(process):
     try:
         chdir(directory)
     except OSError as err:
+        print(f"CHDIR ERROR: {err}", file=stderr)
+        print(f"Make sure the whole path is accessible to user 'fusil' (chmod +xr path_part).", file=stderr)
         if err.errno != EACCES:
             raise
         user = getuid()
@@ -48,6 +50,7 @@ def prepareProcess(process):
         help = permissionHelp(options)
         if help:
             message += " (%s)" % help
+        print(message, file=stderr)
         raise ChildError(message)
 
     # Make sure that the program is executable by the current user
@@ -59,6 +62,7 @@ def prepareProcess(process):
         help = permissionHelp(options)
         if help:
             message += " (%s)" % help
+        print(message, file=stderr)
         raise ChildError(message)
 
     # Limit process resources
