@@ -21,15 +21,16 @@ class Directory:
         except KeyError:
             pass
 
-    def mkdir(self):
+    def mkdir(self, change_owner=True):
         old_umask = umask(0)
         mkdir(self.directory, 0o777)
-        try:
-            uid = pwd.getpwnam("fusil").pw_uid
-            gid = grp.getgrnam("fusil").gr_gid
-            chown(self.directory, uid, gid)
-        except Exception as e:
-            print(e)
+        if change_owner:
+            try:
+                uid = pwd.getpwnam("fusil").pw_uid
+                gid = grp.getgrnam("fusil").gr_gid
+                chown(self.directory, uid, gid)
+            except Exception as e:
+                print(e)
         umask(old_umask)
 
     def isEmpty(self, ignore_generated=False):

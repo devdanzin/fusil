@@ -120,6 +120,12 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        running_options.add_option(
+            "--only-generate",
+            help="Do not run scripts, only generate them (default: False)",
+            action="store_true",
+            default=False,
+        )
         fuzzing_options = OptionGroupWithSections(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
@@ -424,4 +430,9 @@ class PythonProcess(CreateProcess):
     def on_python_source(self, filename: str) -> None:
         """Execute the generated Python source file."""
         self.cmdline.arguments[-1] = filename
+        if self.options.only_generate:
+            self.error("Only generating Python source, skipping running it.")
+            self.application().exit()
+            self.destroy()
+            sys.exit(0)
         self.createProcess()

@@ -15,7 +15,7 @@ class ProjectDirectory(ProjectAgent, Directory):
         # Initialize the agent and create the directory
         ProjectAgent.__init__(self, project, "directory:%s" % basename(self.directory))
         self.warning("Create the directory: %s" % self.directory)
-        self.mkdir()
+        self.mkdir(not self.application().options.only_generate)
 
     def keepDirectory(self, verbose=True):
         if not self.directory:
