@@ -2,10 +2,16 @@ import sys
 from _collections import OrderedDict, deque
 from abc import ABCMeta
 from collections import Counter
-from decimal import Decimal
 from queue import Queue
 from random import randint
 from string import printable
+
+try:
+    from _decimal import Decimal
+    has__decimal = True
+except ImportError:
+    from decimal import Decimal
+    has__decimal = False
 
 sequences = [Queue, deque, frozenset, list, set, str, tuple]
 bytes_ = [bytearray, bytes]
@@ -54,6 +60,10 @@ for cls in bases:
 
 tricky_strs = (chr(0), chr(127), chr(255), chr(0x10FFFF), "𝒜","\\x00" * 10, "A" * (2 ** 16), "💻" * 2**10,)
 
+# We cannot create a Decimal larger than 10 ** 4300 with _pydecimal, only with _decimal
+max_str_digits_adjustment = 1 if has__decimal else -1
+big_int_for_decimal = 10 ** (sys.int_info.default_max_str_digits + max_str_digits_adjustment)
+
 for cls in sequences:
     weird_instances[f"weird_{cls.__name__}_single"] = weird_classes[f"weird_{cls.__name__}"]("a")
     weird_instances[f"weird_{cls.__name__}_range"] = weird_classes[f"weird_{cls.__name__}"](range(20))
@@ -80,7 +90,7 @@ for cls in numbers:
     weird_instances[f"weird_{cls.__name__}_-2**31"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 31)
     weird_instances[f"weird_{cls.__name__}_-2**31-1"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 31 - 1)
     if cls not in (float, complex) and hasattr(sys, 'int_info'):
-        weird_instances[f"weird_{cls.__name__}_10**default_max_str_digits+1"] = weird_classes[f"weird_{cls.__name__}"](10 ** (sys.int_info.default_max_str_digits + 1))
+        weird_instances[f"weird_{cls.__name__}_10**default_max_str_digits+1"] = weird_classes[f"weird_{cls.__name__}"](big_int_for_decimal)
 for cls in dicts:
     weird_instances[f"weird_{cls.__name__}_basic"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in range(100)})
     weird_instances[f"weird_{cls.__name__}_tricky_strs"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in tricky_strs})

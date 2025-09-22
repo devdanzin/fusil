@@ -32,7 +32,10 @@ class SessionDirectory(SessionAgent, Directory):
 
     def init(self):
         self.info("Create the directory: %s" % self.directory)
-        self.mkdir()
+        self.mkdir(not self.application().options.only_generate)
+
+        if self.application().options.only_generate:
+            return
 
         # Allow fuzzer to write in the session directory
         uid = self.application().config.process_uid
@@ -44,7 +47,6 @@ class SessionDirectory(SessionAgent, Directory):
         try:
             chown(self.directory, uid, gid)
         except OSError as err:
-            raise
             if err.errno != EPERM:
                 raise
             help = permissionHelp(self.application().options)
