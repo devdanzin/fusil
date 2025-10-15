@@ -58,7 +58,8 @@ def prepareProcess(process):
 
     # Make sure that the program is executable by the current user
     program = process.current_arguments[0]
-    if not access(program, X_OK):
+    # if not access(program, X_OK):
+    if 0:
         user = getuid()
         user = getpwuid(user).pw_name
         message = "The user %s is not allowed to execute the file %s" % (user, program)
