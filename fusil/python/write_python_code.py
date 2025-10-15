@@ -793,7 +793,7 @@ class WritePythonCode(WriteCode):
         )
         self.write(
             0,
-            f"if callable({current_prefix}_attr_val): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
+            f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val == 'wait': {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
         )
         self.restoreLevel(self.base_level - 1)  # Exit inner try
         self.write(0, f"except Exception: pass")
@@ -824,7 +824,7 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# Conceptual call to generic method fuzzer")
         self.write(
             0,
-            f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
+            f"if {current_prefix}_method_name_to_call.__name__ != 'wait': callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
         )  # Example simplified call
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit if methods
