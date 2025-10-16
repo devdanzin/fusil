@@ -67,7 +67,7 @@ class PythonSource(ProjectAgent):
                 path = pack.__path__[0]
                 print(f"Adding package: {package} ({path})")
                 package_walker = all_modules.discover_modules([path], package + ".")
-                self.modules |= set(mod.name for mod in package_walker)
+                self.modules |= set(name for finder, name, ispgk in package_walker)
 
             if self.options.verbose:
                 print(f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}")

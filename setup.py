@@ -43,6 +43,8 @@ MODULES = (
     "fusil.network",
     "fusil.process",
     "fusil.python",
+    "fusil.python.jit",
+    "fusil.python.samples",
 )
 
 SCRIPTS = glob("fuzzers/fusil-*")

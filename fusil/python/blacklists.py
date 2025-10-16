@@ -232,6 +232,7 @@ OBJECT_BLACKLIST = {
     "Lock",
     "RLock",
     "Semaphore",
+    "AtomicInt64"
 }
 METHOD_BLACKLIST = {
     "__class__",

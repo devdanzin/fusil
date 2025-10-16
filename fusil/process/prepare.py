@@ -35,7 +35,10 @@ def prepareProcess(process):
     except Exception as e:
         print(e)
     # Change the user and group
-    changeUserGroup(config, options)
+    try:
+        changeUserGroup(config, options)
+    except Exception as e:
+        print(e)
 
     try:
         chdir(directory)
@@ -55,7 +58,8 @@ def prepareProcess(process):
 
     # Make sure that the program is executable by the current user
     program = process.current_arguments[0]
-    if not access(program, X_OK):
+    # if not access(program, X_OK):
+    if 0:
         user = getuid()
         user = getpwuid(user).pw_name
         message = "The user %s is not allowed to execute the file %s" % (user, program)
@@ -66,7 +70,8 @@ def prepareProcess(process):
         raise ChildError(message)
 
     # Limit process resources
-    limitResources(process, config, options)
+    if 0:
+        limitResources(process, config, options)
 
 
 def limitResources(process, config, options):

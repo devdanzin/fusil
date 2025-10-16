@@ -550,6 +550,8 @@ class WritePythonCode(WriteCode):
                 if not self.module_classes:
                     break
                 class_name = choice(self.module_classes)
+                if class_name in OBJECT_BLACKLIST:
+                    continue
                 try:
                     class_obj = getattr(self.module, class_name)
                 except AttributeError:
@@ -588,7 +590,11 @@ class WritePythonCode(WriteCode):
         self.write_print_to_stderr(
             0, f'"[{prefix}] Attempting to instantiate class: {class_name_str}"'
         )
-
+        if class_name_str in OBJECT_BLACKLIST:
+            self.write_print_to_stderr(
+            0, f'"[{prefix}] Skipping blacklisted class: {class_name_str}"'
+            )
+            return
         instance_var_name = (
             f"instance_{prefix}_{class_name_str.lower().replace('.', '_')}"  # Unique name
         )
@@ -793,7 +799,7 @@ class WritePythonCode(WriteCode):
         )
         self.write(
             0,
-            f"if callable({current_prefix}_attr_val): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
+            f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val.__name__ == 'wait': {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
         )
         self.restoreLevel(self.base_level - 1)  # Exit inner try
         self.write(0, f"except Exception: pass")
@@ -824,7 +830,7 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# Conceptual call to generic method fuzzer")
         self.write(
             0,
-            f"callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
+            f"if {current_prefix}_method_name_to_call != 'wait': callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
         )  # Example simplified call
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit if methods
