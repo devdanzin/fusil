@@ -48,6 +48,11 @@ class PythonSource(ProjectAgent):
                 verbose=self.options.verbose,
             ).search_modules()
 
+        if self.options.fuzz_cereggii_scenarios:
+            self.error("Cereggii Scenario Mode: Forcing target module to 'cereggii'.")
+
+            self.modules = {'cereggii'}
+
         if self.options.packages != "*":
             print("\nAdding packages...")
             all_modules = ListAllModules(
@@ -59,7 +64,12 @@ class PythonSource(ProjectAgent):
                 verbose=self.options.verbose,
             )
 
-            for package in self.options.packages.split(","):
+            packages = self.options.packages.split(",")
+            if self.options.fuzz_cereggii_scenarios:
+                self.error("Cereggii Scenario Mode: Forcing packages to 'cereggii'.")
+                packages = ["cereggii"]
+
+            for package in packages:
                 package = package.strip().strip("/")
                 if not len(package):
                     continue
@@ -119,6 +129,7 @@ class PythonSource(ProjectAgent):
             self.module_name,
             threads=not self.options.no_threads,
             _async=not self.options.no_async,
+            is_cereggii_scenario_mode=getattr(self.options, 'fuzz_cereggii_scenarios', False),
         )
 
     def on_session_start(self) -> None:

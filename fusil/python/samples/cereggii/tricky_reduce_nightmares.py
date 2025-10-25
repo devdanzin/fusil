@@ -24,9 +24,9 @@ except ImportError:
     print("Warning: 'tricky_atomicdict.py' not found.", file=sys.stderr)
 
 try:
-    from fusil.python.samples.weird_classes import weird_instances
+    from fusil.python.samples.weird_classes import weird_instances as _weird_instances
 except ImportError:
-    weird_instances = None
+    _weird_instances = None
     print("Warning: 'weird_classes.py' not found.", file=sys.stderr)
 
 
@@ -171,7 +171,7 @@ class BoolRaiser:
 
 
 _non_hashable_key = (
-    weird_instances.get("weird_list_empty", []) if weird_instances else []
+    _weird_instances.get("weird_list_empty", []) if _weird_instances else []
 )
 
 specialized_breakers = {

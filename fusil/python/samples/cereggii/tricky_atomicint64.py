@@ -12,7 +12,7 @@ import sys
 # We wrap this in a try-except block to allow this module to be run standalone
 # without breaking, which can be useful for debugging the generated inputs.
 try:
-    from fusil.python.samples import weird_classes
+    from fusil.python.samples import weird_classes as weird_classes_module
 
     _HAS_WEIRD_CLASSES = True
 except ImportError:
@@ -188,14 +188,14 @@ weird_callables["callable_with_side_effect"] = side_effect_callable
 if _HAS_WEIRD_CLASSES:
     # Add callables that return instances from our other tricky modules.
     weird_callables["callable_ret_weird_list"] = (
-        lambda x: weird_classes.weird_instances["weird_list_empty"]
+        lambda x: weird_classes_module.weird_instances["weird_list_empty"]
     )
 
     # This callable returns a FrameModifier. When the C code DECREFs this returned
     # object, its __del__ method will be triggered, attempting to maliciously
     # modify variables in its caller's frame. This is a potent attack against
     # assumptions made by JIT compilers or C code about object lifetimes.
-    weird_callables["callable_frame_modifier"] = lambda x: weird_classes.FrameModifier(
+    weird_callables["callable_frame_modifier"] = lambda x: weird_classes_module.FrameModifier(
         "side_effect_target", 999
     )
 

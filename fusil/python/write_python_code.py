@@ -33,6 +33,15 @@ except ImportError:
     _ARG_GEN_USE_TEMPLATES = False
 
 try:
+    from fusil.python import tricky_cereggii
+    _HAS_TRICKY_CEREGGII = True
+    print("Loaded tricky_cereggii aggregator.")
+except ImportError:
+    _HAS_TRICKY_CEREGGII = False
+    print("Warning: Could not load tricky_cereggii aggregator.")
+    tricky_cereggii = None # Define for type checking if needed
+
+try:
     import numpy  # type: ignore
 
     print(f"Numpy {numpy.__version__} is available, using it to build tricky arrays.")
@@ -93,6 +102,7 @@ class WritePythonCode(WriteCode):
         threads: bool = True,
         _async: bool = True,
         use_h5py: bool = False,
+        is_cereggii_scenario_mode: bool = False,
     ):
         """Initialize the Python code writer."""
         super().__init__()  # Initialize base WriteCode
@@ -104,6 +114,7 @@ class WritePythonCode(WriteCode):
         self.enable_threads = threads
         self.enable_async = _async
         self.generated_filename = filename
+        self.is_cereggii_scenario_mode = is_cereggii_scenario_mode
 
         self.h5py_writer = WriteH5PyCode(self) if use_h5py and _ARG_GEN_USE_H5PY else None
 
@@ -273,11 +284,11 @@ class WritePythonCode(WriteCode):
         self.write(
             0,
             dedent(
-                """\
+                f"""\
                 # FUSIL_BOILERPLATE_START
 
                 from gc import collect
-                from random import choice, randint, random, sample
+                from random import choice, randint, random, sample, seed
                 from sys import stderr, path as sys_path
                 from os.path import dirname
                 import ast
@@ -290,11 +301,18 @@ class WritePythonCode(WriteCode):
                 from threading import Thread
                 from unittest.mock import MagicMock
                 import asyncio
+                seed({randint(0, 2**30)})
                 """
             ),
         )
         if not self.options.no_tstrings and _ARG_GEN_USE_TEMPLATES:
             self.write(0, "from string.templatelib import Interpolation, Template")
+
+        if "cereggii" in self.module_name:
+            self.write_print_to_stderr(0, '"Importing cereggii for tricky definitions..."')
+            self.write(0, "import cereggii")
+            self.write(0, "from fusil.python import tricky_cereggii")
+            self.emptyLine()
 
         self.write_print_to_stderr(0, f'"Importing target module: {self.module_name}"')
         self.write(0, f"import {self.module_name}")
@@ -331,6 +349,18 @@ class WritePythonCode(WriteCode):
         if not self.options.no_numpy and _ARG_GEN_USE_NUMPY and _ARG_GEN_USE_H5PY:
             self.write(0, "# Executing HDF5 tricky object generation code")
             self.write(0, fusil.python.h5py.h5py_tricky_weird.tricky_h5py_code)
+            self.emptyLine()
+
+        if  "cereggii"  in self.module_name and _HAS_TRICKY_CEREGGII and tricky_cereggii:
+            self.write(0, "# --- BEGIN Tricky Cereggii Definitions ---")
+            self.write_print_to_stderr(0, '"Embedding tricky cereggii code snippets..."')
+            for name, code_snippet in tricky_cereggii.tricky_cereggii_code_snippets.items():
+                if code_snippet:
+                    origin_module = name.replace("_code", ".py")
+                    self.write(0, f"# --- Code from {origin_module} ---")
+                    self.write(0, code_snippet)
+                    self.emptyLine()
+            self.write(0, "# --- END Tricky Cereggii Definitions ---")
             self.emptyLine()
 
         self.write(
@@ -1152,10 +1182,97 @@ class WritePythonCode(WriteCode):
         self._write_script_header_and_imports()
         self._write_tricky_definitions()
         self._write_helper_call_functions()
-        self._write_main_fuzzing_logic()
-        self._write_concurrency_finalization()
+        if self.is_cereggii_scenario_mode:
+            # --- Scenario Mode Logic ---
+            self.write_print_to_stderr(0, '"--- Running in Cereggii Scenario Mode ---"')
+            self.emptyLine()
+            self._write_cereggii_scenario_runner_code()  # New method to implement
+            self.emptyLine()
+        else:
+            # --- Standard API Fuzzing Logic ---
+            self._write_main_fuzzing_logic()
+            self._write_concurrency_finalization()
 
         self.parent_python_source.warning(
             f"--- Fuzzing script generation for {self.module_name} complete ---"
         )
         self.close()
+
+    def _write_cereggii_scenario_runner_code(self):
+        # 1. Check if the aggregator was loaded
+        self.write(0, f"if not {_HAS_TRICKY_CEREGGII} or not tricky_cereggii:")
+        self.write_print_to_stderr(1, '"ERROR: Tricky cereggii assets not loaded. Cannot run scenarios."')
+        self.write(1, "sys.exit(1) # Exit script if assets missing")
+        self.emptyLine()
+
+        # 2. Aggregate all scenario names from the aggregator module
+        self.write(0, "# Aggregate all available scenario function names")
+        self.write(0, "_all_scenario_names = []")
+        # Get the names of the dictionaries/lists exported by tricky_cereggii
+        scenario_sources = [
+            "atomicint_scenario_names", "atomicref_scenario_names",
+            "python_utils_scenario_names", "threadhandle_scenario_names",
+            "stateful_scenario_names", "concurrency_hell_scenario_names",
+            "synergy_scenario_names", "atomicdict_scenario_names" # Add any others
+        ]
+        self.write(0, "if tricky_cereggii:") # Check again just in case
+        self.addLevel(1)
+        for source_list_name in scenario_sources:
+             # Generate code to extend the list if the attribute exists
+             self.write(0, f"if hasattr(tricky_cereggii, '{source_list_name}'):")
+             self.write(1, f"    _all_scenario_names.extend(tricky_cereggii.{source_list_name})")
+        self.restoreLevel(self.base_level - 1)
+        self.emptyLine()
+
+        self.write(0, "if not _all_scenario_names:")
+        self.write_print_to_stderr(1, '"ERROR: No cereggii scenarios found to run."')
+        self.write(1, "sys.exit(1)")
+        self.emptyLine()
+
+        self.write_print_to_stderr(0, 'f"Found {len(_all_scenario_names)} cereggii scenarios to choose from."')
+
+        # 3. Write the main scenario execution loop
+        # Allow configuration via options, e.g., options.cereggii_scenarios_to_run
+        num_scenarios_to_run = getattr(self.options, 'cereggii_scenarios_to_run', 10) # Default to 10 random runs
+        self.write(0, f"# Run a selection of scenarios")
+        self.write(0, f"for i in range({num_scenarios_to_run}):")
+        self.addLevel(1)
+        self.write(0, "scenario_name = random.choice(_all_scenario_names)")
+        self.write(0, f"print(f'\\n--- [{{i+1}}/{num_scenarios_to_run}] Attempting scenario: {{scenario_name}} ---', file=stderr)")
+        self.write(0, "try:")
+        self.addLevel(1)
+        # Find the actual function object at runtime using globals() or getattr on imported modules
+        # This requires careful handling of where scenarios are defined.
+        # Assuming scenario functions are defined globally within the embedded code snippets:
+        self.write(0, "# Dynamically find the scenario function")
+        self.write(0, "_scenario_func = None")
+        # Loop through known scenario dicts embedded from tricky modules
+        scenario_dicts = [ # Must match dict names in the tricky_*_scenarios.py files
+             "atomicint_scenarios", "atomicref_scenarios", "python_utils_scenarios",
+             "threadhandle_scenarios", "stateful_scenarios", "concurrency_hell_scenarios",
+             "synergy_scenarios", "atomicdict_scenarios"
+        ]
+        self.write(0, f"for _dict_name in {scenario_dicts}:")
+        self.addLevel(1)
+        self.write(0, f"_scenario_dict = globals().get(_dict_name)") # Access dict defined in boilerplate
+        self.write(0, f"if _scenario_dict and scenario_name in _scenario_dict:")
+        self.write(1, "   _scenario_func = _scenario_dict[scenario_name]")
+        self.write(1, "   break") # Found it
+        self.restoreLevel(self.base_level - 1) # Exit for loop
+
+        # Call the found function
+        self.write(0, "if _scenario_func:")
+        self.addLevel(1)
+        self.write(0, "_scenario_func()") # Call the scenario
+        self.write_print_to_stderr(0, 'f"--- Scenario {scenario_name} completed. ---"')
+        self.restoreLevel(self.base_level - 1) # Exit if _scenario_func
+        self.write(0, "else:")
+        self.write_print_to_stderr(1, 'f"ERROR: Could not find function for scenario {scenario_name}!"')
+
+        self.restoreLevel(self.base_level - 1) # Exit try
+        self.write(0, "except Exception as e_scenario:")
+        self.write_print_to_stderr(1, 'f"--- Scenario {scenario_name} FAILED with: {type(e_scenario).__name__}: {e_scenario} ---"')
+        self.restoreLevel(self.base_level - 1) # Exit except
+        self.write(0, "collect() # GC between scenarios")
+        self.emptyLine()
+        # self.restoreLevel(self.base_level - 1) # Exit main for loop

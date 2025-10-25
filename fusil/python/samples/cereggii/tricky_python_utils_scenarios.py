@@ -4,6 +4,7 @@ like CountDownLatch, often by providing malicious inputs to their constructors
 or methods to attack the underlying C implementations indirectly. Also includes
 scenarios testing interactions between different utilities.
 """
+import math
 
 import cereggii
 import sys
@@ -16,12 +17,12 @@ import itertools  # ADDED for new scenario
 
 # --- Imports for Tricky Objects ---
 try:
-    from fusil.python.samples import weird_classes
+    from fusil.python.samples import weird_classes as weird_classes_module
 
     print("Successfully imported weird_classes for Python utils scenarios.")
 except ImportError:
     print("Warning: Could not import weird_classes.", file=sys.stderr)
-    weird_classes = None
+    weird_classes_module = None
 
 # REMOVED: try...except block for tricky_weird_cereggii
 
@@ -30,8 +31,8 @@ except ImportError:
 
 # Collect integer-like weird objects for the poison constructor attack
 _TRICKY_INTS_FOR_LATCH = []
-if weird_classes:
-    for name, instance in weird_classes.weird_instances.items():
+if weird_classes_module:
+    for name, instance in weird_classes_module.weird_instances.items():
         # Check if it inherits from int/number and isn't just a basic type instance
         if "weird_" in name and isinstance(
             instance, (int, float, complex)
@@ -74,7 +75,7 @@ def scenario_poison_countdownlatch(num_waiters=4, num_decrementers=4):
             # Attempt to create the latch with the malicious object
             latch = cereggii.CountDownLatch(poison_object)
             print(
-                f"Successfully created CountDownLatch with {type(poison_object).__name__}"
+                f"Successfully created CountDownLatch with {type(poison_object).__name__}, log10={math.log10(poison_object)}"
             )
         except AssertionError:
             continue  # Expected failure for negative values etc.
@@ -216,7 +217,7 @@ def scenario_latch_decremented_by_reduce(
 
 # --- Aggregate and Export Scenarios ---
 python_utils_scenarios = {
-    "scenario_poison_countdownlatch": scenario_poison_countdownlatch,
+    # "scenario_poison_countdownlatch": scenario_poison_countdownlatch,
     "scenario_latch_decremented_by_reduce": scenario_latch_decremented_by_reduce,  # Added new scenario
 }
 

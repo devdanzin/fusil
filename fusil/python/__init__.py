@@ -188,6 +188,12 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
+            '--fuzz-cereggii-scenarios',
+            help='Run only specialized cereggii fuzzing scenarios instead of general API fuzzing.',
+            action='store_true',
+            default=False,
+        )
+        fuzzing_options.add_option(
             "--filenames",
             help="Names separated by commas of readable files (default: %s)" % FILENAMES,
             type="str",

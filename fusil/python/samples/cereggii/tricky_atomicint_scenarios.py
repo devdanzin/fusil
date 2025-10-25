@@ -18,7 +18,7 @@ import cereggii
 # We make imports of our other tricky modules optional to allow for modularity.
 try:
     from fusil.python.samples.cereggii import tricky_atomicint64
-    from fusil.python.samples import weird_classes
+    from fusil.python.samples import weird_classes as weird_classes_module
 except ImportError:
     print(
         "Warning: Could not import tricky_atomicint64 or weird_classes. "
@@ -35,7 +35,7 @@ except ImportError:
         weird_instances = {}
 
     tricky_atomicint64 = TrickyAtomicInt64Mock()
-    weird_classes = WeirdClassesMock()
+    weird_classes_module = WeirdClassesMock()
 
 
 # --- Step 1.2: Aggregate a "Menu" of Operations and Operands ---
@@ -48,8 +48,8 @@ _BINARY_OPS = [
     operator.truediv,
     operator.floordiv,
     operator.mod,
-    operator.pow,
-    operator.lshift,
+    # operator.pow,
+    # operator.lshift,
     operator.rshift,
     operator.and_,
     operator.or_,
@@ -58,14 +58,15 @@ _BINARY_OPS = [
 
 # A parallel list of all in-place operators.
 _INPLACE_OPS = [
+
     operator.iadd,
     operator.isub,
     operator.imul,
     operator.itruediv,
     operator.ifloordiv,
     operator.imod,
-    operator.ipow,
-    operator.ilshift,
+    # operator.ipow,
+    # operator.ilshift,
     operator.irshift,
     operator.iand,
     operator.ior,
@@ -80,7 +81,7 @@ _ALL_NUMERIC_OPERANDS.extend(tricky_atomicint64.atomic_int_instances_for_binops)
 _ALL_NUMERIC_OPERANDS.extend(tricky_atomicint64.overflow_operands)
 # 3. Add all number-like "weird" instances.
 _ALL_NUMERIC_OPERANDS.extend(
-    inst for name, inst in weird_classes.weird_instances.items() if "weird_int" in name
+    inst for name, inst in weird_classes_module.weird_instances.items() if "weird_int" in name
 )
 # 4. Add fundamental tricky numerics.
 _ALL_NUMERIC_OPERANDS.extend(
@@ -117,23 +118,30 @@ def scenario_numeric_hell(num_threads=8, num_ops_per_thread=250):
             target_atomic_int = random.choice(
                 tricky_atomicint64.atomic_int_instances_for_binops
             )
-
+            print(f"{target_atomic_int.get()=}")
             # 2. Pick a random, potentially malicious, right-hand operand.
             right_hand_operand = random.choice(_ALL_NUMERIC_OPERANDS)
+            if hasattr(right_hand_operand, "get"):
+                print(f"{right_hand_operand.get()=}")
+            else:
+                print(f"{right_hand_operand=}")
 
             # 3. Randomly choose the type of operation to perform.
             op_type = random.choice(["binary", "inplace", "reflected"])
-
+            print(f"{op_type=}: ", end="")
             try:
                 if op_type == "inplace":
                     op = random.choice(_INPLACE_OPS)
+                    print(f"{op=}")
                     op(target_atomic_int, right_hand_operand)
                 elif op_type == "binary":
                     op = random.choice(_BINARY_OPS)
+                    print(f"{op=}")
                     op(target_atomic_int, right_hand_operand)
                 elif op_type == "reflected":
                     # For reflected ops, the non-atomic operand comes first.
                     op = random.choice(_BINARY_OPS)
+                    print(f"{op=}")
                     op(right_hand_operand, target_atomic_int)
 
             except (OverflowError, TypeError, ValueError, ZeroDivisionError) as e:

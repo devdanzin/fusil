@@ -154,7 +154,7 @@ malicious_behaviors = {
     "return_string": make_wrong_typer("this is not the expected return type"),
     "return_int": make_wrong_typer(12345),
     "return_self": make_wrong_typer("self"),  # Special case handled by the factory
-    "infinite_loop": looper,
+    # "infinite_loop": looper,
     "abuse_super": super_caller_abuse,
 }
 

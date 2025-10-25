@@ -16,7 +16,7 @@ import sys
 # We gather a wide range of pre-existing tricky objects to use as keys/values.
 # This is wrapped in try-except to allow this module to run standalone.
 try:
-    from fusil.python.samples import tricky_objects, weird_classes  # , tricky_numpy
+    from fusil.python.samples import tricky_objects, weird_classes as weird_classes_module # , tricky_numpy
 
     _HAS_DEPS = True
 except ImportError:
@@ -205,7 +205,7 @@ tricky_hashable_keys["empty_frozenset"] = frozenset()
 if _HAS_DEPS:
     all_tricky_sources = {
         "tricky_obj": tricky_objects.__dict__,
-        "weird_cls": weird_classes.weird_instances,
+        "weird_cls": weird_classes_module.weird_instances,
         # "tricky_np": tricky_numpy.__dict__,
     }
     for source_name, source_dict in all_tricky_sources.items():
