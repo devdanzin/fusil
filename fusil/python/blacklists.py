@@ -232,6 +232,7 @@ OBJECT_BLACKLIST = {
     "Lock",
     "RLock",
     "Semaphore",
+    "AtomicInt64"
 }
 METHOD_BLACKLIST = {
     "__class__",
@@ -247,6 +248,7 @@ METHOD_BLACKLIST = {
     "_randbelow",
     "_randbelow_with_getrandbits",
     "_read",
+    "_rehash",
     "_run_once",
     "_serve",
     "_shutdown",
