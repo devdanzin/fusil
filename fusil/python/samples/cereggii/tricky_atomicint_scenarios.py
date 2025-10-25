@@ -219,7 +219,7 @@ def scenario_callback_hell(num_threads=8, num_ops_per_thread=200):
 
 # --- Part 3: Aggregate and Export ---
 atomicint_scenarios = {
-    "scenario_numeric_hell": scenario_numeric_hell,
+    # "scenario_numeric_hell": scenario_numeric_hell,
     "scenario_callback_hell": scenario_callback_hell,
 }
 

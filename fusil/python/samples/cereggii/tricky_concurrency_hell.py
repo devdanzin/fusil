@@ -251,7 +251,7 @@ concurrency_hell_scenarios = {
     "dogpile_on_atomicdict_key": dogpile_on_atomicdict_key,
     "migration_storm": migration_storm,
     "thread_churn_test": thread_churn_test,
-    "fast_iter_vs_mutation_race": fast_iter_vs_mutation_race,
+    # "fast_iter_vs_mutation_race": fast_iter_vs_mutation_race,
 }
 
 # Add configurable versions for the fuzzer to pick from
