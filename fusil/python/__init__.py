@@ -188,12 +188,6 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
-            '--fuzz-cereggii-scenarios',
-            help='Run only specialized cereggii fuzzing scenarios instead of general API fuzzing.',
-            action='store_true',
-            default=False,
-        )
-        fuzzing_options.add_option(
             "--filenames",
             help="Names separated by commas of readable files (default: %s)" % FILENAMES,
             type="str",
@@ -354,6 +348,15 @@ class Fuzzer(Application):
         options = input_options, running_options, fuzzing_options, jit_options, config_options
         for option in options:
             parser.add_option_group(option)
+
+        # Add plugin CLI options
+        plugin_opts = self.plugin_manager.get_cli_options()
+
+        if plugin_opts:
+            plugin_options_group = OptionGroupWithSections(parser, "Plugin Options")
+            for args, kwargs in plugin_opts:
+                plugin_options_group.add_option(*args, **kwargs)
+            parser.add_option_group(plugin_options_group)
 
     def setupProject(self) -> None:
         """Initialize the fuzzing project with process monitoring and output analysis."""

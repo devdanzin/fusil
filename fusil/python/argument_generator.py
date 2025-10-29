@@ -68,15 +68,6 @@ except ImportError:
     TEMPLATES = []
 
 try:
-    from fusil.python import tricky_cereggii
-    _HAS_TRICKY_CEREGGII = True
-    print("Loaded tricky_cereggii aggregator for ArgumentGenerator.")
-except ImportError:
-    _HAS_TRICKY_CEREGGII = False
-    print("Warning: Could not load tricky_cereggii aggregator for ArgumentGenerator.")
-    tricky_cereggii = None # Define for type checking
-
-try:
     import numpy
 except ImportError:
     numpy = None
@@ -101,6 +92,7 @@ class ArgumentGenerator:
         use_templates: bool = True,
         use_h5py: bool = True,
         allow_external_references: bool = True,
+        plugin_manager=None,
     ):
         """
         Initialize the ArgumentGenerator.
@@ -114,11 +106,8 @@ class ArgumentGenerator:
         """
         self.options = options
         self.filenames = filenames
+        self.plugin_manager = plugin_manager
         self.errback_name = ERRBACK_NAME_CONST
-
-        is_cereggii_target = (
-            self.options.modules == "cereggii" or getattr(self.options, "fuzz_cereggii_scenarios", False)
-        )
 
         self.h5py_argument_generator = H5PyArgumentGenerator(self) if use_h5py and H5PyArgumentGenerator else None
 
@@ -171,35 +160,6 @@ class ArgumentGenerator:
                 self.genTrickyObjects,
             )
 
-        if is_cereggii_target and _HAS_TRICKY_CEREGGII:
-            print("Activating cereggii-specific argument generators...")
-            # Add hashable cereggii objects
-            self.hashable_argument_generators += (
-                self.genTrickyAtomicInt64,          # AtomicInt64 is hashable
-                self.genTrickyHashableKeyCereggii, # Keys specifically chosen for hashability
-            ) * 10 # Weight: make them appear reasonably often
-
-            # Add simple (potentially non-hashable) cereggii objects
-            self.simple_argument_generators += (
-                self.genTrickyWeirdCereggii,
-                self.genTrickyRecursiveCereggii,
-                self.genTrickyThreadHandle,
-            ) * 10
-
-            # Add complex cereggii objects (AtomicDict itself)
-            self.complex_argument_generators += (
-                self.genTrickyAtomicDict,
-            ) * 10
-
-            # Also add the simple ones to complex, as complex can include simple
-            self.complex_argument_generators += (
-                self.genTrickyAtomicInt64,
-                self.genTrickyHashableKeyCereggii,
-                self.genTrickyWeirdCereggii,
-                self.genTrickyRecursiveCereggii,
-                self.genTrickyThreadHandle,
-            ) * 5 # Lower weight here as they are already in simple
-
         # Handle NumPy, h5py, and t-strings conditionally
         if not self.options.no_numpy and use_numpy and H5PyArgumentGenerator:
             if allow_external_references:
@@ -210,6 +170,31 @@ class ArgumentGenerator:
 
         if not self.options.no_tstrings and use_templates and TEMPLATES and allow_external_references:
             self.complex_argument_generators += (self.genTrickyTemplate,)
+
+        if self.plugin_manager:
+            self._add_plugin_generators()
+
+    def _add_plugin_generators(self):
+        """Add argument generators from plugins."""
+        # Determine target module from options
+        target_module = getattr(self.options, 'modules', '*')
+        if target_module == '*':
+            target_module = 'unknown'  # Use a generic name
+
+        # Get plugin generators for each category
+        for category in ['simple', 'hashable', 'complex']:
+            plugin_gens = self.plugin_manager.get_argument_generators(
+                self.options,
+                target_module,
+                category
+            )
+
+            if category == 'simple':
+                self.simple_argument_generators += tuple(plugin_gens)
+            elif category == 'hashable':
+                self.hashable_argument_generators += tuple(plugin_gens)
+            elif category == 'complex':
+                self.complex_argument_generators += tuple(plugin_gens)
 
     def _create_argument_from_list(
         self, generators: tuple[Callable[[], list[str]], ...]
@@ -330,60 +315,6 @@ class ArgumentGenerator:
     def genInterestingValues(self) -> list[str]:
         """Generate an 'interesting' predefined value."""
         return [choice(INTERESTING)]
-
-    def genTrickyAtomicInt64(self) -> list[str]:
-        """Generate a reference to a tricky AtomicInt64 instance."""
-        # Check if the aggregator and its specific list are available
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_atomicint64_instance_names:
-            # Fallback to creating a simple default instance if tricky ones aren't loaded
-            return ["cereggii.AtomicInt64(0)"]
-        # Select a random name from the aggregated list
-        name = choice(tricky_cereggii.tricky_atomicint64_instance_names)
-        # Return the code to access it from the dictionary defined in the boilerplate
-        # The name 'tricky_atomic_ints' must match the variable in tricky_atomicint64.py
-        return [f"tricky_atomic_ints['{name}']"]
-
-    def genTrickyAtomicDict(self) -> list[str]:
-        """Generate a reference to a tricky AtomicDict instance."""
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_atomicdict_instance_names:
-            return ["cereggii.AtomicDict()"]  # Fallback
-        name = choice(tricky_cereggii.tricky_atomicdict_instance_names)
-        # Assumes 'tricky_atomic_dicts' dict is defined in boilerplate
-        return [f"tricky_atomic_dicts['{name}']"]
-
-    def genTrickyWeirdCereggii(self) -> list[str]:
-        """Generate a reference to a weird cereggii subclass instance."""
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_weird_cereggii_instance_names:
-            return ["object()"]  # Generic fallback
-        name = choice(tricky_cereggii.tricky_weird_cereggii_instance_names)
-        # Assumes 'tricky_weird_cereggii_objects' dict is defined in boilerplate
-        return [f"tricky_weird_cereggii_objects['{name}']"]
-
-    def genTrickyRecursiveCereggii(self) -> list[str]:
-        """Generate a reference to a tricky recursive cereggii object."""
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_recursive_object_names:
-            return ["['recursive_fallback']"]  # Fallback
-        name = choice(tricky_cereggii.tricky_recursive_object_names)
-        # Assumes 'tricky_recursive_objects' dict is defined in boilerplate
-        return [f"tricky_recursive_objects['{name}']"]
-
-    def genTrickyThreadHandle(self) -> list[str]:
-        """Generate a reference to a tricky ThreadHandle instance or callable."""
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_threadhandle_instance_names:
-            # Fallback needs a valid object to wrap
-            return ["cereggii.ThreadHandle(None)"]
-        name = choice(tricky_cereggii.tricky_threadhandle_instance_names)
-        # Assumes 'tricky_threadhandle_collection' dict is defined in boilerplate
-        return [f"tricky_threadhandle_collection['{name}']"]
-
-    def genTrickyHashableKeyCereggii(self) -> list[str]:
-        """Generate a reference to a tricky but hashable object for use as a dict key."""
-        # Use the specific list aggregated in tricky_atomicdict.py
-        if not _HAS_TRICKY_CEREGGII or not tricky_cereggii or not tricky_cereggii.tricky_hashable_key_names:
-            return ["'fallback_key'"]  # Fallback to a simple string
-        name = choice(tricky_cereggii.tricky_hashable_key_names)
-        # Assumes 'tricky_hashable_keys' dict is defined in boilerplate
-        return [f"tricky_hashable_keys['{name}']"]
 
     def genTrickyObjects(self) -> list[str]:
         """Generate a name of a 'tricky' predefined object from tricky_weird."""
