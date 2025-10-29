@@ -103,10 +103,12 @@ class WritePythonCode(WriteCode):
         _async: bool = True,
         use_h5py: bool = False,
         is_cereggii_scenario_mode: bool = False,
+        plugin_manager=None,
     ):
         """Initialize the Python code writer."""
         super().__init__()  # Initialize base WriteCode
         self.parent_python_source = parent_python_source
+        self.plugin_manager = plugin_manager
         self.options = parent_python_source.options
         self.filenames = parent_python_source.filenames
         self.module = module
@@ -125,6 +127,7 @@ class WritePythonCode(WriteCode):
             _ARG_GEN_USE_TEMPLATES,
             _ARG_GEN_USE_H5PY,
             allow_external_references=self.options.jit_external_references,
+            plugin_manager=self.plugin_manager,
         )
         self.jit_writer = WriteJITCode(self)
 

@@ -101,6 +101,7 @@ class ArgumentGenerator:
         use_templates: bool = True,
         use_h5py: bool = True,
         allow_external_references: bool = True,
+        plugin_manager=None,
     ):
         """
         Initialize the ArgumentGenerator.
@@ -114,6 +115,7 @@ class ArgumentGenerator:
         """
         self.options = options
         self.filenames = filenames
+        self.plugin_manager = plugin_manager
         self.errback_name = ERRBACK_NAME_CONST
 
         is_cereggii_target = (
@@ -210,6 +212,31 @@ class ArgumentGenerator:
 
         if not self.options.no_tstrings and use_templates and TEMPLATES and allow_external_references:
             self.complex_argument_generators += (self.genTrickyTemplate,)
+
+        if self.plugin_manager:
+            self._add_plugin_generators()
+
+    def _add_plugin_generators(self):
+        """Add argument generators from plugins."""
+        # Determine target module from options
+        target_module = getattr(self.options, 'modules', '*')
+        if target_module == '*':
+            target_module = 'unknown'  # Use a generic name
+
+        # Get plugin generators for each category
+        for category in ['simple', 'hashable', 'complex']:
+            plugin_gens = self.plugin_manager.get_argument_generators(
+                self.options,
+                target_module,
+                category
+            )
+
+            if category == 'simple':
+                self.simple_argument_generators += tuple(plugin_gens)
+            elif category == 'hashable':
+                self.hashable_argument_generators += tuple(plugin_gens)
+            elif category == 'complex':
+                self.complex_argument_generators += tuple(plugin_gens)
 
     def _create_argument_from_list(
         self, generators: tuple[Callable[[], list[str]], ...]

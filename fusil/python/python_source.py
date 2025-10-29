@@ -30,6 +30,10 @@ class PythonSource(ProjectAgent):
         self.options = options
         self.source_output_path = source_output_path
 
+        self.plugin_manager = None
+        if hasattr(project.application, 'plugin_manager'):
+            self.plugin_manager = project.application.plugin_manager
+
         if self.options.modules != "*":
             self.modules = set()
             for module in self.options.modules.split(","):
@@ -130,6 +134,7 @@ class PythonSource(ProjectAgent):
             threads=not self.options.no_threads,
             _async=not self.options.no_async,
             is_cereggii_scenario_mode=getattr(self.options, 'fuzz_cereggii_scenarios', False),
+            plugin_manager = self.plugin_manager,
         )
 
     def on_session_start(self) -> None:

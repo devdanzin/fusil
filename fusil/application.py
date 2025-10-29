@@ -58,6 +58,11 @@ class Application(ApplicationAgent):
     def __init__(self):
         self.agents = AgentList()
         ApplicationAgent.__init__(self, "application", self, None)
+
+        from fusil.plugin_manager import get_plugin_manager
+        self.plugin_manager = get_plugin_manager()
+        self.plugin_manager.discover_and_load_plugins()
+
         self.setup()
 
     def registerAgent(self, agent):
