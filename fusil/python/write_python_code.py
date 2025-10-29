@@ -411,6 +411,17 @@ class WritePythonCode(WriteCode):
             self.write(0, mangle_obj)
         self.emptyLine()
 
+        # Add plugin-provided definitions
+        if self.plugin_manager:
+            plugin_defs = self.plugin_manager.get_definitions(
+                self.options,
+                self.module_name
+            )
+            for definition_code in plugin_defs:
+                self.write(0, "# --- Plugin-provided definitions ---")
+                self.write(0, definition_code)
+                self.emptyLine()
+
     def _write_helper_call_functions(self) -> None:
         """Writes helper functions for calling code, comparing results, etc."""
         self.write(0, "# This function is called only once, so it will not be JIT-compiled.")
@@ -1185,14 +1196,18 @@ class WritePythonCode(WriteCode):
         self._write_script_header_and_imports()
         self._write_tricky_definitions()
         self._write_helper_call_functions()
-        if self.is_cereggii_scenario_mode:
-            # --- Scenario Mode Logic ---
-            self.write_print_to_stderr(0, '"--- Running in Cereggii Scenario Mode ---"')
+
+        # Check for active plugin mode
+        active_mode = None
+        if hasattr(self, 'plugin_manager') and self.plugin_manager:
+            active_mode = self.plugin_manager.get_active_mode(self.options)
+
+        if active_mode:
+            self.write_print_to_stderr(0, f'"--- Running in {active_mode.name} Mode ---"')
             self.emptyLine()
-            self._write_cereggii_scenario_runner_code()  # New method to implement
-            self.emptyLine()
+            active_mode.setup_script(self)  # Let the plugin generate the main logic
         else:
-            # --- Standard API Fuzzing Logic ---
+            # Standard fuzzing logic
             self._write_main_fuzzing_logic()
             self._write_concurrency_finalization()
 

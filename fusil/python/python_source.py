@@ -31,8 +31,8 @@ class PythonSource(ProjectAgent):
         self.source_output_path = source_output_path
 
         self.plugin_manager = None
-        if hasattr(project.application, 'plugin_manager'):
-            self.plugin_manager = project.application.plugin_manager
+        if hasattr(project.application(), 'plugin_manager'):
+            self.plugin_manager = project.application().plugin_manager
 
         if self.options.modules != "*":
             self.modules = set()

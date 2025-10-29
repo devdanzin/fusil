@@ -355,6 +355,15 @@ class Fuzzer(Application):
         for option in options:
             parser.add_option_group(option)
 
+        # Add plugin CLI options
+        plugin_opts = self.plugin_manager.get_cli_options()
+
+        if plugin_opts:
+            plugin_options_group = OptionGroupWithSections(parser, "Plugin Options")
+            for args, kwargs in plugin_opts:
+                plugin_options_group.add_option(*args, **kwargs)
+            parser.add_option_group(plugin_options_group)
+
     def setupProject(self) -> None:
         """Initialize the fuzzing project with process monitoring and output analysis."""
         project = self.project

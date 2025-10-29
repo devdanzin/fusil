@@ -63,7 +63,18 @@ class Application(ApplicationAgent):
         self.plugin_manager = get_plugin_manager()
         self.plugin_manager.discover_and_load_plugins()
 
+        # Check plugin dependencies
+        dep_errors = self.plugin_manager.check_dependencies()
+        if dep_errors:
+            for error in dep_errors:
+                print(f"[Plugin Error] {error}", file=sys.stderr)
+
         self.setup()
+
+        if self.plugin_manager:
+            self.plugin_manager.run_hooks('startup', self.options)
+        assert self.plugin_manager, 3
+
 
     def registerAgent(self, agent):
         self.agents.append(agent)
@@ -450,6 +461,9 @@ class Application(ApplicationAgent):
         Cleanup on exiting: destroy agents
         """
         self.warning("Exit Fusil")
+
+        if hasattr(self, 'plugin_manager') and self.plugin_manager:
+            self.plugin_manager.run_hooks('shutdown')
 
         if not keep_log:
             self.logger.unlinkFile()
