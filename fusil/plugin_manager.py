@@ -78,6 +78,7 @@ class PluginManager:
             "startup": [],
             "shutdown": [],
         }
+        self.filter_manager = None
 
     def discover_and_load_plugins(self) -> None:
         """
@@ -390,6 +391,82 @@ class PluginManager:
                     )
 
         return errors
+
+    def set_filter_manager(self, filter_manager):
+        """
+        Set the FilterManager instance.
+
+        This is called by Application after creating the FilterManager
+        and before loading plugins, so plugins can add filters during
+        their registration.
+
+        Args:
+            filter_manager: The FilterManager instance
+        """
+        self.filter_manager = filter_manager
+
+    def get_filter_manager(self):
+        """
+        Get the FilterManager instance for plugins to use.
+
+        Returns:
+            FilterManager instance
+
+        Raises:
+            RuntimeError: If FilterManager hasn't been set yet
+        """
+        if self.filter_manager is None:
+            raise RuntimeError(
+                "FilterManager not set. This method should only be called "
+                "during or after plugin registration."
+            )
+        return self.filter_manager
+
+    def add_blacklist_entry(self, item_type: str, name: str,
+                            pattern_type: str = 'exact'):
+        """
+        Convenience method for plugins to add blacklist entries.
+
+        This is a shorthand for:
+            manager.get_filter_manager().add_blacklist_entry(...)
+
+        Args:
+            item_type: Type of item ('module', 'method', 'class', 'object', 'function')
+            name: Name or pattern to blacklist
+            pattern_type: 'exact', 'glob', or 'regex' (default: 'exact')
+
+        Example:
+            def register(manager):
+                # Blacklist internal methods
+                manager.add_blacklist_entry('method', '_rehash')
+                manager.add_blacklist_entry('method', '_*', pattern_type='glob')
+        """
+        fm = self.get_filter_manager()
+        fm.add_blacklist_entry(item_type, name, pattern_type, source='plugin')
+
+    def add_whitelist_entry(self, item_type: str, name: str,
+                            pattern_type: str = 'exact'):
+        """
+        Convenience method for plugins to add whitelist entries.
+
+        This is a shorthand for:
+            manager.get_filter_manager().add_whitelist_entry(...)
+
+        Whitelist entries can override default blacklists. For example,
+        if __del__ is blacklisted by default, a plugin can whitelist it.
+
+        Args:
+            item_type: Type of item ('module', 'method', 'class', 'object', 'function')
+            name: Name or pattern to whitelist
+            pattern_type: 'exact', 'glob', or 'regex' (default: 'exact')
+
+        Example:
+            def register(manager):
+                # Allow __del__ even though it's in default blacklist
+                manager.add_whitelist_entry('method', '__del__')
+        """
+        fm = self.get_filter_manager()
+        fm.add_whitelist_entry(item_type, name, pattern_type, source='plugin')
 
 
 # Global plugin manager instance

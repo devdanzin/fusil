@@ -1,4 +1,6 @@
 import pathlib
+import sys
+import warnings
 from io import StringIO
 from sys import exit, stdout
 
@@ -14,7 +16,9 @@ from fusil.config import (
     OptionParserWithSections,
     optparse_to_configparser,
 )
+from fusil.blacklist_config import load_blacklist_config
 from fusil.file_tools import relativePath
+from fusil.filter_manager import create_filter_manager, detect_pattern_type
 from fusil.mas.agent_list import AgentList
 from fusil.mas.application_agent import ApplicationAgent
 from fusil.mas.mta import MTA
@@ -59,8 +63,52 @@ class Application(ApplicationAgent):
         self.agents = AgentList()
         ApplicationAgent.__init__(self, "application", self, None)
 
+        # Initialize PluginManager
         from fusil.plugin_manager import get_plugin_manager
         self.plugin_manager = get_plugin_manager()
+
+        self.setup()
+
+        # Create FilterManager with mode from options
+        self.filter_manager = create_filter_manager(
+            mode=getattr(self.options, 'mode', 'blacklist'),
+            verbose=self.options.verbose
+        )
+
+        # Load config file if requested
+        if getattr(self.options, 'use_blacklist_config', False):
+            try:
+                load_blacklist_config(
+                    self.options.blacklist_config,
+                    self.filter_manager
+                )
+            except Exception as e:
+                print(
+                    f"[FilterManager] Warning: Failed to load config file: {e}",
+                    file=sys.stderr
+                )
+
+        # Parse CLI filter options
+        self._load_cli_filters()
+
+        # Handle deprecated --blacklist option for backward compatibility
+        if getattr(self.options, 'blacklist', ''):
+            warnings.warn(
+                "--blacklist is deprecated, use --blacklist-modules instead",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            for module in self.options.blacklist.split(','):
+                module = module.strip()
+                if module:
+                    self.filter_manager.add_blacklist_entry(
+                        'module', module, 'exact', source='cli'
+                    )
+
+        # Give PluginManager access to FilterManager
+        self.plugin_manager.set_filter_manager(self.filter_manager)
+
+        # Discover and load plugins (they can add filters)
         self.plugin_manager.discover_and_load_plugins()
 
         # Check plugin dependencies
@@ -69,12 +117,48 @@ class Application(ApplicationAgent):
             for error in dep_errors:
                 print(f"[Plugin Error] {error}", file=sys.stderr)
 
-        self.setup()
+        # Finalize FilterManager (validates whitelist mode, etc.)
+        try:
+            self.filter_manager.finalize()
+        except ValueError as e:
+            print(f"[FilterManager] Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
+        # Run startup hooks
         if self.plugin_manager:
             self.plugin_manager.run_hooks('startup', self.options)
-        assert self.plugin_manager, 3
 
+    def _load_cli_filters(self):
+        """Parse CLI filter options and add to FilterManager."""
+        # Process blacklist entries
+        for item_type in self.filter_manager.ITEM_TYPES:
+            option_name = f'blacklist_{item_type}s'  # e.g., 'blacklist_modules'
+            if hasattr(self.options, option_name):
+                entries = getattr(self.options, option_name, '')
+                if entries:
+                    for entry in entries.split(','):
+                        entry = entry.strip()
+                        if entry:
+                            pattern_type = detect_pattern_type(entry)
+                            self.filter_manager.add_blacklist_entry(
+                                item_type, entry, pattern_type,
+                                source='cli'
+                            )
+
+        # Process whitelist entries
+        for item_type in self.filter_manager.ITEM_TYPES:
+            option_name = f'whitelist_{item_type}s'  # e.g., 'whitelist_modules'
+            if hasattr(self.options, option_name):
+                entries = getattr(self.options, option_name, '')
+                if entries:
+                    for entry in entries.split(','):
+                        entry = entry.strip()
+                        if entry:
+                            pattern_type = detect_pattern_type(entry)
+                            self.filter_manager.add_whitelist_entry(
+                                item_type, entry, pattern_type,
+                                source='cli'
+                            )
 
     def registerAgent(self, agent):
         self.agents.append(agent)

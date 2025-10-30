@@ -1,0 +1,115 @@
+# Fusil Blacklist Configuration
+#
+# This file configures filtering for the Fusil Python fuzzer.
+# Filters can be exact matches, glob patterns (using * and ?), or regex patterns.
+#
+# Usage:
+#   fusil --use-blacklist-config --blacklist-config fusil_blacklist.toml --modules mymodule
+#
+# Modes:
+#   - blacklist (default): Allow everything except blacklisted items
+#   - whitelist: Deny everything except whitelisted items
+#   - both: Whitelist overrides blacklist, then apply blacklist rules
+
+[options]
+# Default case sensitivity for patterns
+case_sensitive = true
+
+# ============================================================================
+# BLACKLIST
+# ============================================================================
+# Items to exclude from fuzzing (in addition to defaults)
+
+[blacklist]
+
+# Modules to exclude
+module = [
+    # Add custom modules here
+    # "mymodule.testing",
+    # "*.tests",  # Glob: all test modules
+]
+
+# Methods to exclude
+method = [
+    # Add custom methods here
+    # "__del__",       # Already in defaults
+    # "_private_*",    # Glob: all private methods starting with _private_
+]
+
+# Classes to exclude
+class = [
+    # Add custom classes here
+    # "*Test",         # Glob: all classes ending with Test
+    # "*Mock",         # Glob: all mock classes
+]
+
+# Objects to exclude
+object = [
+    # Add custom objects here
+    # "sys.stdin",     # Already in defaults
+]
+
+# Functions to exclude
+function = [
+    # Add custom functions here
+    # "eval",
+    # "exec",
+]
+
+# ============================================================================
+# WHITELIST
+# ============================================================================
+# Items to explicitly allow (overrides blacklist)
+# Only needed if you want to override default blacklists or use whitelist mode
+
+[whitelist]
+
+# Example: Allow __del__ even though it's in the default blacklist
+method = [
+    # "__del__",
+]
+
+# Example: Only fuzz specific modules (use with --mode whitelist)
+module = [
+    # "mymodule",
+]
+
+# ============================================================================
+# EXAMPLES
+# ============================================================================
+
+# Example 1: Exclude all test-related items
+# [blacklist]
+# module = ["*.tests", "*.testing"]
+# class = ["*Test", "*TestCase"]
+# function = ["test_*"]
+
+# Example 2: Override default to allow a specific method
+# [whitelist]
+# method = ["__del__"]  # Allow __del__ even though it's blacklisted by default
+
+# Example 3: Whitelist mode - only fuzz specific targets
+# Use with: fusil --mode whitelist --use-blacklist-config
+# [whitelist]
+# module = ["mymodule"]
+# method = ["process", "encode", "decode"]
+# class = ["MyClass", "DataProcessor"]
+
+# Example 4: Pattern matching examples
+# [blacklist]
+# method = [
+#     "_*",              # Glob: all private methods (starting with single underscore)
+#     "__*__",           # Glob: all dunder methods
+#     ".*_internal.*",   # Regex: methods containing _internal
+# ]
+# class = [
+#     "Abstract*",       # Glob: all abstract classes
+#     ".*Factory$",      # Regex: classes ending with Factory
+# ]
+
+# Example 5: Case-insensitive matching for specific patterns
+# [blacklist.method]
+# [[blacklist.method]]
+# pattern = "DEBUG_*"
+# type = "glob"
+# case_sensitive = false

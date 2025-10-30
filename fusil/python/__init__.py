@@ -345,7 +345,102 @@ class Fuzzer(Application):
             default=False,
         )
 
-        options = input_options, running_options, fuzzing_options, jit_options, config_options
+        filter_options = OptionGroupWithSections(parser, "Filtering Options")
+
+        filter_options.add_option(
+            '--mode',
+            help='Filtering mode: "blacklist" (default), "whitelist", or "both"',
+            type='str',
+            # choices=['blacklist', 'whitelist', 'both'],
+            default='blacklist',
+        )
+
+        filter_options.add_option(
+            '--blacklist-modules',
+            help='Comma-separated list of module patterns to blacklist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--blacklist-methods',
+            help='Comma-separated list of method patterns to blacklist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--blacklist-classes',
+            help='Comma-separated list of class patterns to blacklist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--blacklist-objects',
+            help='Comma-separated list of object patterns to blacklist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--blacklist-functions',
+            help='Comma-separated list of function patterns to blacklist',
+            type='str',
+            default='',
+        )
+
+        # Whitelist options
+        filter_options.add_option(
+            '--whitelist-modules',
+            help='Comma-separated list of module patterns to whitelist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--whitelist-methods',
+            help='Comma-separated list of method patterns to whitelist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--whitelist-classes',
+            help='Comma-separated list of class patterns to whitelist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--whitelist-objects',
+            help='Comma-separated list of object patterns to whitelist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--whitelist-functions',
+            help='Comma-separated list of function patterns to whitelist',
+            type='str',
+            default='',
+        )
+
+        filter_options.add_option(
+            '--blacklist-config',
+            help='Path to blacklist config file (default: fusil_blacklist.toml)',
+            type='str',
+            default='fusil_blacklist.toml',
+        )
+
+        filter_options.add_option(
+            '--use-blacklist-config',
+            help='Load blacklist configuration from file',
+            action='store_true',
+            default=False,
+        )
+
+        options = input_options, running_options, fuzzing_options, jit_options, config_options, filter_options
         for option in options:
             parser.add_option_group(option)
 

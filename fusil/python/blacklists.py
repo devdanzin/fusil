@@ -1,11 +1,15 @@
 """
-Python Fuzzer Blacklists
+Python Fuzzer Default Blacklists
 
-This module defines the blacklists used by the Fusil Python fuzzer to filter out
+This module defines the default blacklists used by the Fusil Python fuzzer to filter out
 dangerous, problematic, or irrelevant functions, methods, classes, and modules.
+
+These are now loaded into FilterManager as defaults. Users can override them with
+whitelist entries or use whitelist mode.
 """
 
-MODULE_BLACKLIST = {
+# Default module blacklist
+DEFAULT_MODULE_BLACKLIST = {
     "logging",
     "pydoc",
     "getpass",
@@ -39,6 +43,8 @@ MODULE_BLACKLIST = {
     "xxsubtype",
     "tkinter",
 }
+
+# Functions and classes blacklist
 CTYPES = {
     "PyObj_FromPtr",
     "string_at",
@@ -53,6 +59,7 @@ CTYPES = {
     "_wstring_at_addr",
     "dlopen",
 }
+
 SOCKET = {
     "gethostbyname",
     "gethostbyname_ex",
@@ -62,6 +69,7 @@ SOCKET = {
     "socket",
     "SocketType",
 }
+
 POSIX = {
     "_exit",
     "abort",
@@ -100,16 +108,11 @@ POSIX = {
     "tcsetpgrp",
     "closerange",
 }
+
 BUILTINS = {"pow", "round"}
 
-# Functions and methods blacklist. Format:
-#   module name => function and class names
-# and
-#    module name:class name => method names
-BLACKLIST = {
-    # sys tracing that will cause an error in fuzzing
-    "sys": {"settrace", "setprofile"},
-    # Dangerous module: ctypes
+# Per-module blacklists (mapping module name to set of names to blacklist)
+DEFAULT_BLACKLIST = {
     "ctypes": CTYPES,
     "_ctypes": CTYPES,
     # Eat a lot of CPU with large arguments
@@ -225,7 +228,9 @@ BLACKLIST = {
     # TODO: blacklist distutils/spawn.py (35): spawn
     # TODO: blacklist distutils/spawn.py (121): _spawn_posix
 }
-OBJECT_BLACKLIST = {
+
+# Default object blacklist
+DEFAULT_OBJECT_BLACKLIST = {
     "_PyRLock",
     "BoundedSemaphore",
     "LockType",
@@ -234,7 +239,9 @@ OBJECT_BLACKLIST = {
     "Semaphore",
     "AtomicInt64"
 }
-METHOD_BLACKLIST = {
+
+# Default method blacklist
+DEFAULT_METHOD_BLACKLIST = {
     "__class__",
     "__enter__",  # Damn locks
     "__imul__",
@@ -275,3 +282,10 @@ METHOD_BLACKLIST = {
     "wait",
     "zfill",
 }
+
+# Backward compatibility (DEPRECATED)
+# These are kept for old code that imports them directly
+MODULE_BLACKLIST = DEFAULT_MODULE_BLACKLIST
+METHOD_BLACKLIST = DEFAULT_METHOD_BLACKLIST
+OBJECT_BLACKLIST = DEFAULT_OBJECT_BLACKLIST
+BLACKLIST = DEFAULT_BLACKLIST
