@@ -27,13 +27,14 @@ OOM_MAX_START = 50
 OOM_CALLS = 3
 
 
-def _make_options(oom_fuzz):
+def _make_options(oom_fuzz, oom_verbose=False):
     """Build an options stand-in with the attributes generation reads."""
     o = MagicMock()
     # OOM mode
     o.oom_fuzz = oom_fuzz
     o.oom_max_start = OOM_MAX_START
     o.oom_calls = OOM_CALLS
+    o.oom_verbose = oom_verbose
     # General generation knobs
     o.fuzz_exceptions = False
     o.test_private = False
@@ -58,10 +59,10 @@ def _make_options(oom_fuzz):
     return o
 
 
-def _generate(oom_fuzz):
+def _generate(oom_fuzz, oom_verbose=False):
     """Generate a fuzzing script against the ``math`` module and return its source."""
     parent = MagicMock()
-    parent.options = _make_options(oom_fuzz)
+    parent.options = _make_options(oom_fuzz, oom_verbose)
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
     os.close(fd)
@@ -89,16 +90,31 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         self.assertIn("from _testcapi import set_nomemory", src)
         self.assertIn("_OOM_AVAILABLE", src)
 
-        # The dense-sweep harness, parameterised by --oom-max-start.
-        self.assertIn("def oom_call(", src)
+        # The dense-sweep harness, parameterised by --oom-max-start, now takes a label.
+        self.assertIn("def oom_call(label, func", src)
         self.assertIn(f"_OOM_MAX_START = {OOM_MAX_START}", src)
         self.assertIn("range(_OOM_MAX_START)", src)
         self.assertIn("_remove_mem_hooks()", src)
-        # MemoryError swallowed silently; other exceptions surfaced.
-        self.assertIn("except MemoryError:", src)
 
-        # One sweep site per --oom-calls.
-        self.assertEqual(src.count("oom_call(getattr(fuzz_target_module,"), OOM_CALLS)
+        # Per-call marker (the pinpointing signal) and exception policy:
+        # MemoryError swallowed silently, SystemError surfaced.
+        self.assertIn('print("[OOM] " + label', src)
+        self.assertIn("except MemoryError:", src)
+        self.assertIn("except SystemError:", src)
+        # The old noisy "print every exception type" surfacing is gone.
+        self.assertNotIn("print(type(_err).__name__)", src)
+
+        # Verbose off by default.
+        self.assertIn("_OOM_VERBOSE = False", src)
+
+        # One labelled sweep site per --oom-calls.
+        self.assertEqual(src.count('oom_call("'), OOM_CALLS)
+
+    def test_verbose_emits_per_iteration_start(self):
+        src = _generate(oom_fuzz=True, oom_verbose=True)
+        ast.parse(src)
+        self.assertIn("_OOM_VERBOSE = True", src)
+        self.assertIn('print("[OOM]   start=" + str(_start)', src)
 
     def test_non_oom_mode_has_no_oom_artifacts(self):
         src = _generate(oom_fuzz=False)
@@ -109,6 +125,7 @@ class TestOOMFuzzGeneration(unittest.TestCase):
             "set_nomemory",
             "_OOM_AVAILABLE",
             "_OOM_MAX_START",
+            "_OOM_VERBOSE",
             "remove_mem_hooks",
         ):
             self.assertNotIn(marker, src, f"unexpected OOM artifact {marker!r} in non-OOM script")

@@ -518,16 +518,25 @@ class WritePythonCode(WriteCode):
         if self.options.oom_fuzz:
             self.write_block(0, f'''
                 _OOM_MAX_START = {self.options.oom_max_start}
+                _OOM_VERBOSE = {bool(self.options.oom_verbose)}
 
-                def oom_call(func, *args, **kwargs):
+                def oom_call(label, func, *args, **kwargs):
                     # Dense OOM sweep: fail every allocation from #_start onward, one
-                    # _start per iteration. MemoryError is the expected outcome; a real
-                    # crash (segfault/abort) terminates the process, which is exactly the
-                    # signal fusil watches for. remove_mem_hooks runs in the inner finally
-                    # so the except clause allocates with the allocator restored.
+                    # _start per iteration. The per-call marker (printed once, before the
+                    # sweep) identifies which invocation was running if a crash follows --
+                    # more reliable than the faulthandler frame, which is often an
+                    # incidental allocation rather than the fuzzed target. MemoryError is
+                    # the expected outcome and is swallowed silently; SystemError is
+                    # surfaced (PyCFunction contract violations); a real crash
+                    # (segfault/abort) terminates the process, the signal fusil scores.
+                    # remove_mem_hooks runs in the inner finally so the except clauses
+                    # allocate with the allocator restored.
                     if not _OOM_AVAILABLE:
                         return
+                    print("[OOM] " + label, file=stderr)
                     for _start in range(_OOM_MAX_START):
+                        if _OOM_VERBOSE:
+                            print("[OOM]   start=" + str(_start), file=stderr)
                         _set_nomemory(_start, 0)
                         try:
                             try:
@@ -536,8 +545,10 @@ class WritePythonCode(WriteCode):
                                 _remove_mem_hooks()
                         except MemoryError:
                             pass
-                        except BaseException as _err:
-                            print(type(_err).__name__, file=stderr)
+                        except SystemError:
+                            print("[OOM] SystemError in " + label, file=stderr)
+                        except BaseException:
+                            pass
             ''')
             self.emptyLine()
 
@@ -1016,8 +1027,10 @@ class WritePythonCode(WriteCode):
         """Emits a module-level function call wrapped in a dense OOM sweep."""
         min_arg, max_arg = get_arg_number(func_obj, func_name, 1)
         num_args = randint(min_arg, max_arg)
+        # Per-call marker: the last one printed before a crash is the culprit call.
+        label = f"{prefix}:{self.module_name}.{func_name}"
         self.write(0, f"# OOM sweep: {func_name}")
-        self.write(0, f'oom_call(getattr(fuzz_target_module, "{func_name}"),')
+        self.write(0, f'oom_call("{label}", getattr(fuzz_target_module, "{func_name}"),')
         self._write_arguments_for_call_lines(num_args, 1)
         self.write(0, ")")
         self.emptyLine()
