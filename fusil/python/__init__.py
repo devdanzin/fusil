@@ -2,21 +2,26 @@ from __future__ import annotations
 
 import sys
 import time
+import warnings
 
-import fusil.python.tricky_weird
-from fusil.application import Application
-from fusil.config import (
-    OptionGroupWithSections,
-    OptionParserWithSections,
-    createFilename,
-)
-from fusil.process.create import CreateProcess
-from fusil.process.stdout import WatchStdout
-from fusil.process.watch import WatchProcess
-from fusil.project import Project
-from fusil.python.python_source import PythonSource
-from fusil.python.utils import print_running_time
-from fusil.python.write_python_code import time_start
+# python-ptrace (imported transitively below) emits deprecation warnings on
+# recent Python versions; hide them while importing the fusil runtime stack.
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import fusil.python.tricky_weird
+    from fusil.application import Application
+    from fusil.config import (
+        OptionGroupWithSections,
+        OptionParserWithSections,
+        createFilename,
+    )
+    from fusil.process.create import CreateProcess
+    from fusil.process.stdout import WatchStdout
+    from fusil.process.watch import WatchProcess
+    from fusil.project import Project
+    from fusil.python.python_source import PythonSource
+    from fusil.python.utils import print_running_time, remove_logging_pycache
+    from fusil.python.write_python_code import time_start
 
 print(sys.version)
 
@@ -445,3 +450,9 @@ class PythonProcess(CreateProcess):
             self.destroy()
             sys.exit(0)
         self.createProcess()
+
+
+def main() -> None:
+    """Console-script entry point for ``fusil-python-threaded``."""
+    remove_logging_pycache()
+    Fuzzer().main()

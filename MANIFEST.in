@@ -6,6 +6,7 @@ include doc/Makefile
 include examples/good-bye-world*
 include examples/hello-world*
 include examples/xterm*
+include fuzzers/fusil-*
 include fuzzers/notworking/fusil-*
 include graph.sh
 include IDEAS
@@ -13,7 +14,8 @@ include INSTALL
 include lsall.sh
 include pyflakes.sh
 include MANIFEST.in
-include README
+include README.rst
+include README_JIT.md
 include README.windows.txt
 include test_doc.py
 include tests/*.rst
