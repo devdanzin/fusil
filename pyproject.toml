@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fusil"
+description = "Fuzzing framework"
+authors = [
+    {name = "Victor Stinner", email = "victor.stinner@haypocalc.com"},
+]
+maintainers = [
+    {name = "Daniel Diniz", email = "lafleurfuzzer@gmail.com"},
+]
+requires-python = ">=3.11"
+license = {text = "GNU GPL v2"}
+keywords = ["fuzzing", "fuzzer", "security", "testing"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent",
+    "Natural Language :: English",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "python-ptrace>=0.7",
+]
+dynamic = ["version", "readme"]
+
+# Optional features used by the Python fuzzer when present (see fusil.python).
+[project.optional-dependencies]
+numpy = ["numpy"]
+h5py = ["h5py"]
+
+[project.urls]
+Homepage = "https://github.com/devdanzin/fusil"
+Repository = "https://github.com/devdanzin/fusil"
+
+# Only the actively-maintained Python fuzzer is exposed as a console script.
+# The legacy fuzzers/fusil-* scripts remain runnable from a checkout via
+# PYTHONPATH=$PWD ./fuzzers/<name>.
+[project.scripts]
+fusil-python-threaded = "fusil.python:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "fusil.version.VERSION"}
+readme = {file = ["README.rst", "ChangeLog"], content-type = "text/x-rst"}
+
+# Auto-discover all fusil packages (this also picks up fusil.python.h5py, which
+# the old hand-maintained setup.py package list omitted).
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fusil*"]
+namespaces = false

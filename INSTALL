@@ -36,11 +36,16 @@ Installation
 Fusil uses the user "fusil" and the group "fusil" to run child processes to
 avoid remove an arbitrary file or kill an arbitrary process.
 
-Type as root:
+Install with pip (build configuration lives in pyproject.toml):
 
-   ./setup.py install
+   pip install .
 
-Or using sudo program:
+Or, for development, an editable install:
 
-   sudo python setup.py install
+   pip install -e .
+
+This installs the "fusil-python-threaded" command. The other fuzzers/fusil-*
+scripts are run from a checkout, e.g.:
+
+   PYTHONPATH=$PWD ./fuzzers/fusil-gettext
 

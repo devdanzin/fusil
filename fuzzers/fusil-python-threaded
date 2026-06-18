@@ -31,13 +31,10 @@ Example:
 
 from __future__ import annotations
 
-import warnings
-
-# Hide Python deprecation warnings coming from ptrace
-with warnings.catch_warnings(action="ignore"):
-    from fusil.python import Fuzzer
-    from fusil.python.utils import remove_logging_pycache
+# Installed as the ``fusil-python-threaded`` console script via the
+# [project.scripts] entry point in pyproject.toml. Also runnable directly from
+# a checkout with: PYTHONPATH=$PWD ./fuzzers/fusil-python-threaded
+from fusil.python import main
 
 if __name__ == "__main__":
-    remove_logging_pycache()
-    Fuzzer().main()
+    main()
