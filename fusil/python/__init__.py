@@ -329,6 +329,30 @@ class Fuzzer(Application):
             default=True,
         )
 
+        oom_options = OptionGroupWithSections(parser, "OOM Fuzzing")
+        oom_options.add_option(
+            "--oom-fuzz",
+            help="Enable OOM (out-of-memory) injection: wrap calls in dense "
+                 "_testcapi.set_nomemory sweeps to drive allocation-failure error "
+                 "paths and find crashes (default: False)",
+            action="store_true",
+            default=False,
+        )
+        oom_options.add_option(
+            "--oom-max-start",
+            help="Dense OOM sweep upper bound (exclusive): each call sweeps "
+                 "range(0, N) (default: 1000)",
+            type="int",
+            default=1000,
+        )
+        oom_options.add_option(
+            "--oom-calls",
+            help="Number of OOM-wrapped function calls to generate per script "
+                 "(replaces --functions-number in OOM mode, default: 10)",
+            type="int",
+            default=10,
+        )
+
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
             "--write-config",
@@ -350,7 +374,7 @@ class Fuzzer(Application):
             default=False,
         )
 
-        options = input_options, running_options, fuzzing_options, jit_options, config_options
+        options = input_options, running_options, fuzzing_options, jit_options, oom_options, config_options
         for option in options:
             parser.add_option_group(option)
 
@@ -409,7 +433,12 @@ class Fuzzer(Application):
             "AddressSanitizer": 1.0,
         }
 
-        stdout.kill_words = {"MemoryError", "mimalloc"}
+        # In OOM mode, MemoryError is the expected (boring) outcome of injection,
+        # so it must not abort the session; real crashes still score via signal.
+        if self.options.oom_fuzz:
+            stdout.kill_words = {"mimalloc"}
+        else:
+            stdout.kill_words = {"MemoryError", "mimalloc"}
 
         # CPython critical messages
         stdout.addRegex("^XXX undetected error", 1.0)
