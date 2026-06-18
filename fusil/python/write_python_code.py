@@ -319,6 +319,19 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
+        if self.options.oom_fuzz:
+            self.write_block(0, '''
+                import faulthandler
+                faulthandler.enable()
+                try:
+                    from _testcapi import set_nomemory as _set_nomemory, remove_mem_hooks as _remove_mem_hooks
+                    _OOM_AVAILABLE = True
+                except ImportError:
+                    _OOM_AVAILABLE = False
+                    print("OOM mode requested but _testcapi.set_nomemory unavailable; running without injection", file=stderr)
+            ''')
+            self.emptyLine()
+
     def _write_tricky_definitions(self) -> None:
         """Writes definitions for 'tricky' classes and objects."""
         self.write(0, fusil.python.tricky_weird.weird_classes)
@@ -502,6 +515,32 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
+        if self.options.oom_fuzz:
+            self.write_block(0, f'''
+                _OOM_MAX_START = {self.options.oom_max_start}
+
+                def oom_call(func, *args, **kwargs):
+                    # Dense OOM sweep: fail every allocation from #_start onward, one
+                    # _start per iteration. MemoryError is the expected outcome; a real
+                    # crash (segfault/abort) terminates the process, which is exactly the
+                    # signal fusil watches for. remove_mem_hooks runs in the inner finally
+                    # so the except clause allocates with the allocator restored.
+                    if not _OOM_AVAILABLE:
+                        return
+                    for _start in range(_OOM_MAX_START):
+                        _set_nomemory(_start, 0)
+                        try:
+                            try:
+                                func(*args, **kwargs)
+                            finally:
+                                _remove_mem_hooks()
+                        except MemoryError:
+                            pass
+                        except BaseException as _err:
+                            print(type(_err).__name__, file=stderr)
+            ''')
+            self.emptyLine()
+
     def _write_main_fuzzing_logic(self) -> None:
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self.write(0, f"fuzz_target_module = {self.module_name}")
@@ -530,11 +569,24 @@ class WritePythonCode(WriteCode):
                 0,
                 f'"--- Fuzzing {len(self.module_functions)} functions in {self.module_name} ---"',
             )
-            for i in range(self.options.functions_number):
+            n_calls = (
+                self.options.oom_calls
+                if self.options.oom_fuzz
+                else self.options.functions_number
+            )
+            for i in range(n_calls):
                 prefix = f"f{i + 1}"
 
                 # --- SIMPLIFIED LOGIC ---
-                if self.options.jit_fuzz:
+                if self.options.oom_fuzz:
+                    # OOM injection: wrap a function call in a dense set_nomemory sweep
+                    func_name = choice(self.module_functions)
+                    try:
+                        func_obj = getattr(self.module, func_name)
+                    except AttributeError:
+                        continue
+                    self._generate_oom_function_call(prefix, func_name, func_obj)
+                elif self.options.jit_fuzz:
                     self.jit_writer.generate_scenario(prefix)
                 else:
                     # Standard (non-JIT) function call fuzzing
@@ -554,6 +606,10 @@ class WritePythonCode(WriteCode):
                     )
 
         self.emptyLine()
+
+        # Phase 1 OOM mode targets module-level functions only.
+        if self.options.oom_fuzz:
+            return
 
         # Fuzz classes (instantiate and call methods)
         if self.module_classes:
@@ -953,6 +1009,18 @@ class WritePythonCode(WriteCode):
                     arg_line_part + (last_char if arg_line_part == arg_lines[-1] else ""),
                 )
 
+
+    def _generate_oom_function_call(
+        self, prefix: str, func_name: str, func_obj: Callable[..., Any]
+    ) -> None:
+        """Emits a module-level function call wrapped in a dense OOM sweep."""
+        min_arg, max_arg = get_arg_number(func_obj, func_name, 1)
+        num_args = randint(min_arg, max_arg)
+        self.write(0, f"# OOM sweep: {func_name}")
+        self.write(0, f'oom_call(getattr(fuzz_target_module, "{func_name}"),')
+        self._write_arguments_for_call_lines(num_args, 1)
+        self.write(0, ")")
+        self.emptyLine()
 
     def _generate_and_write_call(
         self,
