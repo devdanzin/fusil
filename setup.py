@@ -21,6 +21,7 @@
 #  - hg push
 
 from importlib.machinery import SourceFileLoader
+from importlib.util import spec_from_file_location, module_from_spec
 from os import path
 from sys import argv
 from glob import glob
@@ -58,7 +59,14 @@ def main():
         from distutils.core import setup
         use_setuptools = False
 
-    fusil = SourceFileLoader("version", path.join("fusil", "version.py")).load_module()
+    version_path = path.join("fusil", "version.py")
+    try:
+        fusil = SourceFileLoader("version", version_path).load_module()
+    except AttributeError:
+        fusil_spec = spec_from_file_location("version", version_path)
+        fusil = module_from_spec(fusil_spec)
+        fusil_spec.loader.exec_module(fusil)
+
     PACKAGES = {}
     for name in MODULES:
         PACKAGES[name] = name.replace(".", "/")
