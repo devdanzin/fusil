@@ -352,6 +352,14 @@ class Fuzzer(Application):
             type="int",
             default=10,
         )
+        oom_options.add_option(
+            "--oom-verbose",
+            help="In OOM mode, also print the sweep start index before each "
+                 "injection so the exact failing allocation can be pinpointed on "
+                 "replay (verbose output; default: False)",
+            action="store_true",
+            default=False,
+        )
 
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(

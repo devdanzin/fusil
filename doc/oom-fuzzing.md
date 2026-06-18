@@ -50,6 +50,7 @@ A new `OOM Fuzzing` option group:
 | `--oom-fuzz` | bool | `False` | Enable OOM mode. |
 | `--oom-max-start` | int | `1000` | Dense sweep upper bound (exclusive): each call sweeps `range(0, N)`. |
 | `--oom-calls` | int | `10` | Number of OOM-wrapped function calls per script (replaces `--functions-number` in OOM mode, bounding `oom_calls × oom_max_start` total iterations). |
+| `--oom-verbose` | bool | `False` | Also print the sweep `start` index before each injection, so the exact failing allocation can be pinpointed on replay (verbose; ~`oom_max_start` lines per call). |
 
 Options thread automatically via `self.options` → `PythonSource` →
 `WritePythonCode.options`.
@@ -73,14 +74,22 @@ except ImportError:
 
 ```python
 _OOM_MAX_START = <oom_max_start>
+_OOM_VERBOSE = <oom_verbose>
 
-def oom_call(func, *args, **kwargs):
-    # Dense OOM sweep. MemoryError is the expected outcome; a segfault/abort
-    # terminates the process (the signal fusil scores as success). remove_mem_hooks
-    # runs in the inner finally so the except clause allocates safely.
+def oom_call(label, func, *args, **kwargs):
+    # Dense OOM sweep. The per-call marker (printed once, before the sweep)
+    # identifies which invocation was running if a crash follows -- more reliable
+    # than the faulthandler frame, which is often an incidental allocation rather
+    # than the fuzzed target. MemoryError is swallowed silently; SystemError is
+    # surfaced (PyCFunction contract violations); a segfault/abort terminates the
+    # process (the signal fusil scores). remove_mem_hooks runs in the inner finally
+    # so the except clauses allocate safely.
     if not _OOM_AVAILABLE:
         return
+    print("[OOM] " + label, file=stderr)
     for _start in range(_OOM_MAX_START):
+        if _OOM_VERBOSE:
+            print("[OOM]   start=" + str(_start), file=stderr)
         _set_nomemory(_start, 0)
         try:
             try:
@@ -89,8 +98,10 @@ def oom_call(func, *args, **kwargs):
                 _remove_mem_hooks()
         except MemoryError:
             pass
-        except BaseException as _err:
-            print(type(_err).__name__, file=stderr)
+        except SystemError:
+            print("[OOM] SystemError in " + label, file=stderr)
+        except BaseException:
+            pass
 ```
 
 **Call sites** (new `_generate_oom_function_call`, reusing
@@ -98,13 +109,23 @@ def oom_call(func, *args, **kwargs):
 
 ```python
 # OOM sweep: <func_name>
-oom_call(getattr(fuzz_target_module, "<func_name>"),
+oom_call("<prefix>:<module>.<func_name>", getattr(fuzz_target_module, "<func_name>"),
     <arg lines>,
 )
 ```
 
 Arguments are built **once** at the `oom_call(...)` expression (outside the sweep
 loop); arming happens inside `oom_call` after the args exist.
+
+### Pinpointing which call crashed
+
+faulthandler's top Python frame is frequently an *incidental* allocation (GC /
+finalization / warnings firing as the budget runs out), not the fuzzed target —
+so it is unreliable for attribution. The **last `[OOM] <prefix>:<module>.<func>`
+marker** printed before the crash dump identifies the culprit invocation. With
+`--oom-verbose`, the immediately preceding `[OOM]   start=N` line gives the exact
+allocation offset, which is enough to write a minimal reproducer. Marker prefixes
+(`[OOM]`) are chosen to avoid the stdout scorer's words.
 
 ### 3. Wiring (`_write_main_fuzzing_logic`)
 
