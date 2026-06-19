@@ -531,7 +531,7 @@ class WritePythonCode(WriteCode):
                     # (segfault/abort) terminates the process, the signal fusil scores.
                     # remove_mem_hooks runs in the inner finally so the except clauses
                     # allocate with the allocator restored.
-                    if not _OOM_AVAILABLE:
+                    if not _OOM_AVAILABLE or func is None:
                         return
                     print("[OOM] " + label, file=stderr)
                     for _start in range(_OOM_MAX_START):
@@ -618,8 +618,24 @@ class WritePythonCode(WriteCode):
 
         self.emptyLine()
 
-        # Phase 1 OOM mode targets module-level functions only.
+        # OOM mode (Phase 2): after module-level function sweeps, sweep class
+        # constructors and methods -- where the high-value unchecked-allocation bugs
+        # live -- then stop (the non-OOM class/object blocks below are skipped).
         if self.options.oom_fuzz:
+            if self.module_classes and self.options.oom_classes > 0:
+                self.write_print_to_stderr(
+                    0,
+                    f'"--- OOM-fuzzing {len(self.module_classes)} classes in {self.module_name} ---"',
+                )
+                for i in range(self.options.oom_classes):
+                    class_name = choice(self.module_classes)
+                    if class_name in OBJECT_BLACKLIST:
+                        continue
+                    try:
+                        class_obj = getattr(self.module, class_name)
+                    except AttributeError:
+                        continue
+                    self._generate_oom_class_fuzzing(f"oc{i + 1}", class_name, class_obj)
             return
 
         # Fuzz classes (instantiate and call methods)
@@ -1033,6 +1049,62 @@ class WritePythonCode(WriteCode):
         self.write(0, f'oom_call("{label}", getattr(fuzz_target_module, "{func_name}"),')
         self._write_arguments_for_call_lines(num_args, 1)
         self.write(0, ")")
+        self.emptyLine()
+
+    def _generate_oom_class_fuzzing(
+        self, prefix: str, class_name: str, class_obj: type
+    ) -> None:
+        """Emits an OOM sweep over a class constructor and, on a live instance, its methods.
+
+        Phase 2 of OOM fuzzing: constructors and methods reach allocation paths the
+        module-level function sweep cannot (e.g. OOM-0030 is a str-subclass constructor
+        bug). The constructor is swept directly -- the class is itself the callable -- and
+        methods are swept on a single instance built once outside the sweep, so each runs
+        against a real object. Argument values are built once at the oom_call(...)
+        expression; arming happens inside oom_call.
+        """
+        # 1. Constructor sweep -- the class object is the callable.
+        ctor_args = class_arg_number(class_name, class_obj)
+        ctor_label = f"{prefix}:{self.module_name}.{class_name}"
+        self.write(0, f"# OOM sweep: {class_name}() constructor")
+        self.write(0, f'oom_call("{ctor_label}", getattr(fuzz_target_module, "{class_name}", None),')
+        self._write_arguments_for_call_lines(ctor_args, 1)
+        self.write(0, ")")
+        self.emptyLine()
+
+        # 2. Discover methods (generation-time, blacklist-respecting). None -> done.
+        methods = self._get_object_methods(class_obj, class_name)
+        if not methods or self.options.oom_methods < 1:
+            return
+        method_names = sorted(methods.keys())
+
+        # 3. Build one live instance (plain, outside any sweep) to fuzz methods against.
+        inst = f"oom_inst_{prefix}_{class_name.lower().replace('.', '_')}"
+        self.write(0, f"{inst} = None")
+        self.write(0, "try:")
+        self.write(1, f'{inst} = callFunc("{prefix}_init", "{class_name}",')
+        self._write_arguments_for_call_lines(ctor_args, 2)
+        self.write(1, ")")
+        self.write(0, "except Exception:")
+        self.write(1, f"{inst} = None")
+        self.emptyLine()
+
+        # 4. Method sweeps on the live instance.
+        self.write(0, f"if {inst} is not None and {inst} is not SENTINEL_VALUE:")
+        saved = self.addLevel(1)
+        for j in range(self.options.oom_methods):
+            m_name = choice(method_names)
+            m_obj = methods[m_name]
+            min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
+            num_args = randint(min_arg, max_arg)
+            m_label = f"{prefix}m{j + 1}:{self.module_name}.{class_name}.{m_name}"
+            self.write(0, f"# OOM sweep: {class_name}.{m_name}()")
+            self.write(0, f'oom_call("{m_label}", getattr({inst}, "{m_name}", None),')
+            self._write_arguments_for_call_lines(num_args, 1)
+            self.write(0, ")")
+        self.write(0, f"del {inst}")
+        self.write(0, "collect()")
+        self.restoreLevel(saved)
         self.emptyLine()
 
     def _generate_and_write_call(

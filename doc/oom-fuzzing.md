@@ -25,14 +25,45 @@ signal fusil watches for. So **no per-iteration subprocess isolation is needed**
 
 ## Phases
 
-- **Phase 1 (this doc, implemented first):** `_testcapi.set_nomemory` injection,
+- **Phase 1 (implemented):** `_testcapi.set_nomemory` injection,
   **module-level functions only**, no refactor.
-- **Phase 2:** extract a single call-emission seam
-  (`_emit_call(target, name, args, harness=...)`) so the OOM/plain/JIT paths
-  share one primitive, then extend OOM coverage to methods, constructors, and
-  returned objects (where the high-value unchecked-allocation bugs live).
+- **Phase 2 (implemented — constructors + methods):** extend OOM coverage to
+  class **constructors** and **methods**, where the high-value unchecked-allocation
+  bugs live (e.g. OOM-0030 is a str-subclass constructor bug). Done with a targeted
+  `_generate_oom_class_fuzzing(prefix, class_name, class_obj)` that reuses the existing
+  `oom_call` harness rather than the originally-sketched `_emit_call` seam refactor —
+  the seam (unifying the plain/JIT/OOM call-emission paths) is deferred as separate
+  cleanup since it touches the working plain and JIT paths for no extra coverage.
+  Returned-object methods (depth > 1) remain a future Phase 2c.
 - **Phase 3:** libfiu / `LD_PRELOAD` system-malloc injection (reaches foreign C
   libraries that `set_nomemory` cannot), driven via the child process env.
+
+## Phase 2 specification (classes)
+
+Gated behind `options.oom_fuzz`, after the Phase 1 function sweeps and bounded by two
+new options (so OOM-mode cost is controlled separately from the non-OOM
+`--classes-number`/`--methods-number`):
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--oom-classes` | `5` | Classes to OOM-fuzz per script (constructor sweep + method sweeps); `0` disables class fuzzing in OOM mode. |
+| `--oom-methods` | `5` | Method sweeps per instantiated class. |
+
+`_generate_oom_class_fuzzing` emits, per chosen class:
+
+1. **Constructor sweep** — the class object is itself the callable:
+   `oom_call("oc<i>:<mod>.<Class>", getattr(fuzz_target_module, "<Class>", None), <ctor args>)`.
+2. **One live instance**, built once *outside* any sweep via the existing `callFunc`
+   helper in a `try/except`, so methods run against a real object (not re-created 1000×).
+3. **Method sweeps** on that instance (discovered at generation time via
+   `_get_object_methods`, blacklist-respecting), guarded by
+   `if inst is not None and inst is not SENTINEL_VALUE:` — each is
+   `oom_call("oc<i>m<j>:<mod>.<Class>.<method>", getattr(inst, "<method>", None), <args>)`.
+   The safe `getattr(..., None)` plus the harness guard `if ... or func is None: return`
+   make a missing bound method a no-op sweep, never a raise.
+
+The non-OOM class/object blocks stay gated off in OOM mode (the function loop falls
+through to the class loop, then returns).
 
 ---
 
