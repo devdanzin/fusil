@@ -132,6 +132,41 @@ class TestDeduper(unittest.TestCase):
         self.assertTrue(all(d.decide(ABORT_0003)[0] for _ in range(5)))
 
 
+class TestHardening(unittest.TestCase):
+    """Match ALL of a crash's signals (every assertion + every gdb-chain frame), incl.
+    CPython's double-quote Assertion form -- so a known bug behind a secondary frame /
+    later assertion isn't mislabeled oomNEW (the OOM-0017/0020 fleet false positives)."""
+    def _deduper(self, resolver=None):
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT + "\nOOM-0099\tabort\tline\tPython/gc_free_threading.c:1116\n")
+        self.addCleanup(os.unlink, path)
+        return oom_dedup.Deduper(path, resolve_segv=resolver is not None, segv_resolver=resolver)
+
+    def test_double_quote_assertion_parsed(self):
+        a = oom_dedup.all_asserts(
+            'Python/gc_free_threading.c:1116: validate_gc_objects: Assertion "gc_get_refs(op) >= 0" failed: x')
+        self.assertEqual(a[0][0], "Python/gc_free_threading.c")
+        self.assertEqual(a[0][1], 1116)
+        self.assertEqual(a[0][2], "validate_gc_objects")
+
+    def test_secondary_assertion_matches_known(self):
+        # primary (gdb-caught) assert is unknown, but an earlier listed assert is known.
+        stdout = ('Python/gc_free_threading.c:1116: validate_gc_objects: Assertion "gc_get_refs(op) >= 0" failed\n'
+                  'Python/ceval.h:148: check_invalid_reentrancy: Assertion `!x\' failed.\n'
+                  'Fatal Python error: Aborted')
+        keep, label = self._deduper().decide(stdout)
+        self.assertTrue(keep)
+        self.assertEqual(label, "OOM-0099")
+
+    def test_secondary_chain_frame_matches_known(self):
+        # gdb chain: frame 0 is new, a deeper frame is a known bug -> known, not oomNEW.
+        d = self._deduper(resolver=lambda sp: ["brand_new@Objects/zzz.c:9",
+                                               "dictiter_dealloc@Objects/dictobject.c:5532"])
+        keep, label = d.decide(SEGV, source_path="s")
+        self.assertEqual((keep, label), (True, "OOM-0006"))
+
+
 class TestExtractSite(unittest.TestCase):
     def test_skips_plumbing_returns_real_site(self):
         self.assertEqual(oom_dedup.extract_site_from_bt(BT),

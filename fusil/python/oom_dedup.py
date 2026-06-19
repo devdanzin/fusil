@@ -3,25 +3,33 @@
 Pure-Python and free of any runtime (python-ptrace) dependency, so it unit-tests in
 isolation. It loads the known-sites snapshot produced by the cpython-oom-findings
 catalog (``gen_known_sites.py`` -> ``known_sites.tsv``) and, given a crash's captured
-stdout, decides whether the crash is a *known* bug (and how many we've already kept) so
-the fuzzer can prune duplicates in-loop and self-label each crash directory.
+stdout (and optionally its source.py for gdb resolution), decides whether the crash is a
+*known* bug so the fuzzer can prune duplicates in-loop and self-label each crash dir.
 
-Tier-1 resolution only: aborts and fatals carry an exact ``file:line: func(): Assertion``
-/ ``Fatal Python error: <msg>`` in stdout and dedupe build-stably for free. Segvs have
-no reliable C site in stdout and are returned ``unresolved`` -- never pruned here; a
-later phase resolves them via the debugger. The snapshot file format is the contract
-shared with the catalog's ``ingest.py``.
+Matching considers EVERY signal a crash offers and calls it known if ANY matches the
+catalog: all assertions in stdout (glibc ``Assertion `expr'`` and CPython
+``Assertion "expr"`` forms), a specific ``Fatal Python error: <msg>``, and -- for segvs
+or generic-assert fatals, when ``resolve_segv`` is set -- every real CPython frame in the
+gdb backtrace (re-running source.py on the same binary). Checking all signals avoids
+false ``oomNEW`` labels when the gdb-caught frame is a secondary/cascade site but an
+earlier assertion or a deeper frame is a known bug. The snapshot file format is the
+contract shared with the catalog's ``ingest.py``.
 """
 import re
 import os
 import collections
 import subprocess
 
-# ---- stdout classification (mirrors catalog ingest.py tier-1) ----
-ASSERT = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):[^\n]*?\b(\w+)\s*\([^)]*\)\s*:\s*Assertion `([^']*)' failed")
-ASSERT2 = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):[^\n]*?Assertion `([^']*)' failed")
+# ---- stdout classification ----
+# An assertion line: "<file>:<line>: [ret] <func>[(args)]: Assertion <q>expr<q> failed[: msg]".
+# Handles both glibc (`expr') and CPython ("expr") quoting, and an optional (args) list.
+ASSERT = re.compile(
+    r"([\w./+-]+\.(?:c|h)):(\d+):.*?\b(\w+)\s*(?:\([^)]*\))?\s*:\s*Assertion[ `\"]+([^`'\"]*)")
+ASSERT2 = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):.*?Assertion[ `\"]+([^`'\"]*)")  # func-less fallback
 FATAL = re.compile(r'Fatal Python error:\s*([^\n]+)')
 SEGV = re.compile(r'AddressSanitizer: SEGV|Fatal Python error: Segmentation fault|Segmentation fault')
+IMPORTERR = re.compile(r'(ModuleNotFoundError|ImportError):')
+# Generic fatal wrappers that carry no usable site in stdout -> resolve via gdb instead.
 GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 
 
@@ -29,32 +37,42 @@ def _nf(f):
     return f.lstrip("./")
 
 
+def all_asserts(text):
+    """Every assertion in stdout as a list of (file, line, func|None, expr)."""
+    out, seen = [], set()
+    for m in ASSERT.finditer(text):
+        key = (_nf(m.group(1)), int(m.group(2)))
+        out.append((key[0], key[1], m.group(3), m.group(4).strip()))
+        seen.add(key)
+    for m in ASSERT2.finditer(text):           # catch lines without a parseable func
+        key = (_nf(m.group(1)), int(m.group(2)))
+        if key not in seen:
+            out.append((key[0], key[1], None, m.group(3).strip()))
+            seen.add(key)
+    return out
+
+
 def classify(text):
-    """Classify a crash from its stdout. Returns a dict with ``kind`` in
-    {abort, fatal, segv, import, clean} plus any resolved file/line/func/assert/msg."""
-    m = ASSERT.search(text) or ASSERT2.search(text)
-    if m:
-        g = m.groups()
-        f, ln, func, expr = g if len(g) == 4 else (g[0], g[1], None, g[2])
-        return dict(kind="abort", file=_nf(f), line=int(ln), func=func,
-                    assert_expr=expr.strip(), fatal_msg=None)
+    """Coarse kind of a crash from its stdout (back-compat helper). Returns a dict with
+    ``kind`` in {abort, fatal, segv, import, clean} plus the *first* resolved signal."""
+    a = all_asserts(text)
+    if a:
+        f, ln, func, expr = a[0]
+        return dict(kind="abort", file=f, line=ln, func=func, assert_expr=expr, fatal_msg=None)
     fa = FATAL.search(text)
     if fa and not SEGV.search(text):
         msg = fa.group(1).strip()
         if msg.startswith(GENERIC_FATAL):       # carries no site -> treat like segv
-            return dict(kind="segv", file=None, line=None, func=None,
-                        assert_expr=None, fatal_msg=None)
-        return dict(kind="fatal", file=None, line=None, func=None,
-                    assert_expr=None, fatal_msg=msg[:60])
+            return dict(kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None)
+        return dict(kind="fatal", file=None, line=None, func=None, assert_expr=None, fatal_msg=msg[:60])
     if SEGV.search(text):
-        return dict(kind="segv", file=None, line=None, func=None,
-                    assert_expr=None, fatal_msg=None)
-    if re.search(r'(ModuleNotFoundError|ImportError):', text):
+        return dict(kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None)
+    if IMPORTERR.search(text):
         return dict(kind="import")
     return dict(kind="clean")
 
 
-# ---- snapshot loading + matching (mirrors catalog ingest.py) ----
+# ---- snapshot loading + matching ----
 def load_snapshot(lines):
     """Load ``known_sites.tsv`` rows (an iterable of lines) into matcher tables."""
     by_func, by_assert, by_line = {}, {}, {}
@@ -89,7 +107,7 @@ def load_snapshot_file(path):
 
 
 def match(c, snap):
-    """Return (oom_ids:set, how:str). Empty set + 'NEW' if unmatched."""
+    """Match ONE candidate (file/line/func/assert_expr/fatal_msg) -> (oom_ids:set, how)."""
     if c.get("assert_expr") and c.get("file"):
         hit = snap["assert_"].get("%s:%s" % (c["file"], c["assert_expr"]))
         if hit:
@@ -113,30 +131,38 @@ def match(c, snap):
     return set(), "NEW"
 
 
-# ---- Phase B: segv site resolution by re-running source.py under gdb ----
+# ---- segv site resolution by re-running source.py under gdb ----
 # gdb frame:  "#5  0x.. in func (args) at Objects/foo.c:123"  or  "#0 func (..) at ..."
 _BT_FRAME = re.compile(
     r'^#\d+\s+(?:0x[0-9a-fA-F]+ in )?(\w+)\b.*?\bat '
     r'((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+):(\d+)')
-# fatal/assert/dump plumbing -- skip so the recorded frame is the real crash/assert site
+# fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site
 _BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
                       r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
                       r'|_Py_DumpExtensionModules)$')
 _SITE = re.compile(r'^(\w+)@([\w./+-]+):(\d+)$')
 
 
-def extract_site_from_bt(bt_text):
-    """First real CPython frame in a gdb backtrace -> 'func@file:line' (or None)."""
+def extract_sites_from_bt(bt_text):
+    """All real CPython frames in a gdb backtrace, innermost first, as 'func@file:line'
+    (fatal/assert/dump plumbing skipped)."""
+    out = []
     for line in bt_text.splitlines():
         m = _BT_FRAME.match(line.strip())
         if m and not _BT_SKIP.match(m.group(1)):
-            return "%s@%s:%s" % (m.group(1), m.group(2), m.group(3))
-    return None
+            out.append("%s@%s:%s" % (m.group(1), m.group(2), m.group(3)))
+    return out
+
+
+def extract_site_from_bt(bt_text):
+    """First real CPython frame (back-compat)."""
+    sites = extract_sites_from_bt(bt_text)
+    return sites[0] if sites else None
 
 
 def gdb_crash_site(python_bin, source_path, timeout=120):
-    """Re-run source.py under gdb on ``python_bin`` (deterministic on the same binary)
-    and return the resolved crash site 'func@file:line', or None if it can't be found."""
+    """Re-run source.py under gdb on ``python_bin`` (deterministic on the same binary) and
+    return the chain of real CPython frames ['func@file:line', ...] (innermost first)."""
     try:
         out = subprocess.run(
             ["gdb", "-q", "-batch", "-ex", "set pagination off",
@@ -146,27 +172,24 @@ def gdb_crash_site(python_bin, source_path, timeout=120):
             env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0"},
         ).stdout
     except (OSError, subprocess.SubprocessError):
-        return None
-    return extract_site_from_bt(out)
+        return []
+    return extract_sites_from_bt(out)
 
 
-def _site_to_classification(site):
+def _site_to_candidate(site):
     m = _SITE.match(site)
     if not m:
         return None
-    return dict(kind="segv", file=m.group(2), func=m.group(1), line=int(m.group(3)),
+    return dict(file=_nf(m.group(2)), func=m.group(1), line=int(m.group(3)),
                 assert_expr=None, fatal_msg=None)
 
 
 class Deduper:
-    """Stateful in-loop deduper: feed each crash's stdout, get a (keep, label) decision.
+    """Stateful in-loop deduper: feed each crash's stdout (+ source.py), get (keep, label).
 
     keep=False is only ever returned for a *confidently-known* bug already at its sample
     cap, and only when ``prune`` is enabled -- new/unresolved/segv crashes are always kept.
-
-    Phase B: when ``resolve_segv`` is set, a segv (or generic-assert fatal) is resolved to
-    its real site by re-running ``source_path`` under gdb on ``python_bin`` -- so segvs
-    dedupe/label/prune like aborts. ``segv_resolver`` (source_path -> site|None) is
+    ``segv_resolver`` (source_path -> ['func@file:line', ...] | 'func@file:line' | None) is
     injectable for testing; it defaults to :func:`gdb_crash_site`.
     """
     def __init__(self, snapshot_path, keep=5, prune=False, python_bin=None,
@@ -182,41 +205,63 @@ class Deduper:
         self.kept = collections.Counter()   # bug -> directories kept
 
     def _resolve(self, source_path):
-        if self._resolver is not None:
-            return self._resolver(source_path)
-        if self.python_bin and source_path:
-            return gdb_crash_site(self.python_bin, source_path, self.gdb_timeout)
-        return None
+        """Return a list of 'func@file:line' chain frames (normalising the resolver)."""
+        r = self._resolver(source_path) if self._resolver is not None else (
+            gdb_crash_site(self.python_bin, source_path, self.gdb_timeout)
+            if (self.python_bin and source_path) else None)
+        if not r:
+            return []
+        return [r] if isinstance(r, str) else list(r)
 
     def decide(self, stdout_text, source_path=None):
-        """Return (keep: bool, label: str) for one crash."""
-        c = classify(stdout_text)
-        kind = c.get("kind")
-        if kind in ("clean", "import"):
-            return True, "oom" + (kind or "")
-        if kind == "segv":
-            site = self._resolve(source_path) if self.resolve_segv else None
-            resolved = _site_to_classification(site) if site else None
-            if resolved is None:
-                self.seen["segv:unresolved"] += 1
-                return True, "oomSEGV"       # can't resolve -> always keep
-            c = resolved
-        ids, how = match(c, self.snap)
-        if not ids:
-            key = (c.get("assert_expr") and "%s:%s" % (c["file"], c["assert_expr"])) \
-                  or (c.get("func") and "%s:%s" % (c["file"], c["func"])) \
-                  or c.get("fatal_msg") or "?"
-            self.seen["NEW:" + key] += 1
-            return True, "oomNEW"            # never prune a candidate-new site
-        oid = sorted(ids)[0]
-        self.seen[oid] += 1
-        if self.prune and self.kept[oid] >= self.keep_cap:
-            return False, oid                # known + over cap -> prune duplicate
-        self.kept[oid] += 1
-        return True, oid
+        """Return (keep: bool, label: str) for one crash, matching ALL of its signals."""
+        asserts = all_asserts(stdout_text)
+        fa = FATAL.search(stdout_text)
+        fmsg = fa.group(1).strip() if fa else None
+        has_segv = bool(SEGV.search(stdout_text))
+        generic_fatal = bool(fmsg) and fmsg.startswith(GENERIC_FATAL)
+
+        # No crash signal at all -> import / clean (cheap shortcut).
+        if not asserts and not has_segv and not fmsg:
+            return True, ("oomimport" if IMPORTERR.search(stdout_text) else "oomclean")
+
+        # Build candidate signals from everything the crash offers.
+        candidates = [dict(file=f, line=ln, func=fn, assert_expr=expr, fatal_msg=None)
+                      for (f, ln, fn, expr) in asserts]
+        if fmsg and not generic_fatal and not fmsg.lower().startswith(("segmentation", "aborted")):
+            candidates.append(dict(file=None, line=None, func=None, assert_expr=None,
+                                   fatal_msg=fmsg[:60]))
+        # Resolve via gdb when the stdout site is unreliable (pure segv / generic-assert
+        # fatal) or nothing matched yet -- and add every chain frame as a candidate.
+        chain = []
+        if self.resolve_segv and (has_segv or generic_fatal or not asserts):
+            chain = self._resolve(source_path)
+            candidates += [c for c in (_site_to_candidate(s) for s in chain) if c]
+
+        matched = set()
+        for c in candidates:
+            matched |= match(c, self.snap)[0]
+        if matched:
+            oid = sorted(matched)[0]
+            self.seen[oid] += 1
+            if self.prune and self.kept[oid] >= self.keep_cap:
+                return False, oid            # known + over cap -> prune duplicate
+            self.kept[oid] += 1
+            return True, oid
+
+        # Nothing matched the catalog.
+        if has_segv and not chain and not asserts:
+            self.seen["segv:unresolved"] += 1
+            return True, "oomSEGV"           # couldn't resolve a site -> always keep
+        prim = candidates[0] if candidates else {}
+        key = (prim.get("assert_expr") and "%s:%s" % (prim["file"], prim["assert_expr"])) \
+            or (prim.get("func") and "%s:%s" % (prim["file"], prim["func"])) \
+            or prim.get("fatal_msg") or (chain[0] if chain else "?")
+        self.seen["NEW:" + key] += 1
+        return True, "oomNEW"                # never prune a candidate-new site
 
     def report(self):
         lines = ["OOM dedupe summary (seen / kept):"]
         for key, n in self.seen.most_common():
-            lines.append("  %-22s seen=%-5d kept=%d" % (key, n, self.kept.get(key, n)))
+            lines.append("  %-30s seen=%-5d kept=%d" % (key, n, self.kept.get(key, n)))
         return "\n".join(lines)
