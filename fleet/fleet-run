@@ -19,6 +19,9 @@ gil="${_modes[$(( (i - 1) % ${#_modes[@]} ))]}"
 
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
 export PYTHON_GIL="$gil"
+# systemd runs with a clean environment (no venv activation); add the fusil repo root so
+# `import fusil` works whether or not fusil is pip-installed in RUNNER_PY's environment.
+export PYTHONPATH="$(dirname "$(dirname "$FUSIL_PY")")${PYTHONPATH:+:$PYTHONPATH}"
 
 # Output sink: a per-run logfile (truncated each start) or discard.
 if [ "${LOG:-file}" = "none" ]; then
