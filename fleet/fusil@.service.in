@@ -9,6 +9,8 @@ After=network.target
 
 [Service]
 Type=simple
+# The config `fleet up` validated (so instances read the same one, not the in-repo example).
+Environment=FLEET_CONF=@@FLEET_CONF@@
 ExecStart=@@FLEET_RUN@@ %i
 Restart=always
 RestartSec=10

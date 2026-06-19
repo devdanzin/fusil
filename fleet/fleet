@@ -13,8 +13,9 @@
 # All paths/flags come from fleet.conf next to this script.
 set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+CONF_FILE="${FLEET_CONF:-$HERE/fleet.conf}"
 # shellcheck source=/dev/null
-. "${FLEET_CONF:-$HERE/fleet.conf}"
+. "$CONF_FILE"
 : "${INSTANCES:=$(( $(nproc) - 1 ))}"
 UNIT_NAME="fusil@.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
@@ -28,7 +29,8 @@ units(){  # active/loaded fusil@N units, one per line
     systemctl list-units --all --no-legend --plain 'fusil@*.service' 2>/dev/null | awk '{print $1}'
 }
 list_crashes(){  # every kept crash dir under an instance (layout-agnostic: has source.py)
-    find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null | sort -u
+    [ -d "$1" ] || return 0                     # dir may not exist yet -> don't trip set -e
+    find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null | sort -u || true
 }
 
 cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:
@@ -47,6 +49,13 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
         PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$RUNNER_PY" -c 'import fusil, ptrace' 2>/dev/null \
             || { echo "  RUNNER_PY cannot 'import fusil, ptrace': '$RUNNER_PY'"
                  echo "    -> wrong python (not the venv), or python-ptrace not installed"; ok=0; }
+        # PYTHON_GIL is inherited by the runner too -- a non-free-threaded runner fatals
+        # on PYTHON_GIL=0. Check every GIL mode we'd actually use.
+        for g in ${GIL_MODES:-1}; do
+            PYTHON_GIL="$g" "$RUNNER_PY" -c 'pass' >/dev/null 2>&1 \
+                || { echo "  RUNNER_PY can't run with PYTHON_GIL=$g (runner is not free-threaded): '$RUNNER_PY'"
+                     echo "    -> use a free-threaded runner python, or remove $g from GIL_MODES"; ok=0; }
+        done
     fi
     [ "$ok" = 1 ] || die "preflight failed -- fix fleet.conf (see above), then retry"
     echo "preflight OK: runner imports fusil+ptrace; paths exist"
@@ -56,6 +65,7 @@ cmd_install(){
     need_root install
     [ -x "$HERE/fleet-run" ] || chmod +x "$HERE/fleet-run"
     sed -e "s#@@FLEET_RUN@@#$HERE/fleet-run#g" \
+        -e "s#@@FLEET_CONF@@#$CONF_FILE#g" \
         -e "s#@@MEM_MAX@@#${MEM_MAX:-infinity}#g" \
         -e "s#@@NICE@@#${NICE:-10}#g" \
         "$HERE/$UNIT_NAME.in" > "$UNIT_PATH"
