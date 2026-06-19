@@ -236,7 +236,13 @@ class Deduper:
         chain = []
         if self.resolve_segv and (has_segv or generic_fatal or not asserts):
             chain = self._resolve(source_path)
-            candidates += [c for c in (_site_to_candidate(s) for s in chain) if c]
+            # Match only the resolved SITE (chain[0], the innermost real frame after the
+            # plumbing skip). Deeper frames are shared deallocator/eval plumbing
+            # (_Py_Dealloc, subtype_dealloc, ...) that would over-match many bugs.
+            if chain:
+                cand = _site_to_candidate(chain[0])
+                if cand:
+                    candidates.append(cand)
 
         matched = set()
         for c in candidates:
