@@ -159,12 +159,18 @@ class TestHardening(unittest.TestCase):
         self.assertTrue(keep)
         self.assertEqual(label, "OOM-0099")
 
-    def test_secondary_chain_frame_matches_known(self):
-        # gdb chain: frame 0 is new, a deeper frame is a known bug -> known, not oomNEW.
+    def test_resolved_site_frame_matches_known(self):
+        # the resolved SITE (chain[0], after the plumbing skip) is what we match.
+        d = self._deduper(resolver=lambda sp: ["dictiter_dealloc@Objects/dictobject.c:5532",
+                                               "subtype_dealloc@Objects/typeobject.c:2876"])
+        self.assertEqual(d.decide(SEGV, source_path="s"), (True, "OOM-0006"))
+
+    def test_deeper_chain_frame_not_matched(self):
+        # a NEW site frame stays oomNEW even if a deeper (generic) frame would match --
+        # avoids over-matching shared deallocator plumbing.
         d = self._deduper(resolver=lambda sp: ["brand_new@Objects/zzz.c:9",
                                                "dictiter_dealloc@Objects/dictobject.c:5532"])
-        keep, label = d.decide(SEGV, source_path="s")
-        self.assertEqual((keep, label), (True, "OOM-0006"))
+        self.assertEqual(d.decide(SEGV, source_path="s")[1], "oomNEW")
 
 
 class TestExtractSite(unittest.TestCase):
