@@ -1,0 +1,154 @@
+"""In-loop crash dedupe for the OOM Python fuzzer.
+
+Pure-Python and free of any runtime (python-ptrace) dependency, so it unit-tests in
+isolation. It loads the known-sites snapshot produced by the cpython-oom-findings
+catalog (``gen_known_sites.py`` -> ``known_sites.tsv``) and, given a crash's captured
+stdout, decides whether the crash is a *known* bug (and how many we've already kept) so
+the fuzzer can prune duplicates in-loop and self-label each crash directory.
+
+Tier-1 resolution only: aborts and fatals carry an exact ``file:line: func(): Assertion``
+/ ``Fatal Python error: <msg>`` in stdout and dedupe build-stably for free. Segvs have
+no reliable C site in stdout and are returned ``unresolved`` -- never pruned here; a
+later phase resolves them via the debugger. The snapshot file format is the contract
+shared with the catalog's ``ingest.py``.
+"""
+import re
+import collections
+
+# ---- stdout classification (mirrors catalog ingest.py tier-1) ----
+ASSERT = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):[^\n]*?\b(\w+)\s*\([^)]*\)\s*:\s*Assertion `([^']*)' failed")
+ASSERT2 = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):[^\n]*?Assertion `([^']*)' failed")
+FATAL = re.compile(r'Fatal Python error:\s*([^\n]+)')
+SEGV = re.compile(r'AddressSanitizer: SEGV|Fatal Python error: Segmentation fault|Segmentation fault')
+GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
+
+
+def _nf(f):
+    return f.lstrip("./")
+
+
+def classify(text):
+    """Classify a crash from its stdout. Returns a dict with ``kind`` in
+    {abort, fatal, segv, import, clean} plus any resolved file/line/func/assert/msg."""
+    m = ASSERT.search(text) or ASSERT2.search(text)
+    if m:
+        g = m.groups()
+        f, ln, func, expr = g if len(g) == 4 else (g[0], g[1], None, g[2])
+        return dict(kind="abort", file=_nf(f), line=int(ln), func=func,
+                    assert_expr=expr.strip(), fatal_msg=None)
+    fa = FATAL.search(text)
+    if fa and not SEGV.search(text):
+        msg = fa.group(1).strip()
+        if msg.startswith(GENERIC_FATAL):       # carries no site -> treat like segv
+            return dict(kind="segv", file=None, line=None, func=None,
+                        assert_expr=None, fatal_msg=None)
+        return dict(kind="fatal", file=None, line=None, func=None,
+                    assert_expr=None, fatal_msg=msg[:60])
+    if SEGV.search(text):
+        return dict(kind="segv", file=None, line=None, func=None,
+                    assert_expr=None, fatal_msg=None)
+    if re.search(r'(ModuleNotFoundError|ImportError):', text):
+        return dict(kind="import")
+    return dict(kind="clean")
+
+
+# ---- snapshot loading + matching (mirrors catalog ingest.py) ----
+def load_snapshot(lines):
+    """Load ``known_sites.tsv`` rows (an iterable of lines) into matcher tables."""
+    by_func, by_assert, by_line = {}, {}, {}
+    per_file_lines = collections.defaultdict(list)
+    by_msg, kind_of = [], {}
+    for line in lines:
+        line = line.rstrip("\n")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        oid, kind, kt, key = parts
+        kind_of[oid] = kind
+        if kt == "func":
+            by_func.setdefault(key, set()).add(oid)
+        elif kt == "assert":
+            by_assert.setdefault(key, set()).add(oid)
+        elif kt == "msg":
+            by_msg.append((key, oid))
+        elif kt == "line":
+            f, ln = key.rsplit(":", 1)
+            by_line.setdefault((f, int(ln)), set()).add(oid)
+            per_file_lines[f].append((int(ln), oid))
+    return dict(func=by_func, assert_=by_assert, line=by_line,
+                fl=per_file_lines, msg=by_msg, kind=kind_of)
+
+
+def load_snapshot_file(path):
+    with open(path) as fh:
+        return load_snapshot(fh)
+
+
+def match(c, snap):
+    """Return (oom_ids:set, how:str). Empty set + 'NEW' if unmatched."""
+    if c.get("assert_expr") and c.get("file"):
+        hit = snap["assert_"].get("%s:%s" % (c["file"], c["assert_expr"]))
+        if hit:
+            return hit, "assert"
+    if c.get("fatal_msg"):
+        hit = set(o for k, o in snap["msg"]
+                  if c["fatal_msg"].startswith(k) or k.startswith(c["fatal_msg"][:30]))
+        if hit:
+            return hit, "msg"
+    if c.get("file") and c.get("func"):
+        hit = snap["func"].get("%s:%s" % (c["file"], c["func"]))
+        if hit:
+            return hit, "func"
+    if c.get("file") and c.get("line"):
+        hit = snap["line"].get((c["file"], c["line"]))
+        if hit:
+            return hit, "line"
+        for ln, oid in snap["fl"].get(c["file"], ()):
+            if abs(ln - c["line"]) <= 12:
+                return {oid}, "near"
+    return set(), "NEW"
+
+
+class Deduper:
+    """Stateful in-loop deduper: feed each crash's stdout, get a (keep, label) decision.
+
+    keep=False is only ever returned for a *confidently-known* bug already at its sample
+    cap, and only when ``prune`` is enabled -- new/unresolved/segv crashes are always kept.
+    """
+    def __init__(self, snapshot_path, keep=5, prune=False):
+        self.snap = load_snapshot_file(snapshot_path)
+        self.keep_cap = keep
+        self.prune = prune
+        self.seen = collections.Counter()   # bug/new-key -> total crashes seen
+        self.kept = collections.Counter()   # bug -> directories kept
+
+    def decide(self, stdout_text):
+        """Return (keep: bool, label: str) for one crash."""
+        c = classify(stdout_text)
+        kind = c.get("kind")
+        if kind in ("clean", "import"):
+            return True, "oom" + (kind or "")
+        if kind == "segv":
+            self.seen["segv:unresolved"] += 1
+            return True, "oomSEGV"           # tier-1 can't resolve -> always keep
+        ids, how = match(c, self.snap)
+        if not ids:
+            key = (c.get("assert_expr") and "%s:%s" % (c["file"], c["assert_expr"])) \
+                  or (c.get("func") and "%s:%s" % (c["file"], c["func"])) \
+                  or c.get("fatal_msg") or "?"
+            self.seen["NEW:" + key] += 1
+            return True, "oomNEW"            # never prune a candidate-new site
+        oid = sorted(ids)[0]
+        self.seen[oid] += 1
+        if self.prune and self.kept[oid] >= self.keep_cap:
+            return False, oid                # known + over cap -> prune duplicate
+        self.kept[oid] += 1
+        return True, oid
+
+    def report(self):
+        lines = ["OOM dedupe summary (seen / kept):"]
+        for key, n in self.seen.most_common():
+            lines.append("  %-22s seen=%-5d kept=%d" % (key, n, self.kept.get(key, n)))
+        return "\n".join(lines)
