@@ -381,6 +381,21 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        oom_options.add_option(
+            "--oom-dedup-resolve-segv",
+            help="Resolve segv/generic-assert crashes to their real site by re-running "
+                 "source.py under gdb (deterministic on the same binary), so they "
+                 "dedupe/label/prune like aborts instead of staying 'oomSEGV' "
+                 "(default: False; adds a bounded gdb run per unresolved crash)",
+            action="store_true",
+            default=False,
+        )
+        oom_options.add_option(
+            "--oom-dedup-gdb-timeout",
+            help="Per-crash gdb resolution timeout in seconds (default: 120)",
+            type="int",
+            default=120,
+        )
 
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
@@ -499,12 +514,15 @@ class Fuzzer(Application):
                 self.options.oom_dedup_catalog,
                 keep=self.options.oom_dedup_keep,
                 prune=self.options.oom_dedup_prune,
+                python_bin=self.options.python,
+                gdb_timeout=self.options.oom_dedup_gdb_timeout,
+                resolve_segv=self.options.oom_dedup_resolve_segv,
             )
             self.session_keep_policy = self._oom_keep_policy
             project.error(
-                "OOM dedupe enabled: %s (keep=%d, prune=%s)"
+                "OOM dedupe enabled: %s (keep=%d, prune=%s, resolve_segv=%s)"
                 % (self.options.oom_dedup_catalog, self.options.oom_dedup_keep,
-                   self.options.oom_dedup_prune)
+                   self.options.oom_dedup_prune, self.options.oom_dedup_resolve_segv)
             )
 
     def _oom_keep_policy(self, session):
@@ -515,13 +533,13 @@ class Fuzzer(Application):
         is never lost to a dedupe failure.
         """
         import os
+        session_dir = session.directory.directory
         try:
-            stdout_path = os.path.join(session.directory.directory, "stdout")
-            with open(stdout_path, errors="replace") as fh:
+            with open(os.path.join(session_dir, "stdout"), errors="replace") as fh:
                 text = fh.read()
         except OSError:
             return True, None
-        return self._deduper.decide(text)
+        return self._deduper.decide(text, source_path=os.path.join(session_dir, "source.py"))
 
     def exit(self, keep_log: bool = True) -> None:
         """Clean up and exit the fuzzer, printing runtime statistics."""

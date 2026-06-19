@@ -122,12 +122,25 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe --oom-fuzz \
 # prints seen/kept per bug. Add --oom-dedup-prune to drop known dups past the keep cap.
 ```
 
-## Phase B (later)
+## Phase B — segv resolution at crash time (APPLIED)
 
-- **Segv resolution at crash time.** Tier-1 leaves segvs `unresolved` (always kept).
-  Resolve them on the same binary via the existing debugger/ptrace path (`replay.py`
-  already wires `ptrace_program='gdb.py'`, `allow_core_dump=True`; `process/debugger.py`
-  already emits rename parts), so segvs dedupe/prune too. This is the bigger fidelity win.
+`--oom-dedup-resolve-segv` resolves a segv (or a generic-assert fatal that tier-1 can't
+read from stdout) to its real site by **re-running the session's `source.py` under gdb**
+on the same interpreter (`--python`), then matching like an abort. We re-run rather than
+hook `process/debugger.py` because that only captures the *signal* (no symbolized
+backtrace); a same-binary re-run is deterministic (verified) and reuses the proven
+`segv_worker.sh` extraction (skip `fatal_error_exit` / `_Py_FatalError*` /
+`_PyObject_AssertFailed` / `_Py_NegativeRefcount` / dump plumbing → first real CPython
+frame). Bounded by `--oom-dedup-gdb-timeout` (default 120s) and only runs for
+segv-classified crashes (a minority). Engine: `gdb_crash_site` / `extract_site_from_bt` /
+`Deduper(resolve_segv=…, segv_resolver=…)`. Resolved+known → label/prune; resolved+new →
+`oomNEW`; unresolvable → `oomSEGV` (kept). **Validated** end-to-end: a real OOM-0028
+segv re-run resolves to `unicode_encode_utf8@unicodeobject.c:5681` and `decide()` matches
+OOM-0028 against the live catalog. (The live in-loop prune path shares Phase A's
+`checkKeepDirectory` hook, already host-validated.)
+
+## Phase C (later)
+
 - **Cross-instance merge.** N local instances each prune against their snapshot; a
   periodic single-writer merge (catalog `ingest.py`) reconciles new-site collisions and
   regenerates `known_sites.tsv`. Snapshot refresh: instances reload on SIGHUP or restart.

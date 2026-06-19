@@ -13,7 +13,9 @@ later phase resolves them via the debugger. The snapshot file format is the cont
 shared with the catalog's ``ingest.py``.
 """
 import re
+import os
 import collections
+import subprocess
 
 # ---- stdout classification (mirrors catalog ingest.py tier-1) ----
 ASSERT = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):[^\n]*?\b(\w+)\s*\([^)]*\)\s*:\s*Assertion `([^']*)' failed")
@@ -111,28 +113,94 @@ def match(c, snap):
     return set(), "NEW"
 
 
+# ---- Phase B: segv site resolution by re-running source.py under gdb ----
+# gdb frame:  "#5  0x.. in func (args) at Objects/foo.c:123"  or  "#0 func (..) at ..."
+_BT_FRAME = re.compile(
+    r'^#\d+\s+(?:0x[0-9a-fA-F]+ in )?(\w+)\b.*?\bat '
+    r'((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+):(\d+)')
+# fatal/assert/dump plumbing -- skip so the recorded frame is the real crash/assert site
+_BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
+                      r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
+                      r'|_Py_DumpExtensionModules)$')
+_SITE = re.compile(r'^(\w+)@([\w./+-]+):(\d+)$')
+
+
+def extract_site_from_bt(bt_text):
+    """First real CPython frame in a gdb backtrace -> 'func@file:line' (or None)."""
+    for line in bt_text.splitlines():
+        m = _BT_FRAME.match(line.strip())
+        if m and not _BT_SKIP.match(m.group(1)):
+            return "%s@%s:%s" % (m.group(1), m.group(2), m.group(3))
+    return None
+
+
+def gdb_crash_site(python_bin, source_path, timeout=120):
+    """Re-run source.py under gdb on ``python_bin`` (deterministic on the same binary)
+    and return the resolved crash site 'func@file:line', or None if it can't be found."""
+    try:
+        out = subprocess.run(
+            ["gdb", "-q", "-batch", "-ex", "set pagination off",
+             "-ex", "set print frame-arguments none", "-ex", "set debuginfod enabled off",
+             "-ex", "run", "-ex", "bt 30", "--args", python_bin, "-u", source_path],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0"},
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return extract_site_from_bt(out)
+
+
+def _site_to_classification(site):
+    m = _SITE.match(site)
+    if not m:
+        return None
+    return dict(kind="segv", file=m.group(2), func=m.group(1), line=int(m.group(3)),
+                assert_expr=None, fatal_msg=None)
+
+
 class Deduper:
     """Stateful in-loop deduper: feed each crash's stdout, get a (keep, label) decision.
 
     keep=False is only ever returned for a *confidently-known* bug already at its sample
     cap, and only when ``prune`` is enabled -- new/unresolved/segv crashes are always kept.
+
+    Phase B: when ``resolve_segv`` is set, a segv (or generic-assert fatal) is resolved to
+    its real site by re-running ``source_path`` under gdb on ``python_bin`` -- so segvs
+    dedupe/label/prune like aborts. ``segv_resolver`` (source_path -> site|None) is
+    injectable for testing; it defaults to :func:`gdb_crash_site`.
     """
-    def __init__(self, snapshot_path, keep=5, prune=False):
+    def __init__(self, snapshot_path, keep=5, prune=False, python_bin=None,
+                 gdb_timeout=120, resolve_segv=False, segv_resolver=None):
         self.snap = load_snapshot_file(snapshot_path)
         self.keep_cap = keep
         self.prune = prune
+        self.python_bin = python_bin
+        self.gdb_timeout = gdb_timeout
+        self.resolve_segv = resolve_segv
+        self._resolver = segv_resolver
         self.seen = collections.Counter()   # bug/new-key -> total crashes seen
         self.kept = collections.Counter()   # bug -> directories kept
 
-    def decide(self, stdout_text):
+    def _resolve(self, source_path):
+        if self._resolver is not None:
+            return self._resolver(source_path)
+        if self.python_bin and source_path:
+            return gdb_crash_site(self.python_bin, source_path, self.gdb_timeout)
+        return None
+
+    def decide(self, stdout_text, source_path=None):
         """Return (keep: bool, label: str) for one crash."""
         c = classify(stdout_text)
         kind = c.get("kind")
         if kind in ("clean", "import"):
             return True, "oom" + (kind or "")
         if kind == "segv":
-            self.seen["segv:unresolved"] += 1
-            return True, "oomSEGV"           # tier-1 can't resolve -> always keep
+            site = self._resolve(source_path) if self.resolve_segv else None
+            resolved = _site_to_classification(site) if site else None
+            if resolved is None:
+                self.seen["segv:unresolved"] += 1
+                return True, "oomSEGV"       # can't resolve -> always keep
+            c = resolved
         ids, how = match(c, self.snap)
         if not ids:
             key = (c.get("assert_expr") and "%s:%s" % (c["file"], c["assert_expr"])) \

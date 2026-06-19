@@ -17,6 +17,15 @@ SNAPSHOT = "\n".join([
     "OOM-0027\tabort\tfunc\tPython/generated_cases.c.h:_PyEval_EvalFrameDefault",
     "OOM-0022\tfatal\tmsg\t_Py_CheckSlotResult: Slot __delitem__ of type dict succeeded",
     "OOM-0004\tabort\tline\tObjects/object.c:909",
+    "OOM-0006\tabort\tfunc\tObjects/dictobject.c:dictiter_dealloc",
+])
+
+# a gdb backtrace whose real crash site is masked by fatal/refcount plumbing
+BT = "\n".join([
+    "#0  fatal_error_exit at Python/pylifecycle.c:3517",
+    "#5  _Py_NegativeRefcount at Objects/object.c:275",
+    "#8  0x55 in dictiter_dealloc (op=...) at Objects/dictobject.c:5532",
+    "#9  _Py_Dealloc (op=...) at Objects/object.c:3319",
 ])
 
 ABORT_0003 = "python: Objects/codeobject.c:2440: void code_dealloc(PyObject *): Assertion `co != NULL' failed."
@@ -121,6 +130,58 @@ class TestDeduper(unittest.TestCase):
     def test_prune_disabled_keeps_all(self):
         d = self._deduper(keep=1, prune=False)
         self.assertTrue(all(d.decide(ABORT_0003)[0] for _ in range(5)))
+
+
+class TestExtractSite(unittest.TestCase):
+    def test_skips_plumbing_returns_real_site(self):
+        self.assertEqual(oom_dedup.extract_site_from_bt(BT),
+                         "dictiter_dealloc@Objects/dictobject.c:5532")
+
+    def test_no_cpython_frame_returns_none(self):
+        self.assertIsNone(oom_dedup.extract_site_from_bt(
+            "#0 __pthread_kill at nptl/pthread_kill.c:44\n#1 raise at sysdeps/raise.c:26"))
+
+
+class TestSegvResolution(unittest.TestCase):
+    def _deduper(self, resolver, keep=5, prune=False):
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT)
+        self.addCleanup(os.unlink, path)
+        return oom_dedup.Deduper(path, keep=keep, prune=prune,
+                                 resolve_segv=True, segv_resolver=resolver)
+
+    def test_resolved_segv_matches_known(self):
+        d = self._deduper(lambda sp: "dictiter_dealloc@Objects/dictobject.c:5532")
+        self.assertEqual(d.decide(SEGV, source_path="s"), (True, "OOM-0006"))
+
+    def test_resolved_segv_unknown_is_new(self):
+        d = self._deduper(lambda sp: "brand_new@Objects/xyz.c:1")
+        keep, label = d.decide(SEGV, source_path="s")
+        self.assertTrue(keep)
+        self.assertEqual(label, "oomNEW")
+        self.assertTrue(any(k.startswith("NEW:") for k in d.seen))
+
+    def test_unresolvable_segv_kept_as_segv(self):
+        d = self._deduper(lambda sp: None)
+        self.assertEqual(d.decide(SEGV, source_path="s"), (True, "oomSEGV"))
+
+    def test_resolved_known_segv_prunes_over_cap(self):
+        d = self._deduper(lambda sp: "dictiter_dealloc@Objects/dictobject.c:5532",
+                          keep=1, prune=True)
+        self.assertTrue(d.decide(SEGV, source_path="s")[0])
+        self.assertFalse(d.decide(SEGV, source_path="s")[0])
+
+    def test_resolve_disabled_never_calls_resolver(self):
+        called = []
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT)
+        self.addCleanup(os.unlink, path)
+        d = oom_dedup.Deduper(path, resolve_segv=False,
+                              segv_resolver=lambda sp: called.append(sp))
+        self.assertEqual(d.decide(SEGV, source_path="s"), (True, "oomSEGV"))
+        self.assertEqual(called, [])
 
 
 if __name__ == "__main__":
