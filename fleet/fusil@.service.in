@@ -1,0 +1,24 @@
+# systemd template unit for one fusil fleet instance.
+# `fleet up` fills @@..@@ from fleet.conf and installs this as
+# /etc/systemd/system/fusil@.service. "%i" is the instance number, so
+# `systemctl start fusil@3` runs instance 3. This file is a template -- do not
+# edit the installed copy by hand; edit fleet.conf and re-run `fleet up`.
+[Unit]
+Description=fusil fuzzing instance %i
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=@@FLEET_RUN@@ %i
+Restart=always
+RestartSec=10
+# Cap memory so a runaway OOM-injection child can't take down the host. The OOM
+# killer reaps the instance; Restart=always brings it back.
+MemoryMax=@@MEM_MAX@@
+OOMPolicy=continue
+Nice=@@NICE@@
+# Generous but bounded; fuzz children can spawn threads/processes.
+TasksMax=4096
+
+[Install]
+WantedBy=multi-user.target
