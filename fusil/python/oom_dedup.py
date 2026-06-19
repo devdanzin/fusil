@@ -131,26 +131,57 @@ def match(c, snap):
     return set(), "NEW"
 
 
-# ---- segv site resolution by re-running source.py under gdb ----
+# ---- segv site resolution from the crash's own native backtrace ----
 # gdb frame:  "#5  0x.. in func (args) at Objects/foo.c:123"  or  "#0 func (..) at ..."
 _BT_FRAME = re.compile(
     r'^#\d+\s+(?:0x[0-9a-fA-F]+ in )?(\w+)\b.*?\bat '
     r'((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+):(\d+)')
+# ASan/sanitizer frame already printed to stderr at crash time (merged into stdout):
+#   "    #5 0x.. in _excinfo_clear_type /abs/path/Python/crossinterp.c:1319:15"
+# The CPython source dir is matched anywhere in the absolute path; leading libc/pthread
+# frames carry no such path and are skipped, as is fatal/dump plumbing (via _BT_SKIP).
+_ASAN_FRAME = re.compile(
+    r'#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+\S*?'
+    r'/((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)')
 # fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site
 _BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
                       r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
                       r'|_Py_DumpExtensionModules)$')
+# Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
+# of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.
+# do_warn / PyContextVar_Set), not the shared Py_DECREF/_Py_atomic_load that masks dozens
+# of distinct bugs behind one line.
+_BT_SKIP_FILE = re.compile(r'(?:^|/)(?:refcount|pyatomic\w*|object)\.h$')
 _SITE = re.compile(r'^(\w+)@([\w./+-]+):(\d+)$')
+
+
+def _skip_frame(func, filename):
+    return bool(_BT_SKIP.match(func) or _BT_SKIP_FILE.search(filename))
 
 
 def extract_sites_from_bt(bt_text):
     """All real CPython frames in a gdb backtrace, innermost first, as 'func@file:line'
-    (fatal/assert/dump plumbing skipped)."""
+    (fatal/assert/dump plumbing + inlined refcount/atomic header helpers skipped)."""
     out = []
     for line in bt_text.splitlines():
         m = _BT_FRAME.match(line.strip())
-        if m and not _BT_SKIP.match(m.group(1)):
+        if m and not _skip_frame(m.group(1), m.group(2)):
             out.append("%s@%s:%s" % (m.group(1), m.group(2), m.group(3)))
+    return out
+
+
+def extract_native_sites(text):
+    """Real CPython frames from a *live* sanitizer backtrace already present in the crash's
+    captured stdout (innermost first), as 'func@file:line'. This is the actual crash -- no
+    re-run -- so it is deterministic and immune to the hash-seed/threading nondeterminism
+    that can stop a gdb re-run reproducing the same fault. ASan debug builds print this on
+    SEGV/abort; plumbing + inlined refcount/atomic header frames are skipped so the site is
+    the real .c caller."""
+    out = []
+    for m in _ASAN_FRAME.finditer(text):
+        f = _nf(m.group(2))
+        if not _skip_frame(m.group(1), f):
+            out.append("%s@%s:%s" % (m.group(1), f, m.group(3)))
     return out
 
 
@@ -231,11 +262,18 @@ class Deduper:
         if fmsg and not generic_fatal and not fmsg.lower().startswith(("segmentation", "aborted")):
             candidates.append(dict(file=None, line=None, func=None, assert_expr=None,
                                    fatal_msg=fmsg[:60]))
-        # Resolve via gdb when the stdout site is unreliable (pure segv / generic-assert
-        # fatal) or nothing matched yet -- and add every chain frame as a candidate.
+        # Resolve a crash site when the stdout assertion text is unreliable (pure segv /
+        # generic-assert fatal) or nothing matched yet. PREFER the native backtrace the
+        # crash already printed (ASan/debug build, captured in stdout): it is the actual
+        # fault, so it is deterministic -- unlike a gdb re-run, which can fail to reproduce
+        # under a different hash seed or thread timing and leave the crash mislabelled
+        # oomSEGV. Fall back to a gdb re-run of source.py only when stdout has no parseable
+        # native frames and --oom-dedup-resolve-segv is set.
         chain = []
-        if self.resolve_segv and (has_segv or generic_fatal or not asserts):
-            chain = self._resolve(source_path)
+        if has_segv or generic_fatal or not asserts:
+            chain = extract_native_sites(stdout_text)
+            if not chain and self.resolve_segv:
+                chain = self._resolve(source_path)
             # Match only the resolved SITE (chain[0], the innermost real frame after the
             # plumbing skip). Deeper frames are shared deallocator/eval plumbing
             # (_Py_Dealloc, subtype_dealloc, ...) that would over-match many bugs.
