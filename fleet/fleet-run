@@ -19,6 +19,12 @@ cd "$inst_dir"
 read -r -a _modes <<< "$GIL_MODES"
 gil="${_modes[$(( (i - 1) % ${#_modes[@]} ))]}"
 
+# systemd starts services with a clean environment and no HOME; fusil needs it (config
+# lookup / ~ expansion), so derive it from the running user (root -> /root).
+if [ -z "${HOME:-}" ]; then
+    HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+    export HOME="${HOME:-/root}"
+fi
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
 export PYTHON_GIL="$gil"
 # systemd runs with a clean environment (no venv activation); add the fusil repo root so
