@@ -1,8 +1,9 @@
 #!/bin/bash
 # fleet -- run and supervise a fleet of fusil instances via systemd.
 #
-#   sudo ./fleet up [N]     install the unit + start N instances (default: nproc-1)
-#   sudo ./fleet down       stop + disable all instances
+#   ./fleet check           validate fleet.conf (paths exist, runner imports fusil)
+#   sudo ./fleet up [N]      install the unit + start N instances (default: nproc-1)
+#   sudo ./fleet down        stop + disable all instances
 #   ./fleet status          per-instance state + crash/NEW-find counts
 #   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
 #   ./fleet triage          dedupe all instances' crashes (needs INGEST in fleet.conf)
@@ -13,7 +14,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=/dev/null
-. "$HERE/fleet.conf"
+. "${FLEET_CONF:-$HERE/fleet.conf}"
 : "${INSTANCES:=$(( $(nproc) - 1 ))}"
 UNIT_NAME="fusil@.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
@@ -30,6 +31,27 @@ list_crashes(){  # every kept crash dir under an instance (layout-agnostic: has 
     find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null | sort -u
 }
 
+cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:
+              # wrong paths / a non-venv python that can't import fusil under systemd)
+    local ok=1 repo
+    repo="$(dirname "$(dirname "$FUSIL_PY")")"
+    [ -x "$RUNNER_PY" ] || { echo "  RUNNER_PY is not an executable file: '$RUNNER_PY'"
+                             echo "    -> use the ABSOLUTE venv python, e.g. /path/to/venv/bin/python"; ok=0; }
+    [ -f "$FUSIL_PY" ]  || { echo "  FUSIL_PY not found: '$FUSIL_PY'"; ok=0; }
+    [ -x "$TARGET_PYTHON" ] || { echo "  TARGET_PYTHON is not executable: '$TARGET_PYTHON'"; ok=0; }
+    case "$FUSIL_FLAGS" in
+        *--oom-dedup-catalog*) [ -f "$CATALOG" ] || {
+            echo "  CATALOG not found but --oom-dedup-catalog is set: '$CATALOG'"; ok=0; } ;;
+    esac
+    if [ -x "$RUNNER_PY" ] && [ -f "$FUSIL_PY" ]; then
+        PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$RUNNER_PY" -c 'import fusil, ptrace' 2>/dev/null \
+            || { echo "  RUNNER_PY cannot 'import fusil, ptrace': '$RUNNER_PY'"
+                 echo "    -> wrong python (not the venv), or python-ptrace not installed"; ok=0; }
+    fi
+    [ "$ok" = 1 ] || die "preflight failed -- fix fleet.conf (see above), then retry"
+    echo "preflight OK: runner imports fusil+ptrace; paths exist"
+}
+
 cmd_install(){
     need_root install
     [ -x "$HERE/fleet-run" ] || chmod +x "$HERE/fleet-run"
@@ -43,6 +65,7 @@ cmd_install(){
 
 cmd_up(){
     need_root up
+    cmd_check
     local n="${1:-$INSTANCES}"
     mkdir -p "$FLEET_DIR"
     cmd_install
@@ -124,11 +147,12 @@ cmd_tail(){
 case "${1:-status}" in
     up)       shift; cmd_up "$@" ;;
     down)     cmd_down ;;
+    check)    cmd_check ;;
     install)  cmd_install ;;
     restart)  cmd_restart ;;
     status)   cmd_status ;;
     finds)    cmd_finds ;;
     triage)   shift; cmd_triage "$@" ;;
     tail)     shift; cmd_tail "$@" ;;
-    *)        sed -n '2,12p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
+    *)        sed -n '2,13p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
 esac
