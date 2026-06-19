@@ -360,6 +360,27 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        oom_options.add_option(
+            "--oom-dedup-catalog",
+            help="Path to known_sites.tsv (cpython-oom-findings). Enables in-loop "
+                 "crash dedupe: label each crash dir with its matched bug id and, "
+                 "with --oom-dedup-prune, drop known duplicates (default: disabled)",
+            type="str",
+            default=None,
+        )
+        oom_options.add_option(
+            "--oom-dedup-keep",
+            help="Keep at most N sample directories per known bug (default: 5)",
+            type="int",
+            default=5,
+        )
+        oom_options.add_option(
+            "--oom-dedup-prune",
+            help="Remove known-duplicate crash dirs beyond the keep cap "
+                 "(default: keep all, label only)",
+            action="store_true",
+            default=False,
+        )
 
         config_options = OptionGroupWithSections(parser, "Configuration")
         config_options.add_option(
@@ -469,9 +490,44 @@ class Fuzzer(Application):
 
         # import_all()
 
+        # In-loop OOM crash dedupe: install a keep-policy that SessionDirectory
+        # consults for each crashing session (label dirs, optionally prune known dups).
+        self._deduper = None
+        if self.options.oom_dedup_catalog:
+            from fusil.python.oom_dedup import Deduper
+            self._deduper = Deduper(
+                self.options.oom_dedup_catalog,
+                keep=self.options.oom_dedup_keep,
+                prune=self.options.oom_dedup_prune,
+            )
+            self.session_keep_policy = self._oom_keep_policy
+            project.error(
+                "OOM dedupe enabled: %s (keep=%d, prune=%s)"
+                % (self.options.oom_dedup_catalog, self.options.oom_dedup_keep,
+                   self.options.oom_dedup_prune)
+            )
+
+    def _oom_keep_policy(self, session):
+        """Return (keep, label) for a crashed session from its captured stdout.
+
+        Consulted synchronously by SessionDirectory.checkKeepDirectory, where the
+        stdout file is already complete. Returns (True, None) on any error so a crash
+        is never lost to a dedupe failure.
+        """
+        import os
+        try:
+            stdout_path = os.path.join(session.directory.directory, "stdout")
+            with open(stdout_path, errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            return True, None
+        return self._deduper.decide(text)
+
     def exit(self, keep_log: bool = True) -> None:
         """Clean up and exit the fuzzer, printing runtime statistics."""
         super().exit(keep_log=keep_log)
+        if getattr(self, "_deduper", None):
+            self.error(self._deduper.report())
         self.error(print_running_time(time_start))
 
 
