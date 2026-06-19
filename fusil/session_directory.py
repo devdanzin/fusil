@@ -63,6 +63,16 @@ class SessionDirectory(SessionAgent, Directory):
         application = self.application()
         if not self.isEmpty(False):
             if session.isSuccess():
+                # Optional keep-policy (e.g. OOM in-loop dedupe): may relabel the
+                # crash dir and/or prune a known duplicate. Absent policy -> unchanged.
+                policy = getattr(application, "session_keep_policy", None)
+                if policy is not None:
+                    keep, label = policy(session)
+                    if label:
+                        self.on_session_rename(label)
+                    if not keep:
+                        self.warning("Dedup: prune duplicate crash %s" % self.directory)
+                        return False
                 # Session sucess and non-empty directory: keep directory
                 self.warning("Success: keep the directory %s" % self.directory)
                 return True

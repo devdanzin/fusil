@@ -32,11 +32,16 @@ Safety contract enforced by the engine: `keep=False` is returned **only** for a
 *confidently-known* bug already at its sample cap, and **only** when `prune=True`.
 New-site, segv (tier-1-unresolved), import, and clean outcomes are always kept.
 
-## Wiring to apply on a python-ptrace host (Phase A glue — needs a live run)
+## Wiring (Phase A glue — APPLIED)
 
-These three edits are inert unless `--oom-dedup-catalog` is passed (off-path behaviour
-is byte-for-byte unchanged), so they can't regress existing runs; the *enabled* path
-should be smoke-tested on the fuzzing host before merge.
+These three edits are now in place. They are inert unless `--oom-dedup-catalog` is
+passed (off-path behaviour is byte-for-byte unchanged), so they cannot regress existing
+runs. **Validated locally** (python-ptrace present): options parse, the deduper installs
+and loads the snapshot ("OOM dedupe enabled …"), and the tally prints at exit; plus
+`tests/python/test_oom_dedup_wiring.py` covers `_oom_keep_policy`. **Still to validate on
+a real fuzzing run / the host**: the live crash → `checkKeepDirectory` → prune/label path
+(needs an actual crashing session, which the dev box can't fully drive without the
+`fusil` user / a reliable crash).
 
 ### 1. CLI options — `fusil/python/__init__.py`, in `createFuzzerOptions` OOM group
 
