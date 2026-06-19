@@ -353,6 +353,21 @@ class Fuzzer(Application):
             default=10,
         )
         oom_options.add_option(
+            "--oom-classes",
+            help="Number of classes to OOM-fuzz per script: each gets a constructor "
+                 "sweep plus method sweeps on a live instance (0 disables class "
+                 "fuzzing in OOM mode, default: 5)",
+            type="int",
+            default=5,
+        )
+        oom_options.add_option(
+            "--oom-methods",
+            help="Number of method sweeps to generate per OOM-fuzzed class instance "
+                 "(default: 5)",
+            type="int",
+            default=5,
+        )
+        oom_options.add_option(
             "--oom-verbose",
             help="In OOM mode, also print the sweep start index before each "
                  "injection so the exact failing allocation can be pinpointed on "

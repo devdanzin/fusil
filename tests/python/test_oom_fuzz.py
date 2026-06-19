@@ -1,8 +1,9 @@
-"""Tests for OOM (out-of-memory) fuzzing mode code generation (Phase 1).
+"""Tests for OOM (out-of-memory) fuzzing mode code generation (Phases 1 & 2).
 
 These verify that ``--oom-fuzz`` makes ``WritePythonCode`` emit the set_nomemory
-boilerplate, the ``oom_call`` dense-sweep harness, and per-function sweep sites,
-and that none of that appears when the mode is off (gating / regression).
+boilerplate, the ``oom_call`` dense-sweep harness, per-function sweep sites
+(Phase 1), and -- for modules with classes -- constructor and method sweeps
+(Phase 2); and that none of that appears when the mode is off (gating / regression).
 
 The fixture builds a ``MagicMock`` options object with the few real-typed
 attributes the generator needs; it does not depend on the (currently stale)
@@ -10,6 +11,7 @@ attributes the generator needs; it does not depend on the (currently stale)
 """
 
 import ast
+import json
 import math
 import os
 import sys
@@ -44,6 +46,10 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.classes_number = 0
     o.objects_number = 0
     o.methods_number = 2
+    # OOM class fuzzing (Phase 2). Real ints so `range(...)` / `> 0` work; default
+    # 0 keeps the function-only Phase-1 tests' oom_call counts exact.
+    o.oom_classes = 0
+    o.oom_methods = 0
     # JIT options (WriteJITCode is constructed unconditionally); OOM mode never
     # dispatches to it, so legacy defaults are fine.
     o.jit_fuzz = False
@@ -59,16 +65,21 @@ def _make_options(oom_fuzz, oom_verbose=False):
     return o
 
 
-def _generate(oom_fuzz, oom_verbose=False):
-    """Generate a fuzzing script against the ``math`` module and return its source."""
+def _generate(oom_fuzz, oom_verbose=False, module=math, module_name="math",
+              oom_classes=0, oom_methods=0, test_private=False):
+    """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
-    parent.options = _make_options(oom_fuzz, oom_verbose)
+    options = _make_options(oom_fuzz, oom_verbose)
+    options.oom_classes = oom_classes
+    options.oom_methods = oom_methods
+    options.test_private = test_private
+    parent.options = options
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
     os.close(fd)
     try:
         writer = WritePythonCode(
-            parent, path, math, "math",
+            parent, path, module, module_name,
             threads=False, _async=False, plugin_manager=None,
         )
         writer.generate_fuzzing_script()
@@ -129,6 +140,43 @@ class TestOOMFuzzGeneration(unittest.TestCase):
             "remove_mem_hooks",
         ):
             self.assertNotIn(marker, src, f"unexpected OOM artifact {marker!r} in non-OOM script")
+
+
+class TestOOMClassFuzzGeneration(unittest.TestCase):
+    """Phase 2: constructor + method sweeps for module classes (json has classes)."""
+
+    def test_constructor_and_method_sweeps_emitted(self):
+        src = _generate(oom_fuzz=True, module=json, module_name="json",
+                        oom_classes=2, oom_methods=3)
+        ast.parse(src)  # valid Python
+        # A constructor sweep: the class object is the swept callable.
+        self.assertIn("() constructor", src)
+        self.assertIn('oom_call("oc1:json.', src)
+        self.assertIn('getattr(fuzz_target_module, ', src)
+        # A live instance is built once (outside the sweep) for method fuzzing.
+        self.assertIn('callFunc("oc1_init"', src)
+        self.assertIn("is not SENTINEL_VALUE:", src)
+        self.assertIn("oom_inst_oc1_", src)
+        # Method sweeps run on that instance: oom_call over a bound method.
+        self.assertRegex(src, r'oom_call\("oc1m\d+:json\.')
+        self.assertRegex(src, r"getattr\(oom_inst_oc1_\w+, ")
+
+    def test_oom_classes_zero_disables_class_fuzzing(self):
+        src = _generate(oom_fuzz=True, module=json, module_name="json",
+                        oom_classes=0, oom_methods=3)
+        ast.parse(src)
+        self.assertNotIn("constructor", src)
+        self.assertNotIn("oom_inst_", src)
+        # function sweeps still present
+        self.assertIn("oom_call(", src)
+
+    def test_method_target_uses_safe_getattr_default(self):
+        # getattr(inst, "m", None) + the harness's `func is None` guard means a
+        # missing bound method degrades to a no-op sweep, never a NameError/raise.
+        src = _generate(oom_fuzz=True, module=json, module_name="json",
+                        oom_classes=1, oom_methods=2)
+        self.assertIn(", None)", src)               # safe getattr default on method
+        self.assertIn("if not _OOM_AVAILABLE or func is None:", src)
 
 
 if __name__ == "__main__":
