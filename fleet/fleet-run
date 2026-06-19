@@ -5,8 +5,10 @@
 set -euo pipefail
 i="${1:?usage: fleet-run <instance-number>}"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# Use the same config `fleet up` validated: it bakes FLEET_CONF into the unit's
+# Environment, so the instances read it rather than the in-repo example.
 # shellcheck source=/dev/null
-. "$HERE/fleet.conf"
+. "${FLEET_CONF:-$HERE/fleet.conf}"
 
 inst_dir="$FLEET_DIR/inst-$(printf '%02d' "$i")"
 mkdir -p "$inst_dir"
