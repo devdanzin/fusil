@@ -6,6 +6,27 @@ from fusil.project_agent import ProjectAgent
 from fusil.unicode_generator import IntegerGenerator
 
 
+def augment_asan_options(value):
+    """Return ASAN_OPTIONS with crash-diagnostic defaults filled in.
+
+    ``handle_abort=1`` makes AddressSanitizer print a *symbolized* C backtrace when the
+    target ``abort()``s (a failed assertion, ``_Py_NegativeRefcount``, ``Py_FatalError``…);
+    without it an abort prints no native backtrace. ``abort_on_error=1`` keeps the process
+    exiting via SIGABRT after ASan prints, instead of ASan's plain ``exitcode`` -- so the
+    crash is still scored as a signal death (no scoring change) and other ASan errors
+    (segv/UAF) likewise abort consistently. The backtrace lands in the captured stdout,
+    letting the in-loop OOM dedup resolve the crash site straight from stdout instead of a
+    nondeterministic gdb re-run. Keys the caller already set are preserved; this is a no-op
+    on non-ASan builds, which ignore ASAN_OPTIONS entirely.
+    """
+    opts = [p for p in (value or "").split(":") if p]
+    have = {p.split("=", 1)[0] for p in opts}
+    for key, val in (("handle_abort", "1"), ("abort_on_error", "1")):
+        if key not in have:
+            opts.append("%s=%s" % (key, val))
+    return ":".join(opts)
+
+
 class EnvironmentVariable:
     def __init__(self, name, max_count=1):
         self.name = name
@@ -175,6 +196,11 @@ class Environment(ProjectAgent):
                         "Nul byte in environment variable value is forbidden!"
                     )
                 env[name] = value
+
+        # Make target aborts (assertions, _Py_NegativeRefcount, Py_FatalError) print a
+        # symbolized ASan backtrace to stdout, so in-loop crash dedup can resolve the site
+        # without re-running under gdb. No-op on non-ASan builds. See augment_asan_options.
+        env["ASAN_OPTIONS"] = augment_asan_options(env.get("ASAN_OPTIONS"))
 
         # Write result to logs
         self.info("Environment: %r" % env)
