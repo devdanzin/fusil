@@ -60,7 +60,12 @@ Because systemd `enable`s them, they also come back **after a reboot**.
   `MEM_MAX`. Each instance also runs child interpreters, so it uses more than one core's
   worth at peak.
 - **Diversity.** `GIL_MODES="0 1"` alternates instances between free-threaded and
-  GIL-on. To also throw JIT or different module sets into the mix, run a second fleet
+  GIL-on (they find disjoint crashes). Caveat: `PYTHON_GIL=0` is inherited by the
+  *runner* python too, so including `0` requires `RUNNER_PY` to be a **free-threaded**
+  venv (build one from a free-threaded CPython + `pip install python-ptrace`); a non-FT
+  runner fatals with "Disabling the GIL is not supported by this build" (`fleet check`
+  catches it). Use `GIL_MODES="1"` if your runner isn't free-threaded.
+  To also throw JIT or different module sets into the mix, run a second fleet
   dir with different `FUSIL_FLAGS` (the unit is shared, so use a separate checkout/config
   if you want two profiles at once — or just edit `FUSIL_FLAGS` and `fleet restart`).
 - **Logs filling disk.** `fusil.out` is truncated each run start. With `--oom-verbose`
