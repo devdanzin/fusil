@@ -173,6 +173,82 @@ class TestHardening(unittest.TestCase):
         self.assertEqual(d.decide(SEGV, source_path="s")[1], "oomNEW")
 
 
+# A real ASan SEGV backtrace as captured in a session's stdout (stderr is merged in).
+# The leading nptl/libc frames carry no CPython path; the real site is frame #5.
+ASAN_SEGV = "\n".join([
+    "Fatal Python error: Segmentation fault",
+    "==910653==ERROR: AddressSanitizer: SEGV on unknown address 0x03e8000de53d",
+    "    #0 0x75087fea648c in __pthread_kill_implementation nptl/pthread_kill.c:44:76",
+    "    #3 0x75087fe45b7d in raise signal/../sysdeps/posix/raise.c:26:13",
+    "    #4 0x75087fe45caf  (/usr/lib/x86_64-linux-gnu/libc.so.6+0x45caf)",
+    "    #5 0x579b5f3bf58c in dictiter_dealloc "
+    "/home/danzin/projects/3.16_ft_debug_asan_cpython/Objects/dictobject.c:5532:12",
+    "    #6 0x579b5f3bf58c in _PyXI_excinfo_clear "
+    "/home/danzin/projects/3.16_ft_debug_asan_cpython/Python/crossinterp.c:1374:5",
+    "    #7 0x579b5f038dba in cfunction_vectorcall_FASTCALL_KEYWORDS "
+    "/home/danzin/projects/3.16_ft_debug_asan_cpython/Objects/methodobject.c:465:24",
+    "SUMMARY: AddressSanitizer: SEGV nptl/pthread_kill.c:44:76",
+])
+
+
+class TestNativeBacktrace(unittest.TestCase):
+    """The fix: resolve a SEGV from the native backtrace ALREADY in stdout (ASan debug
+    build), with no gdb re-run -- so a crash whose source.py would not reproduce under a
+    fresh hash seed / thread timing is still labelled, not dumped as oomSEGV."""
+
+    def _deduper(self, resolver=None):
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT)
+        self.addCleanup(os.unlink, path)
+        # resolve_segv stays False: prove dedup works from stdout WITHOUT gdb.
+        return oom_dedup.Deduper(path, resolve_segv=resolver is not None, segv_resolver=resolver)
+
+    def test_extract_native_skips_libc_returns_real_site(self):
+        sites = oom_dedup.extract_native_sites(ASAN_SEGV)
+        self.assertEqual(sites[0], "dictiter_dealloc@Objects/dictobject.c:5532")
+
+    def test_asan_segv_matches_known_without_gdb(self):
+        # OOM-0006 is keyed on dictiter_dealloc in the snapshot; no resolver provided.
+        keep, label = self._deduper().decide(ASAN_SEGV, source_path=None)
+        self.assertTrue(keep)
+        self.assertEqual(label, "OOM-0006")
+
+    def test_asan_segv_unknown_site_is_new_not_segv(self):
+        stdout = ASAN_SEGV.replace("dictiter_dealloc", "brand_new_func").replace(
+            "Objects/dictobject.c:5532", "Objects/zzz.c:9")
+        keep, label = self._deduper().decide(stdout, source_path=None)
+        self.assertTrue(keep)
+        self.assertEqual(label, "oomNEW")
+
+    def test_native_backtrace_preferred_over_gdb_rerun(self):
+        # stdout has a usable native frame -> the (would-be-wrong) resolver is never called.
+        called = []
+        d = self._deduper(resolver=lambda sp: called.append(sp) or ["x@Objects/other.c:1"])
+        self.assertEqual(d.decide(ASAN_SEGV, source_path="s")[1], "OOM-0006")
+        self.assertEqual(called, [])
+
+    def test_bare_segv_no_native_no_resolver_stays_segv(self):
+        # non-ASan / no captured backtrace and resolution disabled -> oomSEGV (fallback kept).
+        self.assertEqual(self._deduper().decide(SEGV, source_path="s"), (True, "oomSEGV"))
+
+    def test_inlined_decref_atomic_header_frames_skipped(self):
+        # A "DECREF a freed object" segv: innermost frames are the inlined atomic/Py_DECREF
+        # helpers in headers -> the site must be the real .c caller (code_dealloc), not the
+        # shared header line that would mask dozens of distinct bugs as one.
+        bt = "\n".join([
+            "==1==ERROR: AddressSanitizer: SEGV on unknown address",
+            "    #4 0x0 in _Py_atomic_load_uint32_relaxed "
+            "/p/./Include/cpython/pyatomic_gcc.h:367:10",
+            "    #5 0x0 in Py_DECREF /p/./Include/refcount.h:345:22",
+            "    #6 0x0 in code_dealloc /p/Objects/codeobject.c:2440:9",
+        ])
+        sites = oom_dedup.extract_native_sites(bt)
+        self.assertEqual(sites[0], "code_dealloc@Objects/codeobject.c:2440")
+        # and it matches the catalog bug keyed on that .c line, not labelled oomNEW.
+        self.assertEqual(self._deduper().decide(bt, source_path=None), (True, "OOM-0003"))
+
+
 class TestExtractSite(unittest.TestCase):
     def test_skips_plumbing_returns_real_site(self):
         self.assertEqual(oom_dedup.extract_site_from_bt(BT),
