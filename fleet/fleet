@@ -1,0 +1,134 @@
+#!/bin/bash
+# fleet -- run and supervise a fleet of fusil instances via systemd.
+#
+#   sudo ./fleet up [N]     install the unit + start N instances (default: nproc-1)
+#   sudo ./fleet down       stop + disable all instances
+#   ./fleet status          per-instance state + crash/NEW-find counts
+#   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
+#   ./fleet triage          dedupe all instances' crashes (needs INGEST in fleet.conf)
+#   ./fleet tail [N]        follow instance N's log (default: 1)
+#   sudo ./fleet restart    restart all instances (e.g. to pick up a new catalog)
+#
+# All paths/flags come from fleet.conf next to this script.
+set -euo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+. "$HERE/fleet.conf"
+: "${INSTANCES:=$(( $(nproc) - 1 ))}"
+UNIT_NAME="fusil@.service"
+UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
+STATE="$FLEET_DIR/.fleet_instances"
+
+die(){ echo "fleet: $*" >&2; exit 1; }
+need_root(){ [ "$(id -u)" = 0 ] || die "run this as root (sudo ./fleet $1)"; }
+inst_dir(){ printf '%s/inst-%02d' "$FLEET_DIR" "$1"; }
+
+units(){  # active/loaded fusil@N units, one per line
+    systemctl list-units --all --no-legend --plain 'fusil@*.service' 2>/dev/null | awk '{print $1}'
+}
+list_crashes(){  # every kept crash dir under an instance (layout-agnostic: has source.py)
+    find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null | sort -u
+}
+
+cmd_install(){
+    need_root install
+    [ -x "$HERE/fleet-run" ] || chmod +x "$HERE/fleet-run"
+    sed -e "s#@@FLEET_RUN@@#$HERE/fleet-run#g" \
+        -e "s#@@MEM_MAX@@#${MEM_MAX:-infinity}#g" \
+        -e "s#@@NICE@@#${NICE:-10}#g" \
+        "$HERE/$UNIT_NAME.in" > "$UNIT_PATH"
+    systemctl daemon-reload
+    echo "installed $UNIT_PATH (MemoryMax=${MEM_MAX:-infinity}, nice=${NICE:-10})"
+}
+
+cmd_up(){
+    need_root up
+    local n="${1:-$INSTANCES}"
+    mkdir -p "$FLEET_DIR"
+    cmd_install
+    echo "$n" > "$STATE"
+    for i in $(seq 1 "$n"); do systemctl enable --now "fusil@$i" >/dev/null; done
+    echo "started $n instances (GIL modes cycled: $GIL_MODES)"
+    cmd_status
+}
+
+cmd_down(){
+    need_root down
+    local u list; list="$(units)"
+    [ -n "$list" ] || { echo "no instances running"; return; }
+    # shellcheck disable=SC2086
+    systemctl disable --now $list >/dev/null 2>&1 || true
+    echo "stopped: $(echo "$list" | wc -l) instances"
+}
+
+cmd_restart(){
+    need_root restart
+    local list; list="$(units)"
+    [ -n "$list" ] || die "no instances running"
+    # shellcheck disable=SC2086
+    systemctl restart $list
+    echo "restarted $(echo "$list" | wc -l) instances"
+}
+
+cmd_status(){
+    local list; list="$(units)"
+    [ -n "$list" ] || { echo "no instances (run: sudo ./fleet up)"; return; }
+    printf '%-4s %-9s %-20s %8s %6s\n' '#' STATE SINCE CRASHES NEW
+    local tot=0 totnew=0
+    for u in $list; do
+        local i state since dir n new
+        i="${u#fusil@}"; i="${i%.service}"
+        state="$(systemctl is-active "$u" 2>/dev/null || true)"
+        since="$(systemctl show -p ActiveEnterTimestamp --value "$u" 2>/dev/null | cut -d' ' -f2-3)"
+        dir="$(inst_dir "$i")"
+        n="$(list_crashes "$dir" | wc -l)"
+        new="$(list_crashes "$dir" | grep -c oomNEW || true)"
+        tot=$((tot + n)); totnew=$((totnew + new))
+        printf '%-4s %-9s %-20s %8s %6s\n' "$i" "$state" "${since:-?}" "$n" "$new"
+    done
+    echo "---- totals: $tot crashes kept, $totnew oomNEW candidates ----"
+    [ "$totnew" -gt 0 ] && echo "see them with: ./fleet finds"
+}
+
+cmd_finds(){
+    echo "== oomNEW (new-bug candidates) across the fleet =="
+    local any=
+    for d in "$FLEET_DIR"/inst-*; do
+        [ -d "$d" ] || continue
+        list_crashes "$d" | grep oomNEW | sed "s#$FLEET_DIR/##" && any=1 || true
+    done
+    [ -n "$any" ] || echo "(none yet)"
+}
+
+cmd_triage(){
+    local dirs=("$FLEET_DIR"/inst-*/)
+    if [ -n "${INGEST:-}" ] && [ -f "$INGEST" ]; then
+        echo "ingesting all instances' crashes via $INGEST ..."
+        "$RUNNER_PY" "$INGEST" "${dirs[@]}" --snapshot "$CATALOG" "$@"
+    else
+        echo "(no INGEST configured in fleet.conf -- listing candidates only)"
+        cmd_finds
+    fi
+}
+
+cmd_tail(){
+    local i="${1:-1}" dir; dir="$(inst_dir "$i")"
+    if [ "${LOG:-file}" = "none" ]; then
+        journalctl -u "fusil@$i" -f
+    else
+        echo "== tailing $dir/fusil.out (Ctrl-C to stop) =="
+        tail -n 40 -f "$dir/fusil.out"
+    fi
+}
+
+case "${1:-status}" in
+    up)       shift; cmd_up "$@" ;;
+    down)     cmd_down ;;
+    install)  cmd_install ;;
+    restart)  cmd_restart ;;
+    status)   cmd_status ;;
+    finds)    cmd_finds ;;
+    triage)   shift; cmd_triage "$@" ;;
+    tail)     shift; cmd_tail "$@" ;;
+    *)        sed -n '2,12p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
+esac

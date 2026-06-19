@@ -1,0 +1,32 @@
+#!/bin/bash
+# Launch ONE fusil instance. Called by systemd (ExecStart=fleet-run %i); not meant to
+# be run by hand. Sets up the instance's working directory + per-instance environment,
+# then exec's fusil so systemd supervises the fusil process directly.
+set -euo pipefail
+i="${1:?usage: fleet-run <instance-number>}"
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+. "$HERE/fleet.conf"
+
+inst_dir="$FLEET_DIR/inst-$(printf '%02d' "$i")"
+mkdir -p "$inst_dir"
+cd "$inst_dir"
+
+# Per-instance GIL mode: cycle through GIL_MODES (0=GIL off, 1=on) -- the two modes
+# surface disjoint OOM crashes, so spreading instances across both widens coverage.
+read -r -a _modes <<< "$GIL_MODES"
+gil="${_modes[$(( (i - 1) % ${#_modes[@]} ))]}"
+
+export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+export PYTHON_GIL="$gil"
+
+# Output sink: a per-run logfile (truncated each start) or discard.
+if [ "${LOG:-file}" = "none" ]; then
+    exec >/dev/null 2>&1
+else
+    exec >"$inst_dir/fusil.out" 2>&1
+fi
+
+echo "# fleet-run instance $i  gil=$gil  $(date -u +%FT%TZ)  dir=$inst_dir"
+# shellcheck disable=SC2086  -- FUSIL_FLAGS is intentionally word-split
+exec "$RUNNER_PY" "$FUSIL_PY" --python="$TARGET_PYTHON" $FUSIL_FLAGS
