@@ -368,6 +368,28 @@ class Fuzzer(Application):
             default=5,
         )
         oom_options.add_option(
+            "--oom-seq",
+            help="OOM mode (Phase 4): emit stateful call SEQUENCES -- several calls per "
+                 "scan under one bounded failure window -- so a failure in one call can "
+                 "corrupt state a later call trips over (default: disabled)",
+            action="store_true",
+            default=False,
+        )
+        oom_options.add_option(
+            "--oom-seq-len",
+            help="Steps (calls) per OOM sequence when --oom-seq is set (default: 3)",
+            type="int",
+            default=3,
+        )
+        oom_options.add_option(
+            "--oom-window",
+            help="OOM failure-burst width for sequences: set_nomemory(start, start+k) "
+                 "fails k allocations then resumes succeeding so later steps run on the "
+                 "damaged state (default: 1); 0 = fail forever (legacy single-call mode)",
+            type="int",
+            default=1,
+        )
+        oom_options.add_option(
             "--oom-verbose",
             help="In OOM mode, also print the sweep start index before each "
                  "injection so the exact failing allocation can be pinpointed on "

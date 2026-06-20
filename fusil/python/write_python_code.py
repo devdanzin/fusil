@@ -552,6 +552,47 @@ class WritePythonCode(WriteCode):
             ''')
             self.emptyLine()
 
+        if self.options.oom_fuzz and self.options.oom_seq:
+            self.write_block(0, f'''
+                _OOM_WINDOW = {self.options.oom_window}
+
+                def oom_run(label, thunk):
+                    # Stateful OOM sequence (Phase 4): sweep a bounded failure window
+                    # across a multi-step thunk so a failure in one step can corrupt
+                    # state a later step trips over. set_nomemory(start, start+_OOM_WINDOW)
+                    # fails _OOM_WINDOW allocations then resumes succeeding, so steps after
+                    # the burst run on the damaged state (_OOM_WINDOW == 0 -> fail forever,
+                    # the legacy single-call semantics). The thunk guards each step
+                    # internally so the tail still runs after an earlier step raises; a real
+                    # crash (segfault/abort) terminates the process and is scored.
+                    if not _OOM_AVAILABLE:
+                        try:
+                            thunk()
+                        except BaseException:
+                            pass
+                        return
+                    print("[OOM-SEQ] " + label, file=stderr)
+                    for _start in range(_OOM_MAX_START):
+                        if _OOM_VERBOSE:
+                            print("[OOM-SEQ]   start=" + str(_start) + " window=" + str(_OOM_WINDOW), file=stderr)
+                        if _OOM_WINDOW > 0:
+                            _set_nomemory(_start, _start + _OOM_WINDOW)
+                        else:
+                            _set_nomemory(_start, 0)
+                        try:
+                            try:
+                                thunk()
+                            finally:
+                                _remove_mem_hooks()
+                        except MemoryError:
+                            pass
+                        except SystemError:
+                            print("[OOM-SEQ] SystemError in " + label, file=stderr)
+                        except BaseException:
+                            pass
+            ''')
+            self.emptyLine()
+
     def _write_main_fuzzing_logic(self) -> None:
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self.write(0, f"fuzz_target_module = {self.module_name}")
@@ -590,6 +631,11 @@ class WritePythonCode(WriteCode):
 
                 # --- SIMPLIFIED LOGIC ---
                 if self.options.oom_fuzz:
+                    if self.options.oom_seq:
+                        # OOM sequence: several functions under one failure window so a
+                        # failure in one can corrupt state a later one trips over.
+                        self._generate_oom_function_sequence(prefix)
+                        continue
                     # OOM injection: wrap a function call in a dense set_nomemory sweep
                     func_name = choice(self.module_functions)
                     try:
@@ -1051,6 +1097,69 @@ class WritePythonCode(WriteCode):
         self.write(0, ")")
         self.emptyLine()
 
+    def _write_oom_sequence(self, fn_name: str, seq_label: str, steps) -> None:
+        """Emit a guarded multi-step thunk plus an oom_run() call (Phase 4 sequence).
+
+        steps: list of (sublabel, target_expr, num_args), where target_expr is a string
+        evaluating to the callable (e.g. 'getattr(fuzz_target_module, "dumps", None)').
+        Each step is wrapped in try/except so a failing step does not abort the tail --
+        the shared state (a live instance, or module/interpreter globals such as a pending
+        exception) is what a later step may trip over. Result values are not threaded
+        between steps yet (Phase 4b); the steps interact only through shared state.
+        """
+        self.write(0, f"def {fn_name}():")
+        saved = self.addLevel(1)
+        wrote = False
+        for sublabel, target_expr, num_args in steps:
+            # The verbose marker is INSIDE the try: under a low window the failing
+            # allocation can land in the print itself, and we want that swallowed so the
+            # tail steps still run (it does perturb the allocation count, so verbose is for
+            # coarse pinpointing -- the authoritative locator is faulthandler's traceback).
+            self.write(0, "try:")
+            self.write(1, "if _OOM_VERBOSE:")
+            self.write(2, f'print("[OOM-SEQ]     step {sublabel}", file=stderr)')
+            self.write(1, f"{target_expr}(")
+            self._write_arguments_for_call_lines(num_args, 2)
+            self.write(1, ")")
+            self.write(0, "except BaseException:")
+            self.write(1, "pass")
+            wrote = True
+        if not wrote:
+            self.write(0, "pass")
+        self.restoreLevel(saved)
+        self.write(0, f'oom_run("{seq_label}", {fn_name})')
+        self.emptyLine()
+
+    def _generate_oom_function_sequence(self, prefix: str) -> None:
+        """Emit one OOM sequence (Phase 4) over several module-level functions.
+
+        The functions run in order under one bounded failure window, so a failure in one
+        can leave module/interpreter state (a pending exception, specializer/GC state)
+        that a later one trips over -- the stale-exception class (e.g. OOM-0008/0010/
+        0011/0015/0025/0032).
+        """
+        steps = []
+        names = []
+        for j in range(max(1, self.options.oom_seq_len)):
+            func_name = choice(self.module_functions)
+            try:
+                func_obj = getattr(self.module, func_name)
+            except AttributeError:
+                continue
+            min_arg, max_arg = get_arg_number(func_obj, func_name, 1)
+            num_args = randint(min_arg, max_arg)
+            steps.append((
+                f"s{j + 1}:{func_name}",
+                f'getattr(fuzz_target_module, "{func_name}", None)',
+                num_args,
+            ))
+            names.append(func_name)
+        if not steps:
+            return
+        seq_label = f"{prefix}:{self.module_name}[" + ">".join(names) + "]"
+        self.write(0, f"# OOM sequence: {' > '.join(names)}")
+        self._write_oom_sequence(f"_oom_seq_{prefix}", seq_label, steps)
+
     def _generate_oom_class_fuzzing(
         self, prefix: str, class_name: str, class_obj: type
     ) -> None:
@@ -1092,16 +1201,37 @@ class WritePythonCode(WriteCode):
         # 4. Method sweeps on the live instance.
         self.write(0, f"if {inst} is not None and {inst} is not SENTINEL_VALUE:")
         saved = self.addLevel(1)
-        for j in range(self.options.oom_methods):
-            m_name = choice(method_names)
-            m_obj = methods[m_name]
-            min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
-            num_args = randint(min_arg, max_arg)
-            m_label = f"{prefix}m{j + 1}:{self.module_name}.{class_name}.{m_name}"
-            self.write(0, f"# OOM sweep: {class_name}.{m_name}()")
-            self.write(0, f'oom_call("{m_label}", getattr({inst}, "{m_name}", None),')
-            self._write_arguments_for_call_lines(num_args, 1)
-            self.write(0, ")")
+        if self.options.oom_seq:
+            # Phase 4: one sequence of methods on the SAME instance under a single
+            # failure window, so a failure in method A can leave the instance in a state
+            # method B trips over (e.g. OOM-0035: write... then getvalue()).
+            steps = []
+            mnames = []
+            for j in range(max(1, self.options.oom_seq_len)):
+                m_name = choice(method_names)
+                m_obj = methods[m_name]
+                min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
+                num_args = randint(min_arg, max_arg)
+                steps.append((
+                    f"m{j + 1}:{m_name}",
+                    f'getattr({inst}, "{m_name}", None)',
+                    num_args,
+                ))
+                mnames.append(m_name)
+            seq_label = f"{prefix}:{self.module_name}.{class_name}[" + ">".join(mnames) + "]"
+            self.write(0, f"# OOM sequence on {class_name}: {' > '.join(mnames)}")
+            self._write_oom_sequence(f"_oom_seq_{prefix}", seq_label, steps)
+        else:
+            for j in range(self.options.oom_methods):
+                m_name = choice(method_names)
+                m_obj = methods[m_name]
+                min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
+                num_args = randint(min_arg, max_arg)
+                m_label = f"{prefix}m{j + 1}:{self.module_name}.{class_name}.{m_name}"
+                self.write(0, f"# OOM sweep: {class_name}.{m_name}()")
+                self.write(0, f'oom_call("{m_label}", getattr({inst}, "{m_name}", None),')
+                self._write_arguments_for_call_lines(num_args, 1)
+                self.write(0, ")")
         self.write(0, f"del {inst}")
         self.write(0, "collect()")
         self.restoreLevel(saved)
