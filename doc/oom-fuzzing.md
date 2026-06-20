@@ -37,6 +37,14 @@ signal fusil watches for. So **no per-iteration subprocess isolation is needed**
   Returned-object methods (depth > 1) remain a future Phase 2c.
 - **Phase 3:** libfiu / `LD_PRELOAD` system-malloc injection (reaches foreign C
   libraries that `set_nomemory` cannot), driven via the child process env.
+- **Phase 4 (prototype — stateful call sequences, behind `--oom-seq`):** let one OOM scan
+  exercise *several* calls so an allocation failure in one call can corrupt state that a
+  *later* call trips over (the cross-call "stale state" class — OOM-0033, OOM-0035, the
+  stale-exception family). Built on a **bounded failure window**
+  (`set_nomemory(start, start+k)`, which fails `k` allocations then auto-resumes) so probe
+  steps can run past the failure. Phase 4a (method chains + function sequences) is
+  implemented; producer→consumer (4b) and mutate-reread (4c) are deferred. Full design in
+  [`oom-sequences.md`](oom-sequences.md).
 
 ## Phase 2 specification (classes)
 

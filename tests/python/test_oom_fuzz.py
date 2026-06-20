@@ -50,6 +50,11 @@ def _make_options(oom_fuzz, oom_verbose=False):
     # 0 keeps the function-only Phase-1 tests' oom_call counts exact.
     o.oom_classes = 0
     o.oom_methods = 0
+    # OOM stateful sequences (Phase 4). Default OFF (real values, not MagicMock auto-attrs)
+    # so Phase-1/2 tests keep the single-call path and exact oom_call counts.
+    o.oom_seq = False
+    o.oom_seq_len = 3
+    o.oom_window = 1
     # JIT options (WriteJITCode is constructed unconditionally); OOM mode never
     # dispatches to it, so legacy defaults are fine.
     o.jit_fuzz = False
@@ -66,13 +71,17 @@ def _make_options(oom_fuzz, oom_verbose=False):
 
 
 def _generate(oom_fuzz, oom_verbose=False, module=math, module_name="math",
-              oom_classes=0, oom_methods=0, test_private=False):
+              oom_classes=0, oom_methods=0, test_private=False,
+              oom_seq=False, oom_seq_len=3, oom_window=1):
     """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
     options = _make_options(oom_fuzz, oom_verbose)
     options.oom_classes = oom_classes
     options.oom_methods = oom_methods
     options.test_private = test_private
+    options.oom_seq = oom_seq
+    options.oom_seq_len = oom_seq_len
+    options.oom_window = oom_window
     parent.options = options
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
@@ -177,6 +186,54 @@ class TestOOMClassFuzzGeneration(unittest.TestCase):
                         oom_classes=1, oom_methods=2)
         self.assertIn(", None)", src)               # safe getattr default on method
         self.assertIn("if not _OOM_AVAILABLE or func is None:", src)
+
+
+class TestOOMSeqGeneration(unittest.TestCase):
+    """Phase 4 stateful call sequences (--oom-seq)."""
+
+    def test_seq_emits_windowed_oom_run_harness(self):
+        src = _generate(oom_fuzz=True, oom_seq=True, oom_seq_len=3, oom_window=2)
+        ast.parse(src)
+        # The oom_run harness + the bounded-window primitive (start .. start+k).
+        self.assertIn("def oom_run(label, thunk):", src)
+        self.assertIn("_OOM_WINDOW = 2", src)
+        self.assertIn("_set_nomemory(_start, _start + _OOM_WINDOW)", src)
+        self.assertIn("_set_nomemory(_start, 0)", src)   # window==0 fallback branch
+        self.assertIn('print("[OOM-SEQ] " + label', src)
+        # Function sequences: a guarded multi-step thunk fed to oom_run.
+        self.assertRegex(src, r"def _oom_seq_f\d+\(\):")
+        self.assertRegex(src, r"oom_run\(\"f\d+:math\[")
+
+    def test_seq_thunk_is_guarded_per_step_and_valid(self):
+        # Each step is wrapped so a failing step doesn't abort the tail; the thunk must
+        # contain >1 call (a real sequence) and parse.
+        src = _generate(oom_fuzz=True, oom_seq=True, oom_seq_len=3)
+        ast.parse(src)
+        thunk = src[src.index("def _oom_seq_f1"):]
+        thunk = thunk[:thunk.index("oom_run(")]
+        self.assertGreaterEqual(thunk.count("except BaseException:"), 3)
+        self.assertGreaterEqual(thunk.count("getattr(fuzz_target_module, "), 3)
+
+    def test_seq_default_window_is_one(self):
+        src = _generate(oom_fuzz=True, oom_seq=True)
+        self.assertIn("_OOM_WINDOW = 1", src)
+
+    def test_seq_method_chain_reuses_one_instance(self):
+        # Method-chain sequence: several methods on the SAME live instance under one
+        # window (the OOM-0035 write...->getvalue() shape).
+        src = _generate(oom_fuzz=True, oom_seq=True, module=json, module_name="json",
+                        oom_classes=1, oom_methods=3, oom_seq_len=3)
+        ast.parse(src)
+        self.assertRegex(src, r"def _oom_seq_oc1\(\):")
+        self.assertRegex(src, r'oom_run\("oc1:json\.')
+        # all steps target the same oom_inst_oc1_* instance (not the module)
+        self.assertRegex(src, r"getattr\(oom_inst_oc1_\w+, ")
+        self.assertNotIn('oom_call("oc1m', src)   # single-call method sweep replaced
+
+    def test_non_seq_oom_mode_has_no_seq_artifacts(self):
+        src = _generate(oom_fuzz=True, oom_seq=False)
+        for marker in ("oom_run", "_OOM_WINDOW", "[OOM-SEQ]", "_oom_seq_"):
+            self.assertNotIn(marker, src, f"unexpected seq artifact {marker!r} without --oom-seq")
 
 
 if __name__ == "__main__":
