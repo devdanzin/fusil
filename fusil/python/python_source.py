@@ -12,6 +12,7 @@ from fusil.project import Project
 from fusil.project_agent import ProjectAgent
 from fusil.python.blacklists import MODULE_BLACKLIST
 from fusil.python.list_all_modules import ListAllModules
+from fusil.python.fixtures import ensure_fixture_files
 from fusil.python.utils import print_running_time
 from fusil.python.write_python_code import WritePythonCode
 
@@ -90,7 +91,15 @@ class PythonSource(ProjectAgent):
         for name in self.modules_list:
             self.info("Python module: %s" % name)
 
-        self.filenames = self.options.filenames.split(",")
+        if self.options.filenames:
+            # User-supplied paths. WARNING: a fuzzed call may open these for writing,
+            # so only ever pass expendable files here.
+            self.filenames = self.options.filenames.split(",")
+        else:
+            # Default: auto-created, read-only, throwaway fixture files. Never default to
+            # real system files (the historical /etc/machine-id,/bin/sh default could be
+            # clobbered when a fuzzed call wrote to them as root).
+            self.filenames = ensure_fixture_files()
         for filename in self.filenames:
             if not isabs(filename):
                 raise ValueError(
