@@ -31,7 +31,11 @@ SHOW_STDOUT = False
 DEBUG = False
 TIMEOUT = 900.0
 PYTHON = sys.executable
-FILENAMES = "/etc/machine-id,/bin/sh"
+# Empty default => auto-created, expendable fixture files (fusil.python.fixtures).
+# NEVER default to real system files: a fuzzed call may open a --filenames path for
+# writing/truncation, and a privileged child (e.g. root under --unsafe) will clobber it.
+# The historical "/etc/machine-id,/bin/sh" default did exactly that.
+FILENAMES = ""
 DEFAULT_NB_CALL = 250
 DEFAULT_NB_METHOD = 15
 DEFAULT_NB_CLASS = 50
@@ -194,7 +198,9 @@ class Fuzzer(Application):
         )
         fuzzing_options.add_option(
             "--filenames",
-            help="Names separated by commas of readable files (default: %s)" % FILENAMES,
+            help="Comma-separated readable files to feed as fuzz arguments. WARNING: a "
+                 "fuzzed call may open these for writing -- pass only expendable files. "
+                 "Default: auto-created throwaway fixtures (fusil.python.fixtures).",
             type="str",
             default=FILENAMES,
         )
