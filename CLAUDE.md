@@ -145,7 +145,10 @@ emits an OOM harness (`write_python_code.py`): `faulthandler.enable()`, a guarde
 iteration with `--oom-verbose`) so the crashing invocation/allocation is pinpointable on
 replay; `MemoryError` is swallowed — it's the expected boring outcome, so `WatchStdout.kill_words`
 drops "MemoryError" in OOM mode — while `SystemError` is surfaced. Real crashes (segfault/abort)
-score via the signal probe. `--oom-calls` sets how many calls are wrapped.
+score via the signal probe. `--oom-calls` sets how many calls are wrapped. **Phase 2** also
+sweeps class **constructors + methods** (`--oom-classes` / `--oom-methods`, default 5 each) —
+reaching constructor/method allocation paths where high-value bugs live (e.g. OOM-0030 is a
+str-subclass constructor bug).
 
 **Stateful sequences — `--oom-seq` (Phase 4).** Beyond the single-call `oom_call`,
 `--oom-seq` emits multi-step *sequences* (a guarded thunk run by `oom_run`) under one
@@ -162,7 +165,8 @@ are ~96% duplicate crashes, so `--oom-dedup-catalog <known_sites.tsv>` (a read-o
 from the sibling `cpython-oom-findings` catalog) dedupes crashes as they happen. On a crash,
 `Fuzzer._oom_keep_policy` reads the session's stdout, classifies it (tier-1: aborts/fatals
 carry an exact `file:line: func(): Assertion` / `Fatal Python error:` site;
-`--oom-dedup-resolve-segv` re-runs `source.py` under gdb — deterministic on the same binary —
+`--oom-dedup-resolve-segv` re-runs `source.py` under gdb (`--oom-dedup-gdb-timeout`, default
+120) — deterministic on the same binary —
 to resolve segvs/generic-assert fatals), matches the snapshot, and returns `(keep, label)`.
 The crash dir self-labels with its bug id (`OOM-00NN` / `oomNEW` / `oomSEGV`); with
 `--oom-dedup-prune`, known duplicates past `--oom-dedup-keep N` (default 5) are dropped rather
