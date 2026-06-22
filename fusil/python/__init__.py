@@ -560,6 +560,10 @@ class Fuzzer(Application):
                 python_bin=self.options.python,
                 gdb_timeout=self.options.oom_dedup_gdb_timeout,
                 resolve_segv=self.options.oom_dedup_resolve_segv,
+                # Drop the gdb segv re-run to the same unprivileged user the fuzzing
+                # children use, so the fuzzed source.py is never replayed as root.
+                drop_uid=self.config.process_uid,
+                drop_gid=self.config.process_gid,
             )
             self.session_keep_policy = self._oom_keep_policy
             project.error(

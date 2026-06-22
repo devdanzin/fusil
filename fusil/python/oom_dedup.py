@@ -201,16 +201,36 @@ def extract_site_from_bt(bt_text):
     return sites[0] if sites else None
 
 
-def gdb_crash_site(python_bin, source_path, timeout=120):
+def gdb_crash_site(python_bin, source_path, timeout=120, drop_uid=None, drop_gid=None):
     """Re-run source.py under gdb on ``python_bin`` (deterministic on the same binary) and
-    return the chain of real CPython frames ['func@file:line', ...] (innermost first)."""
+    return the chain of real CPython frames ['func@file:line', ...] (innermost first).
+
+    This re-executes the *fuzzed* source.py, so it must never run it with more privilege
+    than the original fuzzing child had. When the caller is root and a drop target is
+    configured (``drop_uid``/``drop_gid`` -- the same ``fusil`` user the children drop to),
+    gdb and the python it spawns are dropped to that user; a same-uid gdb can still ptrace
+    its own child. The replay also runs with ``cwd`` set to the session dir (where source.py
+    lives, matching the original child's cwd) rather than the root-owned run dir, so a fuzzed
+    ``os.chmod``/``os.makedirs``/... on a relative path can't escalate against the run tree.
+    """
+    cwd = os.path.dirname(source_path) or None
+    # Only drop when we are actually privileged: a non-root caller is already unprivileged
+    # (and setgroups() would fail for it), so there is nothing to drop.
+    drop = {}
+    if os.getuid() == 0 and (drop_uid is not None or drop_gid is not None):
+        if drop_gid is not None:
+            drop["group"] = drop_gid
+            drop["extra_groups"] = [drop_gid]  # drop root's supplementary groups
+        if drop_uid is not None:
+            drop["user"] = drop_uid
     try:
         out = subprocess.run(
             ["gdb", "-q", "-batch", "-ex", "set pagination off",
              "-ex", "set print frame-arguments none", "-ex", "set debuginfod enabled off",
              "-ex", "run", "-ex", "bt 30", "--args", python_bin, "-u", source_path],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, cwd=cwd,
             env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0"},
+            **drop,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return []
@@ -234,7 +254,8 @@ class Deduper:
     injectable for testing; it defaults to :func:`gdb_crash_site`.
     """
     def __init__(self, snapshot_path, keep=5, prune=False, python_bin=None,
-                 gdb_timeout=120, resolve_segv=False, segv_resolver=None):
+                 gdb_timeout=120, resolve_segv=False, segv_resolver=None,
+                 drop_uid=None, drop_gid=None):
         self.snap = load_snapshot_file(snapshot_path)
         self.keep_cap = keep
         self.prune = prune
@@ -242,13 +263,18 @@ class Deduper:
         self.gdb_timeout = gdb_timeout
         self.resolve_segv = resolve_segv
         self._resolver = segv_resolver
+        # Drop target for the gdb segv re-run, so the fuzzed source.py is never replayed as
+        # root. Mirrors config.process_uid/gid (the user the fuzzing children drop to).
+        self.drop_uid = drop_uid
+        self.drop_gid = drop_gid
         self.seen = collections.Counter()   # bug/new-key -> total crashes seen
         self.kept = collections.Counter()   # bug -> directories kept
 
     def _resolve(self, source_path):
         """Return a list of 'func@file:line' chain frames (normalising the resolver)."""
         r = self._resolver(source_path) if self._resolver is not None else (
-            gdb_crash_site(self.python_bin, source_path, self.gdb_timeout)
+            gdb_crash_site(self.python_bin, source_path, self.gdb_timeout,
+                           drop_uid=self.drop_uid, drop_gid=self.drop_gid)
             if (self.python_bin and source_path) else None)
         if not r:
             return []
