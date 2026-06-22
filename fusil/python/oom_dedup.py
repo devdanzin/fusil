@@ -148,10 +148,15 @@ _ASAN_FRAME = re.compile(
 # _PyMem_DebugFree) are likewise detectors: they catch a bad/double free ("bad ID") but the
 # real defect is the CALLER doing the bad free (e.g. free_threadstate), so skip them too -- the
 # resolved site becomes that caller, matching the catalog (gen_known_sites GENERIC_DETECTOR_FUNCS).
+# tracemalloc's allocator hooks (tracemalloc_alloc/realloc/free, raw_*) are the same kind of
+# pass-through layer when tracing is on -- skip them so the site is the real caller (e.g.
+# free_list_items = OOM-0004), not the hook. (The by-design "tracemalloc_realloc() failed to
+# allocate a trace" fatal is matched by its message, not this frame, so skipping it here is safe.)
 _BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
                       r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
                       r'|_Py_DumpExtensionModules'
-                      r'|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree)$')
+                      r'|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree'
+                      r'|tracemalloc_(raw_)?(alloc|calloc|realloc|free))$')
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
 # of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.
 # do_warn / PyContextVar_Set), not the shared Py_DECREF/_Py_atomic_load that masks dozens
