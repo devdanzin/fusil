@@ -6,7 +6,7 @@
 #   sudo ./fleet down        stop + disable all instances
 #   ./fleet status          per-instance state + crash/NEW-find counts
 #   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
-#   ./fleet triage          dedupe all instances' crashes (needs INGEST in fleet.conf)
+#   ./fleet triage          dedupe oomNEW/oomSEGV candidates across instances (needs INGEST); extra args pass to ingest (e.g. --gdb)
 #   ./fleet tail [N]        follow instance N's log (default: 1)
 #   sudo ./fleet restart    restart all instances (e.g. to pick up a new catalog)
 #
@@ -134,9 +134,16 @@ cmd_finds(){
 }
 
 cmd_triage(){
-    local dirs=("$FLEET_DIR"/inst-*/)
+    # Candidate crash dirs live at inst-*/python-*/<label>/ (each holds a `stdout`); ingest.py
+    # checks ONE level for a stdout (it does not recurse), so it must be handed those leaf dirs.
+    # The old `inst-*/` glob passed the instance roots, which contain no stdout, so ingest saw
+    # 0 dirs and triage did nothing. Collect the oomNEW/oomSEGV candidates (depth-agnostic) and
+    # dedupe those against the catalog.
+    local dirs=()
+    mapfile -t dirs < <(find "$FLEET_DIR"/inst-* -type d \( -name '*oomNEW*' -o -name '*oomSEGV*' \) 2>/dev/null | sort)
     if [ -n "${INGEST:-}" ] && [ -f "$INGEST" ]; then
-        echo "ingesting all instances' crashes via $INGEST ..."
+        if [ "${#dirs[@]}" -eq 0 ]; then echo "no oomNEW/oomSEGV candidate dirs under $FLEET_DIR"; return 0; fi
+        echo "ingesting ${#dirs[@]} oomNEW/oomSEGV candidate dirs via $INGEST ..."
         "$RUNNER_PY" "$INGEST" "${dirs[@]}" --snapshot "$CATALOG" "$@"
     else
         echo "(no INGEST configured in fleet.conf -- listing candidates only)"
