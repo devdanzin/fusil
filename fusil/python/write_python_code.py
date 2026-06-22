@@ -324,11 +324,23 @@ class WritePythonCode(WriteCode):
                 import faulthandler
                 faulthandler.enable()
                 try:
-                    from _testcapi import set_nomemory as _set_nomemory, remove_mem_hooks as _remove_mem_hooks
+                    from _testcapi import set_nomemory as _set_nomemory
                     _OOM_AVAILABLE = True
                 except ImportError:
                     _OOM_AVAILABLE = False
                     print("OOM mode requested but _testcapi.set_nomemory unavailable; running without injection", file=stderr)
+                # set_nomemory()/remove_mem_hooks() install/restore the allocation-failure hook by
+                # swapping the process-global allocator via PyMem_SetAllocator(), which is NOT
+                # thread-safe. Performing that swap inside the per-call/per-sequence OOM loops races
+                # any worker threads the fuzzed code spawned and corrupts the heap -- false-positive
+                # "crashes" (mimalloc asserts, _PyMem_DebugRawFree bad-ID, segvs). So install the hook
+                # EXACTLY ONCE here, before any fuzzed code runs, in a disarmed state, and thereafter
+                # only re-arm/disarm the failure WINDOW with set_nomemory() (which never swaps the
+                # allocator). _OOM_DISABLE is a start count no real run reaches, so every allocation
+                # passes through (injection effectively off).
+                _OOM_DISABLE = 2_000_000_000
+                if _OOM_AVAILABLE:
+                    _set_nomemory(_OOM_DISABLE, 0)
             ''')
             self.emptyLine()
 
@@ -529,8 +541,10 @@ class WritePythonCode(WriteCode):
                     # the expected outcome and is swallowed silently; SystemError is
                     # surfaced (PyCFunction contract violations); a real crash
                     # (segfault/abort) terminates the process, the signal fusil scores.
-                    # remove_mem_hooks runs in the inner finally so the except clauses
-                    # allocate with the allocator restored.
+                    # The inner finally DISARMS injection (set_nomemory with an unreachable start)
+                    # so the except clauses allocate freely, WITHOUT swapping the allocator -- the
+                    # swap is not thread-safe and would corrupt the heap if the fuzzed call left
+                    # worker threads running (see the one-time install note above).
                     if not _OOM_AVAILABLE or func is None:
                         return
                     print("[OOM] " + label, file=stderr)
@@ -542,7 +556,7 @@ class WritePythonCode(WriteCode):
                             try:
                                 func(*args, **kwargs)
                             finally:
-                                _remove_mem_hooks()
+                                _set_nomemory(_OOM_DISABLE, 0)
                         except MemoryError:
                             pass
                         except SystemError:
@@ -583,7 +597,7 @@ class WritePythonCode(WriteCode):
                             try:
                                 thunk()
                             finally:
-                                _remove_mem_hooks()
+                                _set_nomemory(_OOM_DISABLE, 0)
                         except MemoryError:
                             pass
                         except SystemError:
