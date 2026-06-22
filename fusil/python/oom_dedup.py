@@ -143,10 +143,15 @@ _BT_FRAME = re.compile(
 _ASAN_FRAME = re.compile(
     r'#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+\S*?'
     r'/((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)')
-# fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site
+# fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site.
+# The debug allocator's free-time checks (_PyMem_DebugCheckAddress / _PyMem_DebugRawFree /
+# _PyMem_DebugFree) are likewise detectors: they catch a bad/double free ("bad ID") but the
+# real defect is the CALLER doing the bad free (e.g. free_threadstate), so skip them too -- the
+# resolved site becomes that caller, matching the catalog (gen_known_sites GENERIC_DETECTOR_FUNCS).
 _BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
                       r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
-                      r'|_Py_DumpExtensionModules)$')
+                      r'|_Py_DumpExtensionModules'
+                      r'|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree)$')
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
 # of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.
 # do_warn / PyContextVar_Set), not the shared Py_DECREF/_Py_atomic_load that masks dozens
