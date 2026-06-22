@@ -301,5 +301,58 @@ class TestSegvResolution(unittest.TestCase):
         self.assertEqual(called, [])
 
 
+class TestGdbResolveDropsPrivileges(unittest.TestCase):
+    """gdb_crash_site re-runs the *fuzzed* source.py, so it must never do so with more
+    privilege than the fuzzing children had: drop to the configured user when root, and
+    confine cwd to the session dir (not the root-owned run-dir root)."""
+
+    SRC = "/run/inst-01/python-2/session-9/source.py"
+    SESSION_DIR = "/run/inst-01/python-2/session-9"
+
+    def _capture(self, *, uid, drop_uid=None, drop_gid=None):
+        """Stub subprocess.run + os.getuid; return the kwargs gdb_crash_site passed to run."""
+        captured = {}
+
+        class _Result:
+            stdout = ""  # no frames -> extract_sites_from_bt returns []
+
+        def fake_run(cmd, **kwargs):
+            captured["kwargs"] = kwargs
+            return _Result()
+
+        orig_run, orig_getuid = oom_dedup.subprocess.run, oom_dedup.os.getuid
+        oom_dedup.subprocess.run = fake_run
+        oom_dedup.os.getuid = lambda: uid
+        try:
+            oom_dedup.gdb_crash_site("/bin/python", self.SRC,
+                                     drop_uid=drop_uid, drop_gid=drop_gid)
+        finally:
+            oom_dedup.subprocess.run = orig_run
+            oom_dedup.os.getuid = orig_getuid
+        return captured["kwargs"]
+
+    def test_drops_to_user_and_confines_cwd_when_root(self):
+        kw = self._capture(uid=0, drop_uid=1001, drop_gid=1001)
+        self.assertEqual(kw["user"], 1001)
+        self.assertEqual(kw["group"], 1001)
+        self.assertEqual(kw["extra_groups"], [1001])  # root's supplementary groups dropped
+        self.assertEqual(kw["cwd"], self.SESSION_DIR)
+
+    def test_no_drop_when_already_unprivileged(self):
+        # A non-root caller is already unprivileged (and setgroups() would fail for it).
+        kw = self._capture(uid=1001, drop_uid=1001, drop_gid=1001)
+        self.assertNotIn("user", kw)
+        self.assertNotIn("group", kw)
+        self.assertNotIn("extra_groups", kw)
+        self.assertEqual(kw["cwd"], self.SESSION_DIR)  # cwd confinement still applies
+
+    def test_no_drop_target_runs_as_is_even_as_root(self):
+        # --unsafe (no process user) configures no drop target: behaviour unchanged.
+        kw = self._capture(uid=0)
+        self.assertNotIn("user", kw)
+        self.assertNotIn("group", kw)
+        self.assertEqual(kw["cwd"], self.SESSION_DIR)
+
+
 if __name__ == "__main__":
     unittest.main()
