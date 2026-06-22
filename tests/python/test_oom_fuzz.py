@@ -114,7 +114,13 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         self.assertIn("def oom_call(label, func", src)
         self.assertIn(f"_OOM_MAX_START = {OOM_MAX_START}", src)
         self.assertIn("range(_OOM_MAX_START)", src)
-        self.assertIn("_remove_mem_hooks()", src)
+        # The allocation hook is installed ONCE (disarmed) and the loop re-arms/disarms the
+        # failure window without swapping the allocator -- swapping (remove_mem_hooks) inside
+        # the loop races fuzzed worker threads and corrupts the heap. So the per-iteration
+        # _remove_mem_hooks() swap is gone; the finally disarms via set_nomemory instead.
+        self.assertIn("_OOM_DISABLE", src)
+        self.assertIn("_set_nomemory(_OOM_DISABLE, 0)", src)
+        self.assertNotIn("_remove_mem_hooks()", src)
 
         # Per-call marker (the pinpointing signal) and exception policy:
         # MemoryError swallowed silently, SystemError surfaced.
