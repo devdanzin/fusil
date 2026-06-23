@@ -43,6 +43,52 @@ def _nf(f):
     return f.lstrip("./")
 
 
+# ---- bounded stdout reader ----
+# A crashing session's stdout can be huge: OOM-verbose `start=N` spew, or a runaway /
+# binary-emitting vehicle (tens of MB). Feeding the whole thing to the classification
+# regexes above makes the ``.*?`` patterns backtrack catastrophically (a multi-MB
+# no-newline binary blob is one giant "line"), which would stall the in-loop keep-policy
+# that runs synchronously in the session's deinit. The crash signature always lives at the
+# HEAD (early asserts / import errors) or the TAIL (the Fatal/ASan backtrace that ends the
+# process), never the middle, so read a bounded head+tail and cap each line -- lossless for
+# every signal decide() uses. Mirrors the catalog's ingest.read_stdout. Env-overridable.
+_STDOUT_HEAD = int(os.environ.get("OOM_STDOUT_HEAD", 256 * 1024))
+_STDOUT_TAIL = int(os.environ.get("OOM_STDOUT_TAIL", 1024 * 1024))
+_STDOUT_LINE_CAP = int(os.environ.get("OOM_STDOUT_LINE_CAP", 4096))
+
+
+def _cap_lines(text):
+    """Truncate over-long lines so a binary blob can't make the regexes backtrack."""
+    if _STDOUT_LINE_CAP <= 0:
+        return text
+    return "\n".join(
+        ln if len(ln) <= _STDOUT_LINE_CAP else ln[:_STDOUT_LINE_CAP]
+        for ln in text.split("\n")
+    )
+
+
+def read_crash_stdout(path):
+    """Read a crash's captured stdout, bounding huge files to head+tail and capping line
+    length (decoded, errors-replaced) so decide()'s regexes can't catastrophically
+    backtrack on OOM-verbose spew or embedded binary."""
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        if size <= _STDOUT_HEAD + _STDOUT_TAIL:
+            fh.seek(0)
+            return _cap_lines(fh.read().decode("utf-8", "replace"))
+        fh.seek(0)
+        head = fh.read(_STDOUT_HEAD)
+        fh.seek(size - _STDOUT_TAIL)
+        tail = fh.read(_STDOUT_TAIL)
+    elided = size - _STDOUT_HEAD - _STDOUT_TAIL
+    return _cap_lines(
+        head.decode("utf-8", "replace")
+        + f"\n...[{elided} bytes elided by read_crash_stdout]...\n"
+        + tail.decode("utf-8", "replace")
+    )
+
+
 def all_asserts(text):
     """Every assertion in stdout as a list of (file, line, func|None, expr)."""
     out, seen = [], set()

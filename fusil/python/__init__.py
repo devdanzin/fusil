@@ -601,8 +601,12 @@ class Fuzzer(Application):
 
         session_dir = session.directory.directory
         try:
-            with open(os.path.join(session_dir, "stdout"), errors="replace") as fh:
-                text = fh.read()
+            from fusil.python.oom_dedup import read_crash_stdout
+
+            # Bounded read: a crashing session's stdout can be tens of MB (OOM-verbose spew /
+            # runaway vehicle); reading it whole would make decide()'s regexes backtrack
+            # catastrophically and stall this keep-policy (it runs synchronously in deinit).
+            text = read_crash_stdout(os.path.join(session_dir, "stdout"))
             return self._deduper.decide(text, source_path=os.path.join(session_dir, "source.py"))
         except Exception as err:
             # Never let a dedupe failure abort the session's keep/rename (deinit): keep the
