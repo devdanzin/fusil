@@ -5,7 +5,7 @@ import inspect
 import logging
 import time
 from random import choice, randint, random
-from textwrap import dedent, indent
+from textwrap import dedent
 from types import BuiltinFunctionType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
-    from fusil.python.template_strings import TEMPLATES
+    from fusil.python.template_strings import TEMPLATES  # noqa: F401  (availability probe)
 
     logger.info("Template strings available.")
     _ARG_GEN_USE_TEMPLATES = True
@@ -49,12 +49,12 @@ except ImportError:
 _ARG_GEN_USE_H5PY = False
 if _ARG_GEN_USE_NUMPY:
     try:
-        import h5py
+        import h5py  # noqa: F401  (availability probe)
 
         logger.info("h5py is available.")
         _ARG_GEN_USE_H5PY = True
+        import fusil.python.h5py.h5py_tricky_weird  # noqa: F401  (registers tricky h5py objects)
         from fusil.python.h5py.write_h5py_code import WriteH5PyCode
-        import fusil.python.h5py.h5py_tricky_weird
     except ImportError:
         logger.info("h5py is not available.")
         _ARG_GEN_USE_H5PY = False
@@ -416,13 +416,13 @@ class WritePythonCode(WriteCode):
         self.write(0, "def jit_harness(func, iterations, *args, **kwargs):")
         self.addLevel(1)
         self.write_print_to_stderr(
-            0, f'f"[+] Warming up {{func.__name__}} for {{iterations}} iterations..."'
+            0, 'f"[+] Warming up {func.__name__} for {iterations} iterations..."'
         )
         self.write(0, "for _ in range(iterations):")
         self.addLevel(1)
         self.write(0, "func(*args, **kwargs)")
         self.restoreLevel(self.base_level - 1)
-        self.write_print_to_stderr(0, f'"[+] Warm-up complete."')
+        self.write_print_to_stderr(0, '"[+] Warm-up complete."')
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
@@ -821,24 +821,24 @@ class WritePythonCode(WriteCode):
     ):
         """Dispatches fuzzing operations for a given object instance."""
         if generation_depth > self.MAX_FUZZ_GENERATION_DEPTH:
-            self.write(0, f"try:")
+            self.write(0, "try:")
             self.write_print_to_stderr(
                 1,
                 f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'",
             )
-            self.write(0, f"except Exception:")
+            self.write(0, "except Exception:")
             self.write_print_to_stderr(
                 1,
                 f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {class_name_hint}, not generating deeper fuzzing.'",
             )
 
             return
-        self.write(0, f"try:")
+        self.write(0, "try:")
         self.write_print_to_stderr(
             1,
             f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{ {target_obj_expr_str}!r }} (hint: {class_name_hint}, prefix: {current_prefix}) ---"',
         )
-        self.write(0, f"except Exception as e:")
+        self.write(0, "except Exception as e:")
         self.write_print_to_stderr(
             1,
             f'f"--- (Depth {generation_depth}) Error calling repr() prefix: {current_prefix}) ---"',
@@ -862,12 +862,12 @@ class WritePythonCode(WriteCode):
                     class_name_hint, current_prefix, generation_depth, target_obj_expr_str
                 )
             try:
-                self.write(0, f"try:")
+                self.write(0, "try:")
                 self.write_print_to_stderr(
                     1,
                     f"f'Instance {{ {target_obj_expr_str}!r }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
                 )
-                self.write(0, f"except Exception as e:")
+                self.write(0, "except Exception as e:")
                 self.write_print_to_stderr(
                     1,
                     f"f'Error printing instance repr() {{ e }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
@@ -924,14 +924,14 @@ class WritePythonCode(WriteCode):
 
         # Example of generic method fuzzing (conceptual, adapt from your existing code):
         self.write(0, f"{current_prefix}_methods = []")
-        self.write(0, f"try:")
+        self.write(0, "try:")
         self.addLevel(1)
         self.write(0, f"for {current_prefix}_attr_name in dir({target_obj_expr_str}):")
         self.addLevel(1)
         self.write(
             0, f"if {current_prefix}_attr_name.startswith('_'): continue"
         )  # Skip private/dunder for simplicity
-        self.write(0, f"try:")  # Inner try for getattr
+        self.write(0, "try:")  # Inner try for getattr
         self.addLevel(1)
         self.write(
             0,
@@ -942,7 +942,7 @@ class WritePythonCode(WriteCode):
             f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val.__name__ in ('wait', '_rehash'): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
         )
         self.restoreLevel(self.base_level - 1)  # Exit inner try
-        self.write(0, f"except Exception: pass")
+        self.write(0, "except Exception: pass")
         self.restoreLevel(self.base_level - 1)  # Exit for loop
         self.restoreLevel(self.base_level - 1)  # Exit outer try
         self.write(0, f"except Exception: {current_prefix}_methods = [] # Failed to get methods")
@@ -967,7 +967,7 @@ class WritePythonCode(WriteCode):
         # _generate_and_write_call needs adaptation if method_obj is a runtime variable.
         # For simplicity here, let's assume _generate_and_write_call can take the method *name*
         # and the target object expression.
-        self.write(0, f"# Conceptual call to generic method fuzzer")
+        self.write(0, "# Conceptual call to generic method fuzzer")
         self.write(
             0,
             f"if {current_prefix}_method_name_to_call not in ('wait', '_rehash'): callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
@@ -1304,18 +1304,18 @@ class WritePythonCode(WriteCode):
             L_deep_dive_res = self.addLevel(1)
             try:
                 self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
-                self.write(0, f"try:")
+                self.write(0, "try:")
                 L_before_repr = self.addLevel(1)
                 self.write_print_to_stderr(
                     0,
                     f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
                 )
                 self.restoreLevel(L_before_repr)
-                self.write(0, f"except Exception as e:")
+                self.write(0, "except Exception as e:")
                 L_after_repr = self.addLevel(1)
                 self.write_print_to_stderr(
                     0,
-                    f"f'EXCEPTION printing CALL_RESULT: {{ e }}'",
+                    "f'EXCEPTION printing CALL_RESULT: { e }'",
                 )
                 self.restoreLevel(L_after_repr)
                 self._dispatch_fuzz_on_instance(

@@ -1,8 +1,7 @@
 from weakref import ref as weakref_ref
 
-from fusil.project_agent import ProjectAgent
-
 from fusil.process.cpu_probe import CpuProbe
+from fusil.project_agent import ProjectAgent
 
 DEFAULT_EXITCODE_SCORE = 0.50
 DEFAULT_TIMEOUT_SCORE = 1.0

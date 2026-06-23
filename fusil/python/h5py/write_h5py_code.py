@@ -149,7 +149,7 @@ class WriteH5PyCode:
         self.parent.emptyLine()
         self.parent.write(
             0,
-            dedent(f"""\
+            dedent("""\
             def _fusil_h5_get_link_target_in_file(parent_group_obj, predefined_tricky_objects, runtime_objects):
                 # ""\"Attempts to find a suitable existing Dataset or Group in the same file as parent_group_obj.
                 # Used as a target for creating hard links.
@@ -249,7 +249,7 @@ class WriteH5PyCode:
             self.parent.write(0, f"{ctx_p}_is_empty_dataspace = False")
             self.parent.write(0, f"{ctx_p}_actual_product_shape = 0")
 
-            self.parent.write(0, f"try:")
+            self.parent.write(0, "try:")
             self.parent.addLevel(1)
             self.parent.write(0, f"{ctx_p}_shape = {ctx_p}_target_dset.shape")
             self.parent.write(0, f"{ctx_p}_dtype_obj = {ctx_p}_target_dset.dtype")
@@ -381,7 +381,7 @@ class WriteH5PyCode:
 
             # Issue 211: Array Dtype Operations
             if random() < 0.2:
-                self.parent.write(0, f"# Issue 211 checks for array dtypes")
+                self.parent.write(0, "# Issue 211 checks for array dtypes")
                 self.parent.write(
                     0,
                     f"if {ctx_p}_dtype_obj is not None and {ctx_p}_dtype_obj.subdtype is not None:",
@@ -479,19 +479,19 @@ class WriteH5PyCode:
                 self.parent.addLevel(1)
                 self.parent.write(0, "try:")
                 self.parent.addLevel(1)
-                self.parent.write(0, f"# Attempt write before resize (might be error or no-op)")
+                self.parent.write(0, "# Attempt write before resize (might be error or no-op)")
                 self.parent.write(0, f"{ctx_p}_target_dset[()] = 0")
                 self.parent.write_print_to_stderr(
                     0,
                     f"f'''G_ISSUE2549 ({dset_name_for_log}): Attempted write to initially zero-size resizable dataset.'''",
                 )
-                self.parent.write(0, f"# Now resize and write")
+                self.parent.write(0, "# Now resize and write")
                 new_len = randint(1, 5)
                 self.parent.write(
                     0,
                     f"new_shape_tuple_parts = ({new_len},) + ({ctx_p}_shape[1:] if {ctx_p}_rank > 1 else ())",
                 )
-                self.parent.write(0, f"new_shape_for_resize = new_shape_tuple_parts")
+                self.parent.write(0, "new_shape_for_resize = new_shape_tuple_parts")
                 self.parent.write(0, f"{ctx_p}_target_dset.resize(new_shape_for_resize)")
                 self.parent.write(
                     0,
@@ -663,7 +663,7 @@ class WriteH5PyCode:
                     0, f"if {ctx_p}_shape is not None and not {ctx_p}_is_empty_dataspace:"
                 )  # Astype on empty might be problematic or less interesting for now
                 self.parent.addLevel(1)
-                self.parent.write(0, f"try:")
+                self.parent.write(0, "try:")
                 self.parent.addLevel(1)
                 self.parent.write(
                     0, f"{ctx_p}_astype_view = {ctx_p}_target_dset.astype({astype_dtype_expr})"
@@ -754,12 +754,12 @@ class WriteH5PyCode:
                 self.parent.write(0, "try:")
                 self.parent.addLevel(1)
                 self.parent.write(0, f"field_names_tuple = tuple({ctx_p}_dtype_obj.fields.keys())")
-                self.parent.write(0, f"if field_names_tuple:")
+                self.parent.write(0, "if field_names_tuple:")
                 self.parent.addLevel(1)
-                self.parent.write(0, f"field_to_access = choice(field_names_tuple)")
+                self.parent.write(0, "field_to_access = choice(field_names_tuple)")
                 self.parent.write(
                     0,
-                    f"if random() < 0.5: field_to_access = list(sample(field_names_tuple, k=min(len(field_names_tuple), randint(1,2))))",
+                    "if random() < 0.5: field_to_access = list(sample(field_names_tuple, k=min(len(field_names_tuple), randint(1,2))))",
                 )
                 self.parent.write(
                     0, f"{ctx_p}_fields_view = {ctx_p}_target_dset.fields(field_to_access)"
@@ -843,7 +843,7 @@ class WriteH5PyCode:
                 self.parent.write(0, f"{ctx_p}_source_sel = {source_sel_expr}")
                 self.parent.write(0, f"{ctx_p}_dest_sel = {dest_sel_expr}")
                 # Read direct
-                self.parent.write(0, f"# For read_direct, np_arr_for_rd is destination")
+                self.parent.write(0, "# For read_direct, np_arr_for_rd is destination")
                 self.parent.write(0, "try:")
                 self.parent.addLevel(1)
                 self.parent.write(
@@ -864,7 +864,7 @@ class WriteH5PyCode:
                     f"except Exception as e_readdirect: print(f'''DS_READ_DIRECT_ERR ({dset_name_for_log}): {{e_readdirect}} with src_sel {{{ctx_p}_source_sel!r}} dst_sel {{{ctx_p}_dest_sel!r}} ''', file=sys.stderr)",
                 )
                 # Write direct
-                self.parent.write(0, f"# For write_direct, np_arr_for_wd is source")
+                self.parent.write(0, "# For write_direct, np_arr_for_wd is source")
                 self.parent.write(0, "try:")
                 self.parent.addLevel(1)
                 self.parent.write(
@@ -1857,8 +1857,8 @@ class WriteH5PyCode:
         kwargs_final_str = ", ".join(part for part in all_kwargs_parts if part)
 
         # 5. Write the h5py.File call
-        self.parent.write(0, f"new_file_obj = None # Initialize before try block")
-        self.parent.write(0, f"try:")
+        self.parent.write(0, "new_file_obj = None # Initialize before try block")
+        self.parent.write(0, "try:")
         self.parent.addLevel(1)
         # Ensure name_arg_expression is correctly formatted, and mode_expr is also handled.
         # kwargs_final_str might be empty, so add a comma only if it's not.
@@ -1867,16 +1867,16 @@ class WriteH5PyCode:
             file_call_args += f", {kwargs_final_str}"
 
         self.parent.write(0, f"new_file_obj = h5py.File({file_call_args})")
-        self.parent.write(0, f"if new_file_obj: # Check if successfully created")
+        self.parent.write(0, "if new_file_obj: # Check if successfully created")
         self.parent.addLevel(1)
         self.parent.write(
             0, f"h5py_tricky_objects['runtime_file_{uuid.uuid4().hex[:4]}'] = new_file_obj"
         )
-        self.parent.write(0, f"_h5_internal_files_to_keep_open_.append(new_file_obj)")
+        self.parent.write(0, "_h5_internal_files_to_keep_open_.append(new_file_obj)")
         self.parent.restoreLevel(self.parent.base_level - 1)  # Exit if
         self.parent.restoreLevel(self.parent.base_level - 1)  # Exit try
 
-        self.parent.write(0, f"except Exception as e_file_create:")
+        self.parent.write(0, "except Exception as e_file_create:")
         self.parent.addLevel(1)
         log_name_arg_expr = name_arg_expression.replace("'", "\\'")  # Escape for f-string
         log_kwargs_final_str = kwargs_final_str.replace("'", "\\'")
@@ -1984,7 +1984,7 @@ class WriteH5PyCode:
         # Filter out None values from the dict before formatting, unless the value is literally the string "None"
         final_kwargs_str = ", ".join(f"{k}={v}" for k, v in all_kwargs_dict.items())
 
-        self.parent.write(0, f"try:")
+        self.parent.write(0, "try:")
         self.parent.addLevel(1)
         self.parent.write(
             0,
@@ -1997,7 +1997,7 @@ class WriteH5PyCode:
         )
         self.parent.restoreLevel(self.parent.base_level - 1)
         self.parent.restoreLevel(self.parent.base_level - 1)
-        self.parent.write(0, f"except Exception as e_dset_create:")
+        self.parent.write(0, "except Exception as e_dset_create:")
         self.parent.addLevel(1)
         self.parent.write(0, f"{instance_var_name} = None")
         # Escape characters in expressions for safe inclusion in the f-string
@@ -2005,7 +2005,7 @@ class WriteH5PyCode:
         log_parent_obj_expr = parent_obj_expr.replace("'", "\\'")
         log_final_kwargs_str = final_kwargs_str.replace("'", "\\'")
 
-        self.parent.write(0, f"try:")  # Inner try for printing error, in case repr itself fails
+        self.parent.write(0, "try:")  # Inner try for printing error, in case repr itself fails
         self.parent.addLevel(1)
         self.parent.write_print_to_stderr(
             0,  # Relative to current indent

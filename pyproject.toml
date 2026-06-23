@@ -11,7 +11,7 @@ authors = [
 maintainers = [
     {name = "Daniel Diniz", email = "lafleurfuzzer@gmail.com"},
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "GNU GPL v2"}
 keywords = ["fuzzing", "fuzzer", "security", "testing"]
 classifiers = [
@@ -23,9 +23,9 @@ classifiers = [
     "Natural Language :: English",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "python-ptrace>=0.7",
@@ -60,17 +60,23 @@ namespaces = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 # Legacy / parked code is not maintained to the lint/format standard.
 extend-exclude = ["fusil/notworking", "fuzzers/notworking", "tools/notworking"]
 
 [tool.ruff.lint]
 # Default rule set (pyflakes F + a subset of pycodestyle E) plus import sorting (I).
 select = ["E4", "E7", "E9", "F", "I"]
+# fusil legitimately does conditional/late imports (optional-feature detection) and the
+# tests set up sys.path before importing fusil, so E402 (import-not-at-top) is expected.
+ignore = ["E402"]
 
 [tool.ruff.lint.per-file-ignores]
-# The code generators build target source as long string literals; do not nag about
-# line length there. Tests likewise carry long expected-output strings.
+# The code generators build target source as long string literals (E501) and accumulate
+# scratch locals while emitting code (F841); the samples are deliberately-weird fixtures.
 "fusil/python/write_python_code.py" = ["E501"]
-"fusil/python/jit/*" = ["E501"]
-"fusil/python/h5py/*" = ["E501"]
+"fusil/python/jit/*" = ["E501", "F841"]
+"fusil/python/h5py/*" = ["E501", "F841"]
+"fusil/python/samples/*" = ["E731", "E722"]
+# These imports exist to assert the tricky sample objects are importable.
+"tests/python/samples/test_tricky_objects.py" = ["F401"]

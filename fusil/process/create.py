@@ -1,6 +1,8 @@
 from errno import ENOENT
-from os import devnull
+from os import devnull, kill
 from os.path import basename
+from pwd import getpwuid
+from signal import SIGKILL
 from subprocess import STDOUT, Popen
 from time import sleep, time
 
@@ -12,12 +14,6 @@ from fusil.process.prepare import ChildError, prepareProcess
 from fusil.process.replay_python import createReplayPythonScript
 from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand, target_is_asan
 from fusil.project_agent import ProjectAgent
-
-from pwd import getpwuid
-
-
-from os import kill
-from signal import SIGKILL
 
 DEFAULT_TIMEOUT = 10.0
 

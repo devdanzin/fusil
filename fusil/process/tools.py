@@ -3,9 +3,6 @@ from functools import lru_cache
 from os import X_OK, access, devnull, getcwd, getenv, pathsep
 from os.path import dirname, isabs, normpath
 from os.path import join as path_join
-from subprocess import STDOUT, Popen, SubprocessError, run
-
-
 from resource import (
     RLIMIT_AS,
     RLIMIT_CORE,
@@ -14,6 +11,7 @@ from resource import (
     getrlimit,
     setrlimit,
 )
+from subprocess import STDOUT, Popen, SubprocessError, run
 
 try:
     from os import nice

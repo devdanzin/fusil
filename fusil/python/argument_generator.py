@@ -14,7 +14,7 @@ vulnerabilities through unusual type interactions and boundary conditions.
 
 from __future__ import annotations
 
-from random import choice, randint, sample, random
+from random import choice, randint, random, sample
 from typing import Callable
 
 import fusil.python
@@ -76,6 +76,7 @@ except ImportError:
 
 try:
     import h5py
+
     import fusil.python.h5py.h5py_tricky_weird
     from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 except ImportError:

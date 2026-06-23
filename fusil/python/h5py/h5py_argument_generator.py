@@ -20,6 +20,7 @@ except ImportError:
 
 try:
     import h5py
+
     import fusil.python.h5py.h5py_tricky_weird
 except ImportError:
     USE_H5PY = False
@@ -231,7 +232,7 @@ class H5PyArgumentGenerator:
         """
         setup_lines = []
         if actual_driver == "fileobj":
-            name_expr = f"io.BytesIO()"
+            name_expr = "io.BytesIO()"
         elif actual_driver == "core" and not is_core_backing:
             name_expr = f"'mem_core_{uuid.uuid4().hex}'"  # Unique name for in-memory core file
         else:  # Needs a disk path
@@ -676,7 +677,7 @@ class H5PyArgumentGenerator:
         """
         order_opt = ""
         if allow_non_contiguous and random() < 0.2:
-            order_opt = f", order='F'"
+            order_opt = ", order='F'"
 
         is_bool_dtype = "'bool'" in dtype_expr.lower()
         if random() < 0.5 and not is_bool_dtype:

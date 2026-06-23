@@ -1,9 +1,9 @@
-import unittest
-import sys
-import os
 import ast
+import os
+import sys
+import unittest
 from io import StringIO
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import ANY, MagicMock, patch
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +16,7 @@ sys.path.insert(0, PROJECT_ROOT)
 try:
     import h5py
     import numpy
+
     from fusil.python.h5py.write_h5py_code import WriteH5PyCode
 
     H5PY_AVAILABLE = True

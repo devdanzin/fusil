@@ -1,8 +1,9 @@
 import pathlib
+from grp import getgrgid, getgrnam
 from io import StringIO
-from sys import exit, stdout
-
 from os import getgid, getuid
+from pwd import getpwnam, getpwuid
+from sys import exit, stderr, stdout
 
 from ptrace.error import PTRACE_ERRORS, writeError
 
@@ -23,9 +24,6 @@ from fusil.process.tools import beNice, runCommand
 from fusil.project import Project
 from fusil.version import LICENSE, VERSION, WEBSITE
 from fusil.xhost import xhostCommand
-
-from grp import getgrgid, getgrnam
-from pwd import getpwnam, getpwuid
 
 
 def formatLimit(limit):
@@ -68,7 +66,7 @@ class Application(ApplicationAgent):
         dep_errors = self.plugin_manager.check_dependencies()
         if dep_errors:
             for error in dep_errors:
-                print(f"[Plugin Error] {error}", file=sys.stderr)
+                print(f"[Plugin Error] {error}", file=stderr)
 
         self.setup()
 

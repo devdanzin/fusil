@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Callable, Any
+from typing import Any, Callable
 
 
 @dataclass

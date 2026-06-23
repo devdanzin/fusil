@@ -7,7 +7,6 @@ from fusil.process.debugger import Debugger
 from fusil.project_agent import ProjectAgent
 from fusil.project_directory import ProjectDirectory
 from fusil.session import Session
-
 from fusil.system_calm import SystemCalm
 
 

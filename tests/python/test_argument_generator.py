@@ -1,20 +1,20 @@
 import ast
-import unittest
-import sys
-import re  # For test_genWeirdUnion and test_genWeirdType
-from random import randint, sample, seed, choice as random_choice
-from unittest.mock import patch, MagicMock  # MagicMock for placeholders
-
 import os
+import re  # For test_genWeirdUnion and test_genWeirdType
+import sys
+import unittest
+from random import choice as random_choice
+from random import randint, sample
+from unittest.mock import MagicMock, patch  # MagicMock for placeholders
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
 import fusil.python.argument_generator
-from fusil.config import FusilConfig
+import fusil.python.h5py.h5py_tricky_weird  # For h5py_tricky_names
 import fusil.python.tricky_weird
 import fusil.python.values
-import fusil.python.h5py.h5py_tricky_weird  # For h5py_tricky_names
+from fusil.config import FusilConfig
 
 USE_NUMPY = USE_H5PY = True
 try:
@@ -25,6 +25,7 @@ except ImportError:
 
 try:
     import h5py
+
     import fusil.python.h5py.h5py_tricky_weird
     from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 except ImportError:
