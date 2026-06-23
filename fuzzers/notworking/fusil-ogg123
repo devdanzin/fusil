@@ -9,15 +9,15 @@ MANGLE = "fixed"
 
 from fusil.application import Application
 from optparse import OptionGroup
-from fusil.process.mangle import MangleProcess
+from fusil.notworking.process.mangle import MangleProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
 if MANGLE == "incr":
-    from fusil.incr_mangle import IncrMangle as OggMangle
+    from fusil.notworking.incr_mangle import IncrMangle as OggMangle
 elif MANGLE == "auto":
-    from fusil.auto_mangle import AutoMangle as OggMangle
+    from fusil.notworking.auto_mangle import AutoMangle as OggMangle
 else:
-    from fusil.mangle import MangleFile as OggMangle
+    from fusil.notworking.mangle import MangleFile as OggMangle
 
 class Fuzzer(Application):
     NAME = "ogg123"
@@ -42,7 +42,7 @@ class Fuzzer(Application):
             mangle.hard_min_op = 1
             mangle.hard_max_op = 100
         elif MANGLE == "incr":
-            from fusil.incr_mangle_op import InverseBit, Increment
+            from fusil.notworking.incr_mangle_op import InverseBit, Increment
             mangle.operations = (InverseBit, Increment)
         else:
             mangle.config.min_op = 1

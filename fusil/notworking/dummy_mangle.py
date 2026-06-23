@@ -1,4 +1,4 @@
-from fusil.mangle import MangleAgent
+from fusil.notworking.mangle import MangleAgent
 
 
 class DummyMangle(MangleAgent):

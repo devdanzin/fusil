@@ -17,11 +17,11 @@ MAX_FILESIZE = 1024*1024
 
 from fusil.application import Application
 from optparse import OptionGroup
-from fusil.process.mangle import MangleProcess
+from fusil.notworking.process.mangle import MangleProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
-from fusil.auto_mangle import AutoMangle
-from fusil.terminal_echo import TerminalEcho
+from fusil.notworking.auto_mangle import AutoMangle
+from fusil.notworking.terminal_echo import TerminalEcho
 
 class Fuzzer(Application):
     NAME = "mplayer"

@@ -6,7 +6,7 @@ from time import time
 
 from ptrace.error import formatError, writeError
 
-from fusil.network.tools import formatAddress
+from fusil.notworking.network.tools import formatAddress
 from fusil.project_agent import ProjectAgent
 
 

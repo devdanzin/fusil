@@ -13,7 +13,7 @@ except ImportError:
 from logging import info
 from zlib import crc32
 
-from fusil.bits import BIG_ENDIAN, bytes2uint, uint2bytes
+from fusil.notworking.bits import BIG_ENDIAN, bytes2uint, uint2bytes
 
 
 def pngCRC32(data):

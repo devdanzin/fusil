@@ -5,7 +5,7 @@ from weakref import ref as weakref_ref
 
 from ptrace.error import formatError
 
-from fusil.network.tools import formatAddress
+from fusil.notworking.network.tools import formatAddress
 from fusil.session_agent import SessionAgent
 
 

@@ -10,7 +10,7 @@ from optparse import OptionGroup
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
-from fusil.auto_mangle import AutoMangle
+from fusil.notworking.auto_mangle import AutoMangle
 from os.path import basename, dirname, join as path_join
 from sys import stderr, exit
 from os import unlink, mkdir

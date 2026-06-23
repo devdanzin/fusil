@@ -12,13 +12,13 @@ VIDEO_EXTENSIONS = "avi,mkv,mov,mpg,mpeg,mp4"
 
 from fusil.application import Application
 from optparse import OptionGroup
-from fusil.process.mangle import MangleProcess
+from fusil.notworking.process.mangle import MangleProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
 if INCR_MANGLE:
-    from fusil.incr_mangle import IncrMangle
+    from fusil.notworking.incr_mangle import IncrMangle
 else:
-    from fusil.auto_mangle import AutoMangle
+    from fusil.notworking.auto_mangle import AutoMangle
 from fusil.file_tools import filenameExtension
 
 class Fuzzer(Application):

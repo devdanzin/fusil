@@ -12,7 +12,7 @@ from fusil.application import Application
 from fusil.process.create import DEFAULT_TIMEOUT
 from fusil.process.env import EnvVarIntegerRange
 from fusil.process.watch import WatchProcess, DEFAULT_TIMEOUT_SCORE
-from fusil.zzuf import ZzufProcess, DEFAULT_RATIO
+from fusil.notworking.zzuf import ZzufProcess, DEFAULT_RATIO
 from optparse import OptionGroup
 import re
 

@@ -1,7 +1,7 @@
 from socket import AF_INET
 
-from fusil.network.server import NetworkServer
-from fusil.network.tools import formatAddress
+from fusil.notworking.network.server import NetworkServer
+from fusil.notworking.network.tools import formatAddress
 
 
 class TcpServer(NetworkServer):

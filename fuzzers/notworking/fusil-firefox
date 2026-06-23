@@ -16,17 +16,17 @@ HTML_REFRESH_TIMEOUT = 2.0
 from fusil.application import Application
 from optparse import OptionGroup
 from fusil.file_tools import filenameExtension
-from fusil.network.http_server import HttpServer
-from fusil.process.attach import AttachProcess
+from fusil.notworking.network.http_server import HttpServer
+from fusil.notworking.process.attach import AttachProcess
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.tools import runCommand
 from fusil.project_agent import ProjectAgent
-from fusil.auto_mangle import AutoMangle
-from fusil.dummy_mangle import DummyMangle
+from fusil.notworking.auto_mangle import AutoMangle
+from fusil.notworking.dummy_mangle import DummyMangle
 from datetime import datetime
 from time import time
-from fusil.x11 import sendKey, getDisplay, findWindowByNameRegex
+from fusil.notworking.x11 import sendKey, getDisplay, findWindowByNameRegex
 from Xlib.keysymdef.miscellany import XK_F5
 import re
 from os import getenv

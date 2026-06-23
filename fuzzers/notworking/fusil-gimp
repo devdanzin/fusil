@@ -9,8 +9,8 @@ from optparse import OptionGroup
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
-from fusil.auto_mangle import AutoMangle
-from fusil.dummy_mangle import DummyMangle
+from fusil.notworking.auto_mangle import AutoMangle
+from fusil.notworking.dummy_mangle import DummyMangle
 from os.path import basename
 
 PROGRAM = 'gimp'

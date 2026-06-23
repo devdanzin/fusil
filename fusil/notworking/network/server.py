@@ -4,8 +4,8 @@ from socket import error as socket_error
 
 from ptrace.error import writeError
 
-from fusil.network.server_client import ServerClient
-from fusil.network.tools import formatAddress
+from fusil.notworking.network.server_client import ServerClient
+from fusil.notworking.network.tools import formatAddress
 from fusil.project_agent import ProjectAgent
 
 
