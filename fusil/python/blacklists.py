@@ -132,7 +132,7 @@ BLACKLIST = {
     "__builtin__": BUILTINS,
     "builtins": BUILTINS,
     # Don't raise SystemError
-    "_builtin__:set": {"test_c_api"},
+    "__builtin__:set": {"test_c_api"},  # py2 module name (was a typo: "_builtin__:set")
     "builtins:set": {"test_c_api"},
     # Sleep
     "time": {"sleep", "pthread_getcpuclockid"},
