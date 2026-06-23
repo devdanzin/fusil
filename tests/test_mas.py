@@ -15,10 +15,17 @@ from fusil.mas.mta import MTA
 
 
 class _StubLogger:
-    def debug(self, *a, **k): pass
-    def info(self, *a, **k): pass
-    def warning(self, *a, **k): pass
-    def error(self, *a, **k): pass
+    def debug(self, *a, **k):
+        pass
+
+    def info(self, *a, **k):
+        pass
+
+    def warning(self, *a, **k):
+        pass
+
+    def error(self, *a, **k):
+        pass
 
 
 class _StubApp:
@@ -27,9 +34,11 @@ class _StubApp:
     def __init__(self):
         self.logger = _StubLogger()
 
-    def registerAgent(self, agent): pass
+    def registerAgent(self, agent):
+        pass
 
-    def unregisterAgent(self, agent, destroy=True): pass
+    def unregisterAgent(self, agent, destroy=True):
+        pass
 
 
 def _make_mta():
