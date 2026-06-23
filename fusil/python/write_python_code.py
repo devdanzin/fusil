@@ -567,27 +567,29 @@ class WritePythonCode(WriteCode):
                 f"""
                 _OOM_WINDOW = {self.options.oom_window}
 
-                def oom_run(label, thunk):
+                def oom_run(label, thunk, window=_OOM_WINDOW):
                     # Stateful OOM sequence (Phase 4): sweep a bounded failure window
                     # across a multi-step thunk so a failure in one step can corrupt
-                    # state a later step trips over. set_nomemory(start, start+_OOM_WINDOW)
-                    # fails _OOM_WINDOW allocations then resumes succeeding, so steps after
-                    # the burst run on the damaged state (_OOM_WINDOW == 0 -> fail forever,
-                    # the legacy single-call semantics). The thunk guards each step
-                    # internally so the tail still runs after an earlier step raises; a real
-                    # crash (segfault/abort) terminates the process and is scored.
+                    # state a later step trips over. set_nomemory(start, start+window)
+                    # fails `window` allocations then resumes succeeding, so steps after
+                    # the burst run on the damaged state (window == 0 -> fail forever,
+                    # the legacy single-call semantics). `window` defaults to _OOM_WINDOW
+                    # but is passed per-sequence when --oom-seq-randomize is set. The thunk
+                    # guards each step internally so the tail still runs after an earlier
+                    # step raises; a real crash (segfault/abort) terminates the process and
+                    # is scored.
                     if not _OOM_AVAILABLE:
                         try:
                             thunk()
                         except BaseException:
                             pass
                         return
-                    print("[OOM-SEQ] " + label, file=stderr)
+                    print("[OOM-SEQ] " + label + " window=" + str(window), file=stderr)
                     for _start in range(_OOM_MAX_START):
                         if _OOM_VERBOSE:
-                            print("[OOM-SEQ]   start=" + str(_start) + " window=" + str(_OOM_WINDOW), file=stderr)
-                        if _OOM_WINDOW > 0:
-                            _set_nomemory(_start, _start + _OOM_WINDOW)
+                            print("[OOM-SEQ]   start=" + str(_start) + " window=" + str(window), file=stderr)
+                        if window > 0:
+                            _set_nomemory(_start, _start + window)
                         else:
                             _set_nomemory(_start, 0)
                         try:
@@ -1091,7 +1093,27 @@ class WritePythonCode(WriteCode):
         self.write(0, ")")
         self.emptyLine()
 
-    def _write_oom_sequence(self, fn_name: str, seq_label: str, steps) -> None:
+    def _oom_seq_randomize(self) -> bool:
+        return bool(getattr(self.options, "oom_seq_randomize", False))
+
+    def _oom_pick_seq_len(self) -> int:
+        """Step count for ONE sequence. With --oom-seq-randomize, uniform in [1, oom_seq_len]
+        (the configured value is the upper bound); otherwise the fixed oom_seq_len."""
+        n = max(1, self.options.oom_seq_len)
+        if self._oom_seq_randomize() and n > 1:
+            return randint(1, n)
+        return n
+
+    def _oom_pick_window(self):
+        """Failure window for ONE sequence, or None to emit the harness default (_OOM_WINDOW).
+        With --oom-seq-randomize, uniform in [1, oom_window] (upper bound); otherwise None so
+        the generated oom_run() call is unchanged. window 0 (legacy fail-forever) is left as
+        the static default and never randomized into."""
+        if self._oom_seq_randomize() and self.options.oom_window > 1:
+            return randint(1, self.options.oom_window)
+        return None
+
+    def _write_oom_sequence(self, fn_name: str, seq_label: str, steps, window=None) -> None:
         """Emit a guarded multi-step thunk plus an oom_run() call (Phase 4 sequence).
 
         steps: list of (sublabel, target_expr, num_args), where target_expr is a string
@@ -1100,6 +1122,9 @@ class WritePythonCode(WriteCode):
         the shared state (a live instance, or module/interpreter globals such as a pending
         exception) is what a later step may trip over. Result values are not threaded
         between steps yet (Phase 4b); the steps interact only through shared state.
+
+        window: per-sequence failure window (--oom-seq-randomize); None emits the default
+        oom_run(label, thunk) call (uses the module-level _OOM_WINDOW).
         """
         self.write(0, f"def {fn_name}():")
         saved = self.addLevel(1)
@@ -1121,7 +1146,10 @@ class WritePythonCode(WriteCode):
         if not wrote:
             self.write(0, "pass")
         self.restoreLevel(saved)
-        self.write(0, f'oom_run("{seq_label}", {fn_name})')
+        if window is None:
+            self.write(0, f'oom_run("{seq_label}", {fn_name})')
+        else:
+            self.write(0, f'oom_run("{seq_label}", {fn_name}, window={window})')
         self.emptyLine()
 
     def _generate_oom_function_sequence(self, prefix: str) -> None:
@@ -1134,7 +1162,7 @@ class WritePythonCode(WriteCode):
         """
         steps = []
         names = []
-        for j in range(max(1, self.options.oom_seq_len)):
+        for j in range(self._oom_pick_seq_len()):
             func_name = choice(self.module_functions)
             try:
                 func_obj = getattr(self.module, func_name)
@@ -1154,7 +1182,9 @@ class WritePythonCode(WriteCode):
             return
         seq_label = f"{prefix}:{self.module_name}[" + ">".join(names) + "]"
         self.write(0, f"# OOM sequence: {' > '.join(names)}")
-        self._write_oom_sequence(f"_oom_seq_{prefix}", seq_label, steps)
+        self._write_oom_sequence(
+            f"_oom_seq_{prefix}", seq_label, steps, window=self._oom_pick_window()
+        )
 
     def _generate_oom_class_fuzzing(self, prefix: str, class_name: str, class_obj: type) -> None:
         """Emits an OOM sweep over a class constructor and, on a live instance, its methods.
@@ -1203,7 +1233,7 @@ class WritePythonCode(WriteCode):
             # method B trips over (e.g. OOM-0035: write... then getvalue()).
             steps = []
             mnames = []
-            for j in range(max(1, self.options.oom_seq_len)):
+            for j in range(self._oom_pick_seq_len()):
                 m_name = choice(method_names)
                 m_obj = methods[m_name]
                 min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
@@ -1218,7 +1248,9 @@ class WritePythonCode(WriteCode):
                 mnames.append(m_name)
             seq_label = f"{prefix}:{self.module_name}.{class_name}[" + ">".join(mnames) + "]"
             self.write(0, f"# OOM sequence on {class_name}: {' > '.join(mnames)}")
-            self._write_oom_sequence(f"_oom_seq_{prefix}", seq_label, steps)
+            self._write_oom_sequence(
+                f"_oom_seq_{prefix}", seq_label, steps, window=self._oom_pick_window()
+            )
         else:
             for j in range(self.options.oom_methods):
                 m_name = choice(method_names)

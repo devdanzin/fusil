@@ -402,6 +402,15 @@ class Fuzzer(Application):
             default=1,
         )
         oom_options.add_option(
+            "--oom-seq-randomize",
+            help="Randomize each emitted sequence's length (in [1, --oom-seq-len]) and "
+            "failure window (in [1, --oom-window]) independently, so one instance covers a "
+            "range of sequence shapes instead of a single static config. The --oom-seq-len / "
+            "--oom-window values become the upper bounds (default: off)",
+            action="store_true",
+            default=False,
+        )
+        oom_options.add_option(
             "--oom-verbose",
             help="In OOM mode, also print the sweep start index before each "
             "injection so the exact failing allocation can be pinpointed on "

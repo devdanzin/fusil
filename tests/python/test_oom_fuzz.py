@@ -14,6 +14,8 @@ import ast
 import json
 import math
 import os
+import random
+import re
 import sys
 import tempfile
 import unittest
@@ -55,6 +57,7 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.oom_seq = False
     o.oom_seq_len = 3
     o.oom_window = 1
+    o.oom_seq_randomize = False
     # JIT options (WriteJITCode is constructed unconditionally); OOM mode never
     # dispatches to it, so legacy defaults are fine.
     o.jit_fuzz = False
@@ -81,6 +84,7 @@ def _generate(
     oom_seq=False,
     oom_seq_len=3,
     oom_window=1,
+    oom_seq_randomize=False,
 ):
     """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
@@ -91,6 +95,7 @@ def _generate(
     options.oom_seq = oom_seq
     options.oom_seq_len = oom_seq_len
     options.oom_window = oom_window
+    options.oom_seq_randomize = oom_seq_randomize
     parent.options = options
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
@@ -218,9 +223,9 @@ class TestOOMSeqGeneration(unittest.TestCase):
         src = _generate(oom_fuzz=True, oom_seq=True, oom_seq_len=3, oom_window=2)
         ast.parse(src)
         # The oom_run harness + the bounded-window primitive (start .. start+k).
-        self.assertIn("def oom_run(label, thunk):", src)
+        self.assertIn("def oom_run(label, thunk, window=_OOM_WINDOW):", src)
         self.assertIn("_OOM_WINDOW = 2", src)
-        self.assertIn("_set_nomemory(_start, _start + _OOM_WINDOW)", src)
+        self.assertIn("_set_nomemory(_start, _start + window)", src)
         self.assertIn("_set_nomemory(_start, 0)", src)  # window==0 fallback branch
         self.assertIn('print("[OOM-SEQ] " + label', src)
         # Function sequences: a guarded multi-step thunk fed to oom_run.
@@ -259,6 +264,45 @@ class TestOOMSeqGeneration(unittest.TestCase):
         # all steps target the same oom_inst_oc1_* instance (not the module)
         self.assertRegex(src, r"getattr\(oom_inst_oc1_\w+, ")
         self.assertNotIn('oom_call("oc1m', src)  # single-call method sweep replaced
+
+    def test_seq_no_randomize_omits_per_call_window(self):
+        # Default (randomize off): oom_run() calls take no per-sequence window override,
+        # so the harness default (_OOM_WINDOW) applies -- output is unchanged.
+        src = _generate(oom_fuzz=True, oom_seq=True, oom_seq_len=3, oom_window=2)
+        calls = re.findall(r"oom_run\([^\n]*?, _oom_seq_f\d+\)", src)
+        self.assertTrue(calls, "expected default 2-arg oom_run() calls")
+        self.assertEqual(re.findall(r"oom_run\([^\n]*?, window=\d+\)", src), [])
+
+    def test_seq_randomize_emits_per_sequence_window_within_bounds(self):
+        random.seed(20240623)
+        src = _generate(
+            oom_fuzz=True, oom_seq=True, oom_seq_len=6, oom_window=8, oom_seq_randomize=True
+        )
+        ast.parse(src)
+        windows = [int(w) for w in re.findall(r"oom_run\([^\n]*?, window=(\d+)\)", src)]
+        self.assertTrue(windows, "randomize on should emit per-sequence window= kwargs")
+        self.assertTrue(all(1 <= w <= 8 for w in windows), windows)
+
+    def test_seq_randomize_varies_length_within_bounds(self):
+        # Across the per-session sequences, step counts stay in [1, oom_seq_len] and (with a
+        # wide bound + seed) are not all identical -> real per-sequence variety.
+        random.seed(42)
+        src = _generate(
+            oom_fuzz=True,
+            oom_seq=True,
+            oom_verbose=True,  # emits a "step sN:" marker per step so we can count
+            oom_seq_len=6,
+            oom_window=4,
+            oom_seq_randomize=True,
+        )
+        ast.parse(src)
+        lengths = [
+            len(re.findall(r"step s\d+:", body))
+            for body in re.split(r"def _oom_seq_f\d+\(\):", src)[1:]
+        ]
+        self.assertTrue(lengths, "expected function sequences")
+        self.assertTrue(all(1 <= n <= 6 for n in lengths), lengths)
+        self.assertGreater(len(set(lengths)), 1, f"lengths did not vary: {lengths}")
 
     def test_non_seq_oom_mode_has_no_seq_artifacts(self):
         src = _generate(oom_fuzz=True, oom_seq=False)
