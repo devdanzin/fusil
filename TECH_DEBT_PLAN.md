@@ -175,9 +175,36 @@ skipped (Phase 0); final disposition follows the decision.
 `0 Stabilize` → `1 Shrink` → `2 Hygiene` → `3 Deep-dive` → `4 Format/lint` → `5 Deps+review`
 → `6 Tests` → `7 Docs` → `8 JIT (blocked)` → CI + extras last.
 
+## Completion status (2026-06-23)
+
+Phases 0–7 + CI/extras are **done and merged**; Phase 8 (JIT) is the only item left, awaiting
+the maintainer's direction (`doc/jit-decision-memo.md`). Suite grew 0→308 tests; CI is green
+on Python 3.13 + 3.14.
+
+| Phase | PR(s) |
+|---|---|
+| Plan + umbrella issue | #107, #106 |
+| 0 Stabilize (un-break suite; ASan-safe memory cap; exit-code path) | #108, #109 |
+| JIT decision memo | #110 |
+| 1 Shrink → `notworking/` | #111 |
+| 2 Hygiene (remove mangling; logging; dead-code; fuzz_loop) | #112, #113, #114 |
+| 3 Deep-dive opt-in | #115 |
+| 4 ruff format + check (+ requires-python ≥3.12) | #116, #117 |
+| 5 numpy/h5py verify (+ ≥3.13) + code-review backlog | #118, #119 |
+| 6 Tests (+77, core/MAS/generators/arg_numbers/blacklists/dirs) | #120, #121 |
+| 7 Docs (`doc/python-fuzzer.md`, README, archive) | #122 |
+| CI + CONTRIBUTING + script archival | #123 |
+
+Real bugs fixed along the way: disabled `limitResources()` (no memory cap on children),
+disabled exec-perm check, `fatalError()` exit-code typo (exited 0), the OOM-dedup segv resolver
+running fuzzed code as root (earlier, #105), a blacklist key typo, and a too-low
+`requires-python`. Remaining non-blocking backlog lives in `doc/code-review-findings.md`.
+
 ## Interim decisions log
 
 - (2026-06-22) Process: umbrella issue + PR-per-unit, self-merged; suite green at each merge.
 - (2026-06-22) CI added at the end so its first run is green (decision 5 timing).
 - (2026-06-22) Stale top-level docs archived under `doc/legacy/` rather than deleted (Phase 7).
-- _(append as the sweep proceeds)_
+- (2026-06-23) `requires-python` raised to **3.13** (PEP 701 f-strings need 3.12, `types.CapsuleType` needs 3.13); numpy/h5py verified on a normal-CPython 3.14 venv (no wheels for 3.16t).
+- (2026-06-23) Object-mangling removed (decision 2); JIT left untouched pending decision 5.
+- (2026-06-23) `graph.sh`→`tools/`, `lsall.sh`/`pyflakes.sh`/`fuzz_loop.sh`→`*/notworking/`.
