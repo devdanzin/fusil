@@ -17,7 +17,6 @@ from fusil.python.blacklists import (
     OBJECT_BLACKLIST,
 )
 from fusil.python.jit.write_jit_code import WriteJITCode
-from fusil.python.mangle_object import mangle_loop, mangle_obj
 from fusil.write_code import WriteCode
 
 if TYPE_CHECKING:
@@ -54,7 +53,6 @@ if _ARG_GEN_USE_NUMPY:
         _ARG_GEN_USE_H5PY = False
 
 time_start = time.time()
-USE_MANGLE_FEATURE = False
 CALL_REPETITION_COUNT_CONST = 3
 ERRBACK_NAME_CONST = "errback"
 EXCEPTION_NAMES = {
@@ -401,10 +399,6 @@ class WritePythonCode(WriteCode):
 
         self.write(0, "# Define a custom exception to distinguish our check from others.")
         self.write(0, "class JITCorrectnessError(AssertionError): pass")
-        self.emptyLine()
-
-        if USE_MANGLE_FEATURE:
-            self.write(0, mangle_obj)
         self.emptyLine()
 
         # Add plugin-provided definitions
@@ -766,8 +760,6 @@ class WritePythonCode(WriteCode):
         )  # prefix was from original _fuzz_one_class
         self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
         self.write(0, "  )")  # Close callFunc
-        if USE_MANGLE_FEATURE:  # Assuming USE_MANGLE_FEATURE is defined
-            self.write(0, mangle_loop % num_constructor_args)  # Assuming mangle_loop defined
         self.restoreLevel(self.base_level - 1)  # Exit try's indentation (level 1)
         self.write(0, "except Exception as e_instantiate:")
         self.addLevel(1)  # Indent for except block contents

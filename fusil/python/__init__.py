@@ -167,11 +167,6 @@ class Fuzzer(Application):
             type="int",
             default=DEFAULT_NB_OBJ,
         )
-        # options.add_option(
-        #     "--no-mangle",
-        #     help="Don't mangle objects (default: False)",
-        #     action="store_true",
-        # )
         fuzzing_options.add_option(
             "--fuzz-exceptions",
             help="Include basic Exceptions in fuzzing (default: False)",
