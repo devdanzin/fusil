@@ -7,22 +7,7 @@ import importlib
 import logging
 import pathlib
 import resource
-import sys
 import time
-
-from fusil.python.blacklists import MODULE_BLACKLIST
-
-
-def import_all() -> None:
-    """Import all standard library C modules before running the fuzzer."""
-    # Currently we have to import all C modules before running the fuzzer.
-    # TODO: figure out why and fix it properly.
-    for name in sys.stdlib_module_names:
-        if name not in MODULE_BLACKLIST and "test" not in name:
-            try:
-                sys.modules[name] = __import__(name)
-            except ImportError as e:
-                print("Failed to import module %s\n" % name, e)
 
 
 def remove_logging_pycache() -> None:
