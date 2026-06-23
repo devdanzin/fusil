@@ -15,6 +15,7 @@ false ``oomNEW`` labels when the gdb-caught frame is a secondary/cascade site bu
 earlier assertion or a deeper frame is a known bug. The snapshot file format is the
 contract shared with the catalog's ``ingest.py``.
 """
+
 import re
 import os
 import collections
@@ -24,11 +25,16 @@ import subprocess
 # An assertion line: "<file>:<line>: [ret] <func>[(args)]: Assertion <q>expr<q> failed[: msg]".
 # Handles both glibc (`expr') and CPython ("expr") quoting, and an optional (args) list.
 ASSERT = re.compile(
-    r"([\w./+-]+\.(?:c|h)):(\d+):.*?\b(\w+)\s*(?:\([^)]*\))?\s*:\s*Assertion[ `\"]+([^`'\"]*)")
-ASSERT2 = re.compile(r"([\w./+-]+\.(?:c|h)):(\d+):.*?Assertion[ `\"]+([^`'\"]*)")  # func-less fallback
-FATAL = re.compile(r'Fatal Python error:\s*([^\n]+)')
-SEGV = re.compile(r'AddressSanitizer: SEGV|Fatal Python error: Segmentation fault|Segmentation fault')
-IMPORTERR = re.compile(r'(ModuleNotFoundError|ImportError):')
+    r"([\w./+-]+\.(?:c|h)):(\d+):.*?\b(\w+)\s*(?:\([^)]*\))?\s*:\s*Assertion[ `\"]+([^`'\"]*)"
+)
+ASSERT2 = re.compile(
+    r"([\w./+-]+\.(?:c|h)):(\d+):.*?Assertion[ `\"]+([^`'\"]*)"
+)  # func-less fallback
+FATAL = re.compile(r"Fatal Python error:\s*([^\n]+)")
+SEGV = re.compile(
+    r"AddressSanitizer: SEGV|Fatal Python error: Segmentation fault|Segmentation fault"
+)
+IMPORTERR = re.compile(r"(ModuleNotFoundError|ImportError):")
 # Generic fatal wrappers that carry no usable site in stdout -> resolve via gdb instead.
 GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 
@@ -44,7 +50,7 @@ def all_asserts(text):
         key = (_nf(m.group(1)), int(m.group(2)))
         out.append((key[0], key[1], m.group(3), m.group(4).strip()))
         seen.add(key)
-    for m in ASSERT2.finditer(text):           # catch lines without a parseable func
+    for m in ASSERT2.finditer(text):  # catch lines without a parseable func
         key = (_nf(m.group(1)), int(m.group(2)))
         if key not in seen:
             out.append((key[0], key[1], None, m.group(3).strip()))
@@ -62,9 +68,13 @@ def classify(text):
     fa = FATAL.search(text)
     if fa and not SEGV.search(text):
         msg = fa.group(1).strip()
-        if msg.startswith(GENERIC_FATAL):       # carries no site -> treat like segv
-            return dict(kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None)
-        return dict(kind="fatal", file=None, line=None, func=None, assert_expr=None, fatal_msg=msg[:60])
+        if msg.startswith(GENERIC_FATAL):  # carries no site -> treat like segv
+            return dict(
+                kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None
+            )
+        return dict(
+            kind="fatal", file=None, line=None, func=None, assert_expr=None, fatal_msg=msg[:60]
+        )
     if SEGV.search(text):
         return dict(kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None)
     if IMPORTERR.search(text):
@@ -97,8 +107,9 @@ def load_snapshot(lines):
             f, ln = key.rsplit(":", 1)
             by_line.setdefault((f, int(ln)), set()).add(oid)
             per_file_lines[f].append((int(ln), oid))
-    return dict(func=by_func, assert_=by_assert, line=by_line,
-                fl=per_file_lines, msg=by_msg, kind=kind_of)
+    return dict(
+        func=by_func, assert_=by_assert, line=by_line, fl=per_file_lines, msg=by_msg, kind=kind_of
+    )
 
 
 def load_snapshot_file(path):
@@ -113,8 +124,11 @@ def match(c, snap):
         if hit:
             return hit, "assert"
     if c.get("fatal_msg"):
-        hit = set(o for k, o in snap["msg"]
-                  if c["fatal_msg"].startswith(k) or k.startswith(c["fatal_msg"][:30]))
+        hit = set(
+            o
+            for k, o in snap["msg"]
+            if c["fatal_msg"].startswith(k) or k.startswith(c["fatal_msg"][:30])
+        )
         if hit:
             return hit, "msg"
     if c.get("file") and c.get("func"):
@@ -134,15 +148,17 @@ def match(c, snap):
 # ---- segv site resolution from the crash's own native backtrace ----
 # gdb frame:  "#5  0x.. in func (args) at Objects/foo.c:123"  or  "#0 func (..) at ..."
 _BT_FRAME = re.compile(
-    r'^#\d+\s+(?:0x[0-9a-fA-F]+ in )?(\w+)\b.*?\bat '
-    r'((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+):(\d+)')
+    r"^#\d+\s+(?:0x[0-9a-fA-F]+ in )?(\w+)\b.*?\bat "
+    r"((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+):(\d+)"
+)
 # ASan/sanitizer frame already printed to stderr at crash time (merged into stdout):
 #   "    #5 0x.. in _excinfo_clear_type /abs/path/Python/crossinterp.c:1319:15"
 # The CPython source dir is matched anywhere in the absolute path; leading libc/pthread
 # frames carry no such path and are skipped, as is fatal/dump plumbing (via _BT_SKIP).
 _ASAN_FRAME = re.compile(
-    r'#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+\S*?'
-    r'/((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)')
+    r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+\S*?"
+    r"/((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)"
+)
 # fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site.
 # The debug allocator's free-time checks (_PyMem_DebugCheckAddress / _PyMem_DebugRawFree /
 # _PyMem_DebugFree) are likewise detectors: they catch a bad/double free ("bad ID") but the
@@ -152,17 +168,19 @@ _ASAN_FRAME = re.compile(
 # pass-through layer when tracing is on -- skip them so the site is the real caller (e.g.
 # free_list_items = OOM-0004), not the hook. (The by-design "tracemalloc_realloc() failed to
 # allocate a trace" fatal is matched by its message, not this frame, so skipping it here is safe.)
-_BT_SKIP = re.compile(r'^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed'
-                      r'|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*'
-                      r'|_Py_DumpExtensionModules'
-                      r'|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree'
-                      r'|tracemalloc_(raw_)?(alloc|calloc|realloc|free))$')
+_BT_SKIP = re.compile(
+    r"^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed"
+    r"|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*"
+    r"|_Py_DumpExtensionModules"
+    r"|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree"
+    r"|tracemalloc_(raw_)?(alloc|calloc|realloc|free))$"
+)
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
 # of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.
 # do_warn / PyContextVar_Set), not the shared Py_DECREF/_Py_atomic_load that masks dozens
 # of distinct bugs behind one line.
-_BT_SKIP_FILE = re.compile(r'(?:^|/)(?:refcount|pyatomic\w*|object)\.h$')
-_SITE = re.compile(r'^(\w+)@([\w./+-]+):(\d+)$')
+_BT_SKIP_FILE = re.compile(r"(?:^|/)(?:refcount|pyatomic\w*|object)\.h$")
+_SITE = re.compile(r"^(\w+)@([\w./+-]+):(\d+)$")
 
 
 def _skip_frame(func, filename):
@@ -225,10 +243,29 @@ def gdb_crash_site(python_bin, source_path, timeout=120, drop_uid=None, drop_gid
             drop["user"] = drop_uid
     try:
         out = subprocess.run(
-            ["gdb", "-q", "-batch", "-ex", "set pagination off",
-             "-ex", "set print frame-arguments none", "-ex", "set debuginfod enabled off",
-             "-ex", "run", "-ex", "bt 30", "--args", python_bin, "-u", source_path],
-            capture_output=True, text=True, timeout=timeout, cwd=cwd,
+            [
+                "gdb",
+                "-q",
+                "-batch",
+                "-ex",
+                "set pagination off",
+                "-ex",
+                "set print frame-arguments none",
+                "-ex",
+                "set debuginfod enabled off",
+                "-ex",
+                "run",
+                "-ex",
+                "bt 30",
+                "--args",
+                python_bin,
+                "-u",
+                source_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
             env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0"},
             **drop,
         ).stdout
@@ -241,8 +278,13 @@ def _site_to_candidate(site):
     m = _SITE.match(site)
     if not m:
         return None
-    return dict(file=_nf(m.group(2)), func=m.group(1), line=int(m.group(3)),
-                assert_expr=None, fatal_msg=None)
+    return dict(
+        file=_nf(m.group(2)),
+        func=m.group(1),
+        line=int(m.group(3)),
+        assert_expr=None,
+        fatal_msg=None,
+    )
 
 
 class Deduper:
@@ -253,9 +295,19 @@ class Deduper:
     ``segv_resolver`` (source_path -> ['func@file:line', ...] | 'func@file:line' | None) is
     injectable for testing; it defaults to :func:`gdb_crash_site`.
     """
-    def __init__(self, snapshot_path, keep=5, prune=False, python_bin=None,
-                 gdb_timeout=120, resolve_segv=False, segv_resolver=None,
-                 drop_uid=None, drop_gid=None):
+
+    def __init__(
+        self,
+        snapshot_path,
+        keep=5,
+        prune=False,
+        python_bin=None,
+        gdb_timeout=120,
+        resolve_segv=False,
+        segv_resolver=None,
+        drop_uid=None,
+        drop_gid=None,
+    ):
         self.snap = load_snapshot_file(snapshot_path)
         self.keep_cap = keep
         self.prune = prune
@@ -267,15 +319,26 @@ class Deduper:
         # root. Mirrors config.process_uid/gid (the user the fuzzing children drop to).
         self.drop_uid = drop_uid
         self.drop_gid = drop_gid
-        self.seen = collections.Counter()   # bug/new-key -> total crashes seen
-        self.kept = collections.Counter()   # bug -> directories kept
+        self.seen = collections.Counter()  # bug/new-key -> total crashes seen
+        self.kept = collections.Counter()  # bug -> directories kept
 
     def _resolve(self, source_path):
         """Return a list of 'func@file:line' chain frames (normalising the resolver)."""
-        r = self._resolver(source_path) if self._resolver is not None else (
-            gdb_crash_site(self.python_bin, source_path, self.gdb_timeout,
-                           drop_uid=self.drop_uid, drop_gid=self.drop_gid)
-            if (self.python_bin and source_path) else None)
+        r = (
+            self._resolver(source_path)
+            if self._resolver is not None
+            else (
+                gdb_crash_site(
+                    self.python_bin,
+                    source_path,
+                    self.gdb_timeout,
+                    drop_uid=self.drop_uid,
+                    drop_gid=self.drop_gid,
+                )
+                if (self.python_bin and source_path)
+                else None
+            )
+        )
         if not r:
             return []
         return [r] if isinstance(r, str) else list(r)
@@ -293,11 +356,14 @@ class Deduper:
             return True, ("oomimport" if IMPORTERR.search(stdout_text) else "oomclean")
 
         # Build candidate signals from everything the crash offers.
-        candidates = [dict(file=f, line=ln, func=fn, assert_expr=expr, fatal_msg=None)
-                      for (f, ln, fn, expr) in asserts]
+        candidates = [
+            dict(file=f, line=ln, func=fn, assert_expr=expr, fatal_msg=None)
+            for (f, ln, fn, expr) in asserts
+        ]
         if fmsg and not generic_fatal and not fmsg.lower().startswith(("segmentation", "aborted")):
-            candidates.append(dict(file=None, line=None, func=None, assert_expr=None,
-                                   fatal_msg=fmsg[:60]))
+            candidates.append(
+                dict(file=None, line=None, func=None, assert_expr=None, fatal_msg=fmsg[:60])
+            )
         # Resolve a crash site when the stdout assertion text is unreliable (pure segv /
         # generic-assert fatal) or nothing matched yet. PREFER the native backtrace the
         # crash already printed (ASan/debug build, captured in stdout): it is the actual
@@ -325,20 +391,23 @@ class Deduper:
             oid = sorted(matched)[0]
             self.seen[oid] += 1
             if self.prune and self.kept[oid] >= self.keep_cap:
-                return False, oid            # known + over cap -> prune duplicate
+                return False, oid  # known + over cap -> prune duplicate
             self.kept[oid] += 1
             return True, oid
 
         # Nothing matched the catalog.
         if has_segv and not chain and not asserts:
             self.seen["segv:unresolved"] += 1
-            return True, "oomSEGV"           # couldn't resolve a site -> always keep
+            return True, "oomSEGV"  # couldn't resolve a site -> always keep
         prim = candidates[0] if candidates else {}
-        key = (prim.get("assert_expr") and "%s:%s" % (prim["file"], prim["assert_expr"])) \
-            or (prim.get("func") and "%s:%s" % (prim["file"], prim["func"])) \
-            or prim.get("fatal_msg") or (chain[0] if chain else "?")
+        key = (
+            (prim.get("assert_expr") and "%s:%s" % (prim["file"], prim["assert_expr"]))
+            or (prim.get("func") and "%s:%s" % (prim["file"], prim["func"]))
+            or prim.get("fatal_msg")
+            or (chain[0] if chain else "?")
+        )
         self.seen["NEW:" + key] += 1
-        return True, "oomNEW"                # never prune a candidate-new site
+        return True, "oomNEW"  # never prune a candidate-new site
 
     def report(self):
         lines = ["OOM dedupe summary (seen / kept):"]

@@ -33,6 +33,7 @@ from fusil.unicode_generator import (
     UnixPathGenerator,
     UnsignedGenerator,
 )
+
 try:
     from lafleur.mutator import (
         genLyingEqualityObject,
@@ -46,6 +47,7 @@ try:
         genStatefulStrReprObject,
         genUnstableHashObject,
     )
+
     HAS_MUTATOR = True
 except ImportError:
     genLyingEqualityObject = None
@@ -109,7 +111,9 @@ class ArgumentGenerator:
         self.plugin_manager = plugin_manager
         self.errback_name = ERRBACK_NAME_CONST
 
-        self.h5py_argument_generator = H5PyArgumentGenerator(self) if use_h5py and H5PyArgumentGenerator else None
+        self.h5py_argument_generator = (
+            H5PyArgumentGenerator(self) if use_h5py and H5PyArgumentGenerator else None
+        )
 
         # Initialize generators for various data types
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
@@ -124,19 +128,34 @@ class ArgumentGenerator:
 
         # Define categories of generators
         safe_hashable_generators = (
-            self.genNone, self.genBool, self.genSmallUint, self.genInt,
-            self.genLetterDigit, self.genBytes, self.genString, self.genSurrogates,
-            self.genAsciiString, self.genUnixPath, self.genFloat,
-            self.genExistingFilename, self.genException, self.genRawString,
+            self.genNone,
+            self.genBool,
+            self.genSmallUint,
+            self.genInt,
+            self.genLetterDigit,
+            self.genBytes,
+            self.genString,
+            self.genSurrogates,
+            self.genAsciiString,
+            self.genUnixPath,
+            self.genFloat,
+            self.genExistingFilename,
+            self.genException,
+            self.genRawString,
         )
 
         safe_simple_generators = safe_hashable_generators + (self.genBufferObject,)
 
         # These generators produce references to names defined in boilerplate
         external_reference_generators = (
-            self.genErrback, self.genWeirdType, self.genWeirdClass,
-            self.genWeirdInstance, self.genWeirdUnion, self.genTricky,
-            self.genInterestingValues, self.genTrickyObjects,
+            self.genErrback,
+            self.genWeirdType,
+            self.genWeirdClass,
+            self.genWeirdInstance,
+            self.genWeirdUnion,
+            self.genTricky,
+            self.genInterestingValues,
+            self.genTrickyObjects,
         )
 
         self.hashable_argument_generators = safe_hashable_generators
@@ -149,14 +168,16 @@ class ArgumentGenerator:
         if allow_external_references:
             self.simple_argument_generators += external_reference_generators
 
-        self.complex_argument_generators = (
-            self.genList, self.genTuple, self.genDict, self.genSet
-        )
+        self.complex_argument_generators = (self.genList, self.genTuple, self.genDict, self.genSet)
         if allow_external_references:
             # Add complex generators that rely on external refs
-             self.complex_argument_generators += (
-                self.genTricky, self.genInterestingValues, self.genWeirdClass,
-                self.genWeirdInstance, self.genWeirdType, self.genWeirdUnion,
+            self.complex_argument_generators += (
+                self.genTricky,
+                self.genInterestingValues,
+                self.genWeirdClass,
+                self.genWeirdInstance,
+                self.genWeirdType,
+                self.genWeirdUnion,
                 self.genTrickyObjects,
             )
 
@@ -168,7 +189,12 @@ class ArgumentGenerator:
             assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
             self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
 
-        if not self.options.no_tstrings and use_templates and TEMPLATES and allow_external_references:
+        if (
+            not self.options.no_tstrings
+            and use_templates
+            and TEMPLATES
+            and allow_external_references
+        ):
             self.complex_argument_generators += (self.genTrickyTemplate,)
 
         if self.plugin_manager:
@@ -177,23 +203,21 @@ class ArgumentGenerator:
     def _add_plugin_generators(self):
         """Add argument generators from plugins."""
         # Determine target module from options
-        target_module = getattr(self.options, 'modules', '*')
-        if target_module == '*':
-            target_module = 'unknown'  # Use a generic name
+        target_module = getattr(self.options, "modules", "*")
+        if target_module == "*":
+            target_module = "unknown"  # Use a generic name
 
         # Get plugin generators for each category
-        for category in ['simple', 'hashable', 'complex']:
+        for category in ["simple", "hashable", "complex"]:
             plugin_gens = self.plugin_manager.get_argument_generators(
-                self.options,
-                target_module,
-                category
+                self.options, target_module, category
             )
 
-            if category == 'simple':
+            if category == "simple":
                 self.simple_argument_generators += tuple(plugin_gens)
-            elif category == 'hashable':
+            elif category == "hashable":
                 self.hashable_argument_generators += tuple(plugin_gens)
-            elif category == 'complex':
+            elif category == "complex":
                 self.complex_argument_generators += tuple(plugin_gens)
 
     def _create_argument_from_list(
@@ -396,7 +420,12 @@ class ArgumentGenerator:
         return ["Exception('fuzzer_generated_exception')"]
 
     def _gen_collection_internal(
-        self, open_text: str, close_text: str, empty_repr: str, is_dict: bool = False, is_set: bool = False
+        self,
+        open_text: str,
+        close_text: str,
+        empty_repr: str,
+        is_dict: bool = False,
+        is_set: bool = False,
     ) -> list[str]:
         """Helper to generate code for lists, tuples, or dictionaries."""
         same_type = randint(1, 10) != 1  # 90% same_type
@@ -481,7 +510,7 @@ class ArgumentGenerator:
     def generate_subclass_str(self) -> str:
         if random() < 1.1:  # Temporarily no chance
             return ""
-        bases = ('int', 'float', 'str', 'bytes', 'tuple', 'list', 'dict', 'set')
+        bases = ("int", "float", "str", "bytes", "tuple", "list", "dict", "set")
         if random() > 0.1:
             base = self.genWeirdClass()[0]
         else:
@@ -498,45 +527,54 @@ class ArgumentGenerator:
         Returns: The setup_code for the variable.
         """
         simple_dispatch_table = {
-            'int': self.genInt,
-            'float': self.genFloat,
-            'str': self.genString,
-            'list': self.genList,
-            'tuple': self.genTuple,
-            'set': self.genSet,
-            'dict': self.genDict,
-            'small_int': self.genSmallUint,
+            "int": self.genInt,
+            "float": self.genFloat,
+            "str": self.genString,
+            "list": self.genList,
+            "tuple": self.genTuple,
+            "set": self.genSet,
+            "dict": self.genDict,
+            "small_int": self.genSmallUint,
         }
 
         custom_dispatch_table = {}
         if HAS_MUTATOR:
             custom_dispatch_table = {
-                'object': genSimpleObject,
-                'object_with_method': genSimpleObject,
-                'object_with_attr': genSimpleObject,
-                'object_with_getitem': genSimpleObject,
-                'lying_eq_object': genLyingEqualityObject,
-                'stateful_len_object': genStatefulLenObject,
-                'unstable_hash_object': genUnstableHashObject,
-                'stateful_str_object': genStatefulStrReprObject,
-                'stateful_getitem_object': genStatefulGetitemObject,
-                'stateful_getattr_object': genStatefulGetattrObject,
-                'stateful_bool_object': genStatefulBoolObject,
-                'stateful_iter_object': genStatefulIterObject,
-                'stateful_index_object': genStatefulIndexObject,
+                "object": genSimpleObject,
+                "object_with_method": genSimpleObject,
+                "object_with_attr": genSimpleObject,
+                "object_with_getitem": genSimpleObject,
+                "lying_eq_object": genLyingEqualityObject,
+                "stateful_len_object": genStatefulLenObject,
+                "unstable_hash_object": genUnstableHashObject,
+                "stateful_str_object": genStatefulStrReprObject,
+                "stateful_getitem_object": genStatefulGetitemObject,
+                "stateful_getattr_object": genStatefulGetattrObject,
+                "stateful_bool_object": genStatefulBoolObject,
+                "stateful_iter_object": genStatefulIterObject,
+                "stateful_index_object": genStatefulIndexObject,
             }
 
-        if p_type == 'any' or (p_type not in simple_dispatch_table and p_type not in custom_dispatch_table):
+        if p_type == "any" or (
+            p_type not in simple_dispatch_table and p_type not in custom_dispatch_table
+        ):
             # For 'any', we can now also choose one of our new evil objects.
-            choices = [
-                'int', 'float', 'str', 'list'
-            ]
+            choices = ["int", "float", "str", "list"]
             if HAS_MUTATOR:
                 choices += [
-                    'object', 'object_with_method', 'object_with_attr', 'object_with_getitem',
-                    'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
-                    'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
-                    'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+                    "object",
+                    "object_with_method",
+                    "object_with_attr",
+                    "object_with_getitem",
+                    "lying_eq_object",
+                    "stateful_len_object",
+                    "unstable_hash_object",
+                    "stateful_str_object",
+                    "stateful_getitem_object",
+                    "stateful_getattr_object",
+                    "stateful_bool_object",
+                    "stateful_iter_object",
+                    "stateful_index_object",
                 ]
             chosen_type = choice(choices)
             return self.generate_arg_by_type(chosen_type, var_name)
@@ -547,12 +585,24 @@ class ArgumentGenerator:
 
     def get_random_object_type(self, evil_boost: int = 4) -> str:
         normal = [
-            'int', 'float', 'str', 'list', 'object', 'object_with_method',
-            'object_with_attr', 'object_with_getitem',
+            "int",
+            "float",
+            "str",
+            "list",
+            "object",
+            "object_with_method",
+            "object_with_attr",
+            "object_with_getitem",
         ]
         evil = [
-            'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
-            'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
-            'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+            "lying_eq_object",
+            "stateful_len_object",
+            "unstable_hash_object",
+            "stateful_str_object",
+            "stateful_getitem_object",
+            "stateful_getattr_object",
+            "stateful_bool_object",
+            "stateful_iter_object",
+            "stateful_index_object",
         ]
         return choice(normal + evil * evil_boost)

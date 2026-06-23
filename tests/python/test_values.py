@@ -5,11 +5,12 @@ import ast
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
     from fusil.python.values import INTERESTING, BUFFER_OBJECTS, SURROGATES
+
     VALUES_AVAILABLE = True
 except ImportError as e:
     print(f"Could not import values module, skipping tests: {e}", file=sys.stderr)
@@ -63,7 +64,9 @@ class TestValues(unittest.TestCase):
                 try:
                     ast.parse(expr)
                 except SyntaxError as e:
-                    self.fail(f"BUFFER_OBJECTS contains an invalid expression: '{expr}'. Error: {e}")
+                    self.fail(
+                        f"BUFFER_OBJECTS contains an invalid expression: '{expr}'. Error: {e}"
+                    )
 
     def test_surrogates_constant(self):
         """
@@ -76,8 +79,11 @@ class TestValues(unittest.TestCase):
             with self.subTest(i=i, expr=expr):
                 self.assertIsInstance(expr, str)
                 evaluated = eval(expr)
-                self.assertFalse(evaluated.isascii() and evaluated != "\x00", f"Surrogate pair string '{expr}' should not be ASCII.")
+                self.assertFalse(
+                    evaluated.isascii() and evaluated != "\x00",
+                    f"Surrogate pair string '{expr}' should not be ASCII.",
+                )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

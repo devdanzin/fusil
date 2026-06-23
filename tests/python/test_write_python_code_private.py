@@ -9,7 +9,7 @@ from types import ModuleType, FunctionType, BuiltinFunctionType
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 # --- Imports of Code to be Tested ---
@@ -36,6 +36,7 @@ def mock_global_func(arg1, arg2=True):
 
 class MockException(Exception):
     """A mock exception class to test exception filtering."""
+
     pass
 
 
@@ -55,6 +56,7 @@ class MockClass:
 
 
 # --- The Test Suite Class ---
+
 
 class TestWritePythonCodePrivateMethods(unittest.TestCase):
     """
@@ -96,7 +98,7 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
             module_name="mock_module",
             threads=True,
             _async=True,
-            use_h5py=H5PY_AVAILABLE
+            use_h5py=H5PY_AVAILABLE,
         )
         self.writer.output = StringIO()
 
@@ -119,7 +121,9 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
                 try:
                     ast.parse(generated_code)
                 except SyntaxError as e:
-                    self.fail(f"{method.__name__} produced a syntax error: {e}\n--- CODE ---\n{generated_code}")
+                    self.fail(
+                        f"{method.__name__} produced a syntax error: {e}\n--- CODE ---\n{generated_code}"
+                    )
 
     def test_write_arguments_for_call_lines_formatting(self):
         """Logic Test: Ensures _write_arguments_for_call_lines places commas and newlines correctly."""
@@ -134,7 +138,9 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
         for name, (num_args, arg_gen_return, expected_output) in test_cases.items():
             with self.subTest(name=name):
                 self.writer.output = StringIO()
-                with patch.object(self.writer.arg_generator, 'create_complex_argument', side_effect=arg_gen_return):
+                with patch.object(
+                    self.writer.arg_generator, "create_complex_argument", side_effect=arg_gen_return
+                ):
                     self.writer._write_arguments_for_call_lines(num_args, base_indent_level=0)
 
                 actual = " ".join(self.writer.output.getvalue().split())
@@ -143,12 +149,13 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
 
     # --- Tests for Fuzzing Orchestration Methods ---
 
-    @patch('fusil.python.write_python_code.get_arg_number', return_value=(2, 4))
-    @patch('fusil.python.write_python_code.randint')
+    @patch("fusil.python.write_python_code.get_arg_number", return_value=(2, 4))
+    @patch("fusil.python.write_python_code.randint")
     def test_generate_and_write_call_argument_logic(self, mock_randint, mock_get_args):
         """Wiring Test: Verifies _generate_and_write_call uses the correct argument count logic."""
 
-        def sample_func_for_test(a, b, c=None, d=None): pass
+        def sample_func_for_test(a, b, c=None, d=None):
+            pass
 
         self.mock_module.sample_func_for_test = sample_func_for_test
 
@@ -156,13 +163,15 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
             "zero_args_branch": ([0], 0),
             "one_arg_branch": ([1], 1),
             "max_plus_one_branch": ([2], 5),
-            "random_in_range_branch": ([5, 3], 3)
+            "random_in_range_branch": ([5, 3], 3),
         }
 
         for name, (randint_side_effects, expected_num_args) in test_cases.items():
             with self.subTest(name=name):
                 mock_randint.side_effect = randint_side_effects
-                with patch.object(self.writer, '_write_arguments_for_call_lines') as mock_write_args:
+                with patch.object(
+                    self.writer, "_write_arguments_for_call_lines"
+                ) as mock_write_args:
                     self.writer.output = StringIO()
                     self.writer._generate_and_write_call(
                         prefix="t1",
@@ -171,52 +180,62 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
                         min_arg_count=1,
                         target_obj_expr="fuzz_target_module",
                         is_method_call=False,
-                        generation_depth=0
+                        generation_depth=0,
                     )
                     mock_write_args.assert_called_with(expected_num_args, 1)
 
-    @patch('fusil.python.write_python_code.class_arg_number', return_value=2)
+    @patch("fusil.python.write_python_code.class_arg_number", return_value=2)
     def test_fuzz_one_class_orchestration(self, mock_arg_num):
         """Wiring Test: Ensures _fuzz_one_class correctly orchestrates instantiation and fuzzing calls."""
         class_obj = self.mock_module.TestClass
 
-        with patch.object(self.writer, '_dispatch_fuzz_on_instance') as mock_dispatch, \
-                patch.object(self.writer, '_fuzz_methods_on_object_or_specific_types') as mock_fuzz_methods:
+        with (
+            patch.object(self.writer, "_dispatch_fuzz_on_instance") as mock_dispatch,
+            patch.object(
+                self.writer, "_fuzz_methods_on_object_or_specific_types"
+            ) as mock_fuzz_methods,
+        ):
             self.writer.output = StringIO()
             self.writer._fuzz_one_class(0, "TestClass", class_obj)
 
             mock_arg_num.assert_called_once_with("TestClass", class_obj)
 
             mock_dispatch.assert_called_once()
-            self.assertEqual(mock_dispatch.call_args.kwargs['target_obj_expr_str'], 'instance_c1_testclass')
+            self.assertEqual(
+                mock_dispatch.call_args.kwargs["target_obj_expr_str"], "instance_c1_testclass"
+            )
 
             mock_fuzz_methods.assert_called_once()
-            self.assertEqual(mock_fuzz_methods.call_args.kwargs['target_obj_expr_str'], 'instance_c1_testclass')
+            self.assertEqual(
+                mock_fuzz_methods.call_args.kwargs["target_obj_expr_str"], "instance_c1_testclass"
+            )
 
     def test_fuzz_one_module_object_orchestration(self):
         """Wiring Test: Ensures _fuzz_one_module_object calls the method fuzzer correctly."""
-        with patch.object(self.writer, '_fuzz_methods_on_object_or_specific_types') as mock_fuzz_methods:
+        with patch.object(
+            self.writer, "_fuzz_methods_on_object_or_specific_types"
+        ) as mock_fuzz_methods:
             self.writer._fuzz_one_module_object(0, "test_object", MockClass("instance_runtime"))
 
             mock_fuzz_methods.assert_called_once()
             kwargs = mock_fuzz_methods.call_args.kwargs
-            self.assertEqual(kwargs['target_obj_expr_str'], 'fuzz_target_module.test_object')
-            self.assertEqual(kwargs['target_obj_class_name'], 'MockClass')
-            self.assertEqual(kwargs['num_method_calls_to_make'], 3)
+            self.assertEqual(kwargs["target_obj_expr_str"], "fuzz_target_module.test_object")
+            self.assertEqual(kwargs["target_obj_class_name"], "MockClass")
+            self.assertEqual(kwargs["num_method_calls_to_make"], 3)
 
-    @patch('fusil.python.write_python_code.WritePythonCode._get_object_methods')
-    @patch('fusil.python.write_python_code.WritePythonCode._generate_and_write_call')
+    @patch("fusil.python.write_python_code.WritePythonCode._get_object_methods")
+    @patch("fusil.python.write_python_code.WritePythonCode._generate_and_write_call")
     def test_fuzz_methods_on_object(self, mock_generate_call, mock_get_methods):
         """Wiring Test: Validates that methods are discovered and fuzzed in a loop."""
         # Return a mock method dictionary
-        mock_get_methods.return_value = {'public_method': self.mock_module.TestClass.public_method}
+        mock_get_methods.return_value = {"public_method": self.mock_module.TestClass.public_method}
 
         self.writer._fuzz_methods_on_object_or_specific_types(
             current_prefix="c1m",
             target_obj_expr_str="instance_var",
             target_obj_class_name="TestClass",
             target_obj_actual_type_obj=self.mock_module.TestClass,
-            num_method_calls_to_make=self.writer.options.methods_number
+            num_method_calls_to_make=self.writer.options.methods_number,
         )
 
         # Check that methods were discovered on the object
@@ -227,8 +246,8 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
 
         # Check one of the calls to ensure it's for the right method
         call_kwargs = mock_generate_call.call_args.kwargs
-        self.assertEqual(call_kwargs['callable_name'], 'public_method')
-        self.assertEqual(call_kwargs['target_obj_expr'], 'instance_var')
+        self.assertEqual(call_kwargs["callable_name"], "public_method")
+        self.assertEqual(call_kwargs["target_obj_expr"], "instance_var")
 
     def test_dispatch_fuzz_on_instance_recursion_depth(self):
         """Logic Test: Ensure the recursive deep-diving logic terminates correctly."""
@@ -240,7 +259,7 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
                 current_prefix="prefix_at_max_depth",
                 target_obj_expr_str="some_object",
                 class_name_hint="SomeClass",
-                generation_depth=2  # This depth is > MAX_FUZZ_GENERATION_DEPTH
+                generation_depth=2,  # This depth is > MAX_FUZZ_GENERATION_DEPTH
             )
         finally:
             self.writer.MAX_FUZZ_GENERATION_DEPTH = original_depth
@@ -262,16 +281,20 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
 
         # Test for generic object dispatch
         self.writer.output = StringIO()
-        self.writer._dispatch_fuzz_on_instance("generic_dispatch", "my_generic_var", "SomeGenericClass", 0)
+        self.writer._dispatch_fuzz_on_instance(
+            "generic_dispatch", "my_generic_var", "SomeGenericClass", 0
+        )
         generated_code_generic = self.writer.output.getvalue()
         # self.assertNotIn("elif isinstance(my_generic_var, h5py.Dataset):", generated_code_generic)
         self.assertIn("doing generic calls", generated_code_generic)
 
     def test_write_main_fuzzing_logic_call_counts(self):
         """Wiring Test: Checks the main logic method calls the correct number of fuzzing sub-methods."""
-        with patch.object(self.writer, '_generate_and_write_call') as mock_gen_call, \
-                patch.object(self.writer, '_fuzz_one_class') as mock_fuzz_class, \
-                patch.object(self.writer, '_fuzz_one_module_object') as mock_fuzz_obj:
+        with (
+            patch.object(self.writer, "_generate_and_write_call") as mock_gen_call,
+            patch.object(self.writer, "_fuzz_one_class") as mock_fuzz_class,
+            patch.object(self.writer, "_fuzz_one_module_object") as mock_fuzz_obj,
+        ):
             self.writer._write_main_fuzzing_logic()
 
             self.assertEqual(mock_gen_call.call_count, self.writer.options.functions_number)
@@ -279,5 +302,5 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
             self.assertEqual(mock_fuzz_obj.call_count, self.writer.options.objects_number)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

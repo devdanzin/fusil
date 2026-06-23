@@ -106,8 +106,8 @@ class Fuzzer(Application):
         running_options.add_option(
             "--no-memory-limit",
             help="Don't apply the per-child memory cap (RLIMIT_AS). Automatically "
-                 "implied for AddressSanitizer targets, whose huge address-space "
-                 "reservation is incompatible with RLIMIT_AS (default: False)",
+            "implied for AddressSanitizer targets, whose huge address-space "
+            "reservation is incompatible with RLIMIT_AS (default: False)",
             action="store_true",
             default=False,
         )
@@ -176,7 +176,7 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--deep-dive",
             help="Recursively fuzz the return value of every method call (multiplicative; "
-                 "off by default)",
+            "off by default)",
             action="store_true",
             default=False,
         )
@@ -207,8 +207,8 @@ class Fuzzer(Application):
         fuzzing_options.add_option(
             "--filenames",
             help="Comma-separated readable files to feed as fuzz arguments. WARNING: a "
-                 "fuzzed call may open these for writing -- pass only expendable files. "
-                 "Default: auto-created throwaway fixtures (fusil.python.fixtures).",
+            "fuzzed call may open these for writing -- pass only expendable files. "
+            "Default: auto-created throwaway fixtures (fusil.python.fixtures).",
             type="str",
             default=FILENAMES,
         )
@@ -222,12 +222,12 @@ class Fuzzer(Application):
         jit_options.add_option(
             "--jit-mode",
             help="Main JIT fuzzing strategy: "
-                 "'synthesize' (default: create new patterns with AST), "
-                 "'variational' (mutate existing patterns from the library), "
-                 "'legacy' (run old hardcoded scenarios for regression testing), or "
-                 "'all' (randomly pick a strategy and modifiers for each test case, for maximum coverage).",
-            choices=('synthesize', 'variational', 'legacy', 'all'),
-            default='synthesize',
+            "'synthesize' (default: create new patterns with AST), "
+            "'variational' (mutate existing patterns from the library), "
+            "'legacy' (run old hardcoded scenarios for regression testing), or "
+            "'all' (randomly pick a strategy and modifiers for each test case, for maximum coverage).",
+            choices=("synthesize", "variational", "legacy", "all"),
+            default="synthesize",
         )
 
         # --- Variational Mode Modifiers ---
@@ -235,7 +235,7 @@ class Fuzzer(Application):
             "--jit-pattern-name",
             help="[variational mode] Specifies which pattern(s) to use, e.g., 'decref_escapes' or 'ALL'.",
             type="str",
-            default='ALL',
+            default="ALL",
         )
         jit_options.add_option(
             "--jit-fuzz-ast-mutation",
@@ -311,35 +311,35 @@ class Fuzzer(Application):
         jit_options.add_option(
             "--jit-target-uop",
             help="Target a specific JIT micro-op (uop) for fuzzing. Provide the name "
-                 "of the uop (e.g., '_STORE_ATTR'). This will generate patterns "
-                 "specifically designed to stress that uop.",
+            "of the uop (e.g., '_STORE_ATTR'). This will generate patterns "
+            "specifically designed to stress that uop.",
             type="str",
             default=None,
         )
 
         jit_options.add_option(
-            '--jit-feedback-driven-mode',
-            help='Enable feedback-driven mode, mutating from the corpus.',
-            action='store_true',
+            "--jit-feedback-driven-mode",
+            help="Enable feedback-driven mode, mutating from the corpus.",
+            action="store_true",
             default=False,
         )
         jit_options.add_option(
-            '--source-output-path',
-            help='Specify an exact output path for the generated source file.',
-            type='str',
+            "--source-output-path",
+            help="Specify an exact output path for the generated source file.",
+            type="str",
             default=None,
         )
         jit_options.add_option(
-            '--stdout-path',
-            help='Specify an exact output path for the process stdout/stderr.',
-            type='str',
+            "--stdout-path",
+            help="Specify an exact output path for the process stdout/stderr.",
+            type="str",
             default=None,
         )
         jit_options.add_option(
-            '--no-jit-external-references',
-            help='Prevent argument generators from creating references to boilerplate-defined names. Use for minimized corpus generation. (Default: allows references)',
-            action='store_false',
-            dest='jit_external_references',
+            "--no-jit-external-references",
+            help="Prevent argument generators from creating references to boilerplate-defined names. Use for minimized corpus generation. (Default: allows references)",
+            action="store_false",
+            dest="jit_external_references",
             default=True,
         )
 
@@ -347,45 +347,44 @@ class Fuzzer(Application):
         oom_options.add_option(
             "--oom-fuzz",
             help="Enable OOM (out-of-memory) injection: wrap calls in dense "
-                 "_testcapi.set_nomemory sweeps to drive allocation-failure error "
-                 "paths and find crashes (default: False)",
+            "_testcapi.set_nomemory sweeps to drive allocation-failure error "
+            "paths and find crashes (default: False)",
             action="store_true",
             default=False,
         )
         oom_options.add_option(
             "--oom-max-start",
             help="Dense OOM sweep upper bound (exclusive): each call sweeps "
-                 "range(0, N) (default: 1000)",
+            "range(0, N) (default: 1000)",
             type="int",
             default=1000,
         )
         oom_options.add_option(
             "--oom-calls",
             help="Number of OOM-wrapped function calls to generate per script "
-                 "(replaces --functions-number in OOM mode, default: 10)",
+            "(replaces --functions-number in OOM mode, default: 10)",
             type="int",
             default=10,
         )
         oom_options.add_option(
             "--oom-classes",
             help="Number of classes to OOM-fuzz per script: each gets a constructor "
-                 "sweep plus method sweeps on a live instance (0 disables class "
-                 "fuzzing in OOM mode, default: 5)",
+            "sweep plus method sweeps on a live instance (0 disables class "
+            "fuzzing in OOM mode, default: 5)",
             type="int",
             default=5,
         )
         oom_options.add_option(
             "--oom-methods",
-            help="Number of method sweeps to generate per OOM-fuzzed class instance "
-                 "(default: 5)",
+            help="Number of method sweeps to generate per OOM-fuzzed class instance (default: 5)",
             type="int",
             default=5,
         )
         oom_options.add_option(
             "--oom-seq",
             help="OOM mode (Phase 4): emit stateful call SEQUENCES -- several calls per "
-                 "scan under one bounded failure window -- so a failure in one call can "
-                 "corrupt state a later call trips over (default: disabled)",
+            "scan under one bounded failure window -- so a failure in one call can "
+            "corrupt state a later call trips over (default: disabled)",
             action="store_true",
             default=False,
         )
@@ -398,24 +397,24 @@ class Fuzzer(Application):
         oom_options.add_option(
             "--oom-window",
             help="OOM failure-burst width for sequences: set_nomemory(start, start+k) "
-                 "fails k allocations then resumes succeeding so later steps run on the "
-                 "damaged state (default: 1); 0 = fail forever (legacy single-call mode)",
+            "fails k allocations then resumes succeeding so later steps run on the "
+            "damaged state (default: 1); 0 = fail forever (legacy single-call mode)",
             type="int",
             default=1,
         )
         oom_options.add_option(
             "--oom-verbose",
             help="In OOM mode, also print the sweep start index before each "
-                 "injection so the exact failing allocation can be pinpointed on "
-                 "replay (verbose output; default: False)",
+            "injection so the exact failing allocation can be pinpointed on "
+            "replay (verbose output; default: False)",
             action="store_true",
             default=False,
         )
         oom_options.add_option(
             "--oom-dedup-catalog",
             help="Path to known_sites.tsv (cpython-oom-findings). Enables in-loop "
-                 "crash dedupe: label each crash dir with its matched bug id and, "
-                 "with --oom-dedup-prune, drop known duplicates (default: disabled)",
+            "crash dedupe: label each crash dir with its matched bug id and, "
+            "with --oom-dedup-prune, drop known duplicates (default: disabled)",
             type="str",
             default=None,
         )
@@ -428,16 +427,16 @@ class Fuzzer(Application):
         oom_options.add_option(
             "--oom-dedup-prune",
             help="Remove known-duplicate crash dirs beyond the keep cap "
-                 "(default: keep all, label only)",
+            "(default: keep all, label only)",
             action="store_true",
             default=False,
         )
         oom_options.add_option(
             "--oom-dedup-resolve-segv",
             help="Resolve segv/generic-assert crashes to their real site by re-running "
-                 "source.py under gdb (deterministic on the same binary), so they "
-                 "dedupe/label/prune like aborts instead of staying 'oomSEGV' "
-                 "(default: False; adds a bounded gdb run per unresolved crash)",
+            "source.py under gdb (deterministic on the same binary), so they "
+            "dedupe/label/prune like aborts instead of staying 'oomSEGV' "
+            "(default: False; adds a bounded gdb run per unresolved crash)",
             action="store_true",
             default=False,
         )
@@ -469,7 +468,14 @@ class Fuzzer(Application):
             default=False,
         )
 
-        options = input_options, running_options, fuzzing_options, jit_options, oom_options, config_options
+        options = (
+            input_options,
+            running_options,
+            fuzzing_options,
+            jit_options,
+            oom_options,
+            config_options,
+        )
         for option in options:
             parser.add_option_group(option)
 
@@ -493,7 +499,9 @@ class Fuzzer(Application):
         project.error("Use python interpreter: %s" % self.options.python)
         version = " -- ".join(line.strip() for line in sys.version.splitlines())
         project.error("Python version: %s" % version)
-        self.source = PythonSource(project, self.options, source_output_path=self.options.source_output_path)
+        self.source = PythonSource(
+            project, self.options, source_output_path=self.options.source_output_path
+        )
         process = PythonProcess(
             project,
             self.options,
@@ -559,6 +567,7 @@ class Fuzzer(Application):
         self._deduper = None
         if self.options.oom_dedup_catalog:
             from fusil.python.oom_dedup import Deduper
+
             self._deduper = Deduper(
                 self.options.oom_dedup_catalog,
                 keep=self.options.oom_dedup_keep,
@@ -574,8 +583,12 @@ class Fuzzer(Application):
             self.session_keep_policy = self._oom_keep_policy
             project.error(
                 "OOM dedupe enabled: %s (keep=%d, prune=%s, resolve_segv=%s)"
-                % (self.options.oom_dedup_catalog, self.options.oom_dedup_keep,
-                   self.options.oom_dedup_prune, self.options.oom_dedup_resolve_segv)
+                % (
+                    self.options.oom_dedup_catalog,
+                    self.options.oom_dedup_keep,
+                    self.options.oom_dedup_prune,
+                    self.options.oom_dedup_resolve_segv,
+                )
             )
 
     def _oom_keep_policy(self, session):
@@ -586,6 +599,7 @@ class Fuzzer(Application):
         is never lost to a dedupe failure.
         """
         import os
+
         session_dir = session.directory.directory
         try:
             with open(os.path.join(session_dir, "stdout"), errors="replace") as fh:

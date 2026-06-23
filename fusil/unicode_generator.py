@@ -56,9 +56,7 @@ class UnsignedGenerator(UnicodeGenerator):
 
     def _createValue(self, length):
         if 2 <= length:
-            return choice(self.first_digit) + UnicodeGenerator._createValue(
-                self, length - 1
-            )
+            return choice(self.first_digit) + UnicodeGenerator._createValue(self, length - 1)
         else:
             return UnicodeGenerator._createValue(self, length)
 

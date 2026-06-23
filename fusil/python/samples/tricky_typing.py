@@ -15,7 +15,14 @@ itertools_types = [cls for cls in itertools.__dict__.values() if isinstance(cls,
 types_types = [cls for cls in types.__dict__.values() if isinstance(cls, type)]
 typing_types = [cls for cls in typing.__dict__.values() if isinstance(cls, type)]
 
-all_types = (abc_types + builtins_types + collections_abc_types + collections_types + itertools_types
-             + types_types + typing_types)
+all_types = (
+    abc_types
+    + builtins_types
+    + collections_abc_types
+    + collections_types
+    + itertools_types
+    + types_types
+    + typing_types
+)
 all_types = [t for t in all_types if not (isinstance(t, type) and issubclass(t, BaseException))]
 big_union = reduce(or_, all_types, int)

@@ -5,6 +5,7 @@ calls, so it imports the runtime stack and SKIPS where python-ptrace is unavaila
 It locks the contract the core hook depends on: reading <session.directory.directory>/
 stdout, calling the deduper, and never losing a crash on a read error.
 """
+
 import os
 import shutil
 import tempfile
@@ -14,14 +15,17 @@ from types import SimpleNamespace
 try:
     from fusil.python import Fuzzer
     from fusil.python.oom_dedup import Deduper
+
     HAVE_FUSIL = True
-except Exception:                       # pragma: no cover - env without python-ptrace
+except Exception:  # pragma: no cover - env without python-ptrace
     HAVE_FUSIL = False
 
-SNAPSHOT = "\n".join([
-    "OOM-0003\tabort\tfunc\tObjects/codeobject.c:code_dealloc",
-    "OOM-0003\tabort\tline\tObjects/codeobject.c:2440",
-])
+SNAPSHOT = "\n".join(
+    [
+        "OOM-0003\tabort\tfunc\tObjects/codeobject.c:code_dealloc",
+        "OOM-0003\tabort\tline\tObjects/codeobject.c:2440",
+    ]
+)
 ABORT = "python: Objects/codeobject.c:2440: void code_dealloc(PyObject *): Assertion `co != NULL' failed."
 
 

@@ -22,7 +22,9 @@ time_start = time.time()
 class PythonSource(ProjectAgent):
     """Manages module discovery, loading, and Python source code generation."""
 
-    def __init__(self, project: Project, options: FusilConfig, source_output_path: str | None = None):
+    def __init__(
+        self, project: Project, options: FusilConfig, source_output_path: str | None = None
+    ):
         ProjectAgent.__init__(self, project, "python_source")
         self.module: ModuleType | None = None
         self.module_name = ""
@@ -32,7 +34,7 @@ class PythonSource(ProjectAgent):
         self.source_output_path = source_output_path
 
         self.plugin_manager = None
-        if hasattr(project.application(), 'plugin_manager'):
+        if hasattr(project.application(), "plugin_manager"):
             self.plugin_manager = project.application().plugin_manager
 
         if self.options.modules != "*":
@@ -76,8 +78,9 @@ class PythonSource(ProjectAgent):
                 package_walker = all_modules.discover_modules([path], package + ".")
                 self.modules |= set(name for finder, name, ispgk in package_walker)
 
-            self.info("Known modules (%d): %s"
-                      % (len(self.modules), ",".join(sorted(self.modules))))
+            self.info(
+                "Known modules (%d): %s" % (len(self.modules), ",".join(sorted(self.modules)))
+            )
 
         blacklist_str = self.options.blacklist
         if blacklist_str:
@@ -134,7 +137,7 @@ class PythonSource(ProjectAgent):
             self.module_name,
             threads=not self.options.no_threads,
             _async=not self.options.no_async,
-            plugin_manager = self.plugin_manager,
+            plugin_manager=self.plugin_manager,
         )
 
     def on_session_start(self) -> None:

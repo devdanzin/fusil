@@ -15,9 +15,7 @@ class FileWatch(ProjectAgent):
         if not start:
             start = "zero"
         if start not in VALID_POS:
-            raise ValueError(
-                "start position (%r) have to be in %s" % (start, VALID_POS)
-            )
+            raise ValueError("start position (%r) have to be in %s" % (start, VALID_POS))
 
         ProjectAgent.__init__(self, project, name)
         self.file_obj = file_obj
@@ -101,7 +99,7 @@ class FileWatch(ProjectAgent):
             if isinstance(text, str):
                 text = text.encode("ASCII")
             regex = re.escape(text)
-            regex = br"(?:^|\W)" + regex + br"(?:$|\W)"
+            regex = rb"(?:^|\W)" + regex + rb"(?:$|\W)"
             match = re.compile(regex, re.IGNORECASE).search
             yield (text, score, match)
 
@@ -110,7 +108,7 @@ class FileWatch(ProjectAgent):
             if isinstance(text, str):
                 text = text.encode("ASCII")
             regex = re.escape(text)
-            regex = br"(?:^|\W)" + regex + br"(?:$|\W)"
+            regex = rb"(?:^|\W)" + regex + rb"(?:$|\W)"
             match = re.compile(regex, re.IGNORECASE).search
             yield (text, 100, match)
 
@@ -221,9 +219,7 @@ class FileWatch(ProjectAgent):
                 duration = time() - time0
                 if self.max_process_time < duration:
                     count = self.total_line - first_line
-                    self.warning(
-                        "Too slow: proceed %s lines in %.1f sec" % (count, duration)
-                    )
+                    self.warning("Too slow: proceed %s lines in %.1f sec" % (count, duration))
                     return
                 oldpos = self.file_obj.tell()
                 self.file_obj.seek(self.file_seed)
@@ -236,9 +232,7 @@ class FileWatch(ProjectAgent):
                     yield line
         except IOError as err:
             if err.errno == EBADF:
-                self.error(
-                    "Unable to read data: closed file (Bad file descriptor error)"
-                )
+                self.error("Unable to read data: closed file (Bad file descriptor error)")
                 self.file_obj = None
                 return
             else:

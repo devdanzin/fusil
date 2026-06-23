@@ -8,12 +8,13 @@ import collections.abc
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
     # --- Import the object to be tested ---
     from fusil.python.samples.tricky_typing import big_union
+
     TYPING_AVAILABLE = True
 except (ImportError, TypeError) as e:
     # This can happen if the Python version is too old for some typing features
@@ -39,7 +40,7 @@ class TestTrickyTyping(unittest.TestCase):
         # In older versions, they are typing.Union. We check for both.
         self.assertTrue(
             isinstance(big_union, (types.UnionType, typing.Union)),
-            f"'big_union' is not a valid Union type, but {type(big_union)}"
+            f"'big_union' is not a valid Union type, but {type(big_union)}",
         )
 
     def test_big_union_contains_expected_types(self):
@@ -52,9 +53,15 @@ class TestTrickyTyping(unittest.TestCase):
         # Check for types from various modules to ensure they were all processed
         self.assertIn(int, union_contents, "int (the base type) should be in the union")
         self.assertIn(str, union_contents, "str from builtins should be in the union")
-        self.assertIn(collections.abc.Iterable, union_contents, "Iterable from collections.abc should be in the union")
+        self.assertIn(
+            collections.abc.Iterable,
+            union_contents,
+            "Iterable from collections.abc should be in the union",
+        )
         self.assertIn(typing.Generic, union_contents, "Generic from typing should be in the union")
-        self.assertIn(types.ModuleType, union_contents, "ModuleType from types should be in the union")
+        self.assertIn(
+            types.ModuleType, union_contents, "ModuleType from types should be in the union"
+        )
 
     def test_big_union_excludes_exceptions(self):
         """
@@ -64,9 +71,13 @@ class TestTrickyTyping(unittest.TestCase):
 
         # Check that common exception types are NOT in the union
         self.assertNotIn(Exception, union_contents, "Exception class should have been filtered out")
-        self.assertNotIn(ValueError, union_contents, "ValueError class should have been filtered out")
-        self.assertNotIn(BaseException, union_contents, "BaseException class should have been filtered out")
+        self.assertNotIn(
+            ValueError, union_contents, "ValueError class should have been filtered out"
+        )
+        self.assertNotIn(
+            BaseException, union_contents, "BaseException class should have been filtered out"
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

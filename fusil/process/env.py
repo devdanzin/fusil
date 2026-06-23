@@ -107,9 +107,7 @@ class EnvVarIntegerRange(EnvironmentVariable):
 
 
 class EnvVarRandom(BytesGenerator, EnvironmentVariable):
-    def __init__(
-        self, name, min_length=0, max_length=10000, max_count=1, bytes_set=ASCII0
-    ):
+    def __init__(self, name, min_length=0, max_length=10000, max_count=1, bytes_set=ASCII0):
         BytesGenerator.__init__(self, min_length, max_length, bytes_set)
         EnvironmentVariable.__init__(self, name, max_count)
 
@@ -192,9 +190,7 @@ class Environment(ProjectAgent):
                     message += " " + repr(value)
                 self.info(message)
                 if "\0" in value:
-                    raise ValueError(
-                        "Nul byte in environment variable value is forbidden!"
-                    )
+                    raise ValueError("Nul byte in environment variable value is forbidden!")
                 env[name] = value
 
         # Make target aborts (assertions, _Py_NegativeRefcount, Py_FatalError) print a

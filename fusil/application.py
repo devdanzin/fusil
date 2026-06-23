@@ -60,6 +60,7 @@ class Application(ApplicationAgent):
         ApplicationAgent.__init__(self, "application", self, None)
 
         from fusil.plugin_manager import get_plugin_manager
+
         self.plugin_manager = get_plugin_manager()
         self.plugin_manager.discover_and_load_plugins()
 
@@ -72,9 +73,8 @@ class Application(ApplicationAgent):
         self.setup()
 
         if self.plugin_manager:
-            self.plugin_manager.run_hooks('startup', self.options)
+            self.plugin_manager.run_hooks("startup", self.options)
         assert self.plugin_manager, 3
-
 
     def registerAgent(self, agent):
         self.agents.append(agent)
@@ -112,8 +112,7 @@ class Application(ApplicationAgent):
         )
         fuzzer.add_option(
             "--sessions",
-            help="Maximum number of session (default: %s)"
-            % formatLimit(self.config.fusil_session),
+            help="Maximum number of session (default: %s)" % formatLimit(self.config.fusil_session),
             type="int",
             default=self.config.fusil_session,
         )
@@ -306,9 +305,7 @@ class Application(ApplicationAgent):
         if not self.options.fast:
             beNice(True)
         if 0 < self.config.fusil_max_memory:
-            self.error(
-                "Skip limiting memory to %s bytes" % self.config.fusil_max_memory
-            )
+            self.error("Skip limiting memory to %s bytes" % self.config.fusil_max_memory)
             # limitMemory(self.config.fusil_max_memory)
 
         # Create multi agent system
@@ -387,20 +384,11 @@ class Application(ApplicationAgent):
         if gid is None:
             gid = getgid()
         self.error("")
-        self.error(
-            "!!!WARNING!!! The fuzzer will run as user %s and group %s," % (uid, gid)
-        )
-        self.error(
-            "!!!WARNING!!! and may remove arbitrary files and kill arbitrary processes."
-        )
+        self.error("!!!WARNING!!! The fuzzer will run as user %s and group %s," % (uid, gid))
+        self.error("!!!WARNING!!! and may remove arbitrary files and kill arbitrary processes.")
         if not self.options.unsafe:
-            self.error(
-                "!!!WARNING!!! Change your Fusil configuration (%s)"
-                % self.config.filename
-            )
-            self.error(
-                "!!!WARNING!!! to use different user and group, or use --unsafe command"
-            )
+            self.error("!!!WARNING!!! Change your Fusil configuration (%s)" % self.config.filename)
+            self.error("!!!WARNING!!! to use different user and group, or use --unsafe command")
             self.error(
                 "!!!WARNING!!! line option to use current user and group (%s:%s)."
                 % (getuid(), getgid())
@@ -462,8 +450,8 @@ class Application(ApplicationAgent):
         """
         self.warning("Exit Fusil")
 
-        if hasattr(self, 'plugin_manager') and self.plugin_manager:
-            self.plugin_manager.run_hooks('shutdown')
+        if hasattr(self, "plugin_manager") and self.plugin_manager:
+            self.plugin_manager.run_hooks("shutdown")
 
         if not keep_log:
             self.logger.unlinkFile()
