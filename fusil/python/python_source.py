@@ -54,7 +54,7 @@ class PythonSource(ProjectAgent):
             ).search_modules()
 
         if self.options.packages != "*":
-            print("\nAdding packages...")
+            self.info("Adding packages...")
             all_modules = ListAllModules(
                 self,
                 self.options.only_c,
@@ -72,12 +72,12 @@ class PythonSource(ProjectAgent):
                     continue
                 pack = __import__(package)
                 path = pack.__path__[0]
-                print(f"Adding package: {package} ({path})")
+                self.info("Adding package: %s (%s)" % (package, path))
                 package_walker = all_modules.discover_modules([path], package + ".")
                 self.modules |= set(name for finder, name, ispgk in package_walker)
 
-            if self.options.verbose:
-                print(f"\nKnown modules ({len(self.modules)}): {','.join(sorted(self.modules))}")
+            self.info("Known modules (%d): %s"
+                      % (len(self.modules), ",".join(sorted(self.modules))))
 
         blacklist_str = self.options.blacklist
         if blacklist_str:

@@ -1130,6 +1130,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     if base_dtype_expr.isidentifier() and base_dtype_expr in self.test_globals:
                         del self.test_globals[base_dtype_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "evaluates a numpy.s_ slice expression; needs numpy")
     def test_genH5PySliceForDirectIO_expr_runtime(self):
         rank_var_name = "my_rank_variable"
         self.test_globals[rank_var_name] = 2  # Example rank for eval
@@ -1333,6 +1334,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     if base_dtype_expr.isidentifier() and base_dtype_expr in self.test_globals:
                         del self.test_globals[base_dtype_expr]
 
+    @unittest.skipUnless(USE_NUMPY, "evaluates a numpy.s_ slice expression; needs numpy")
     def test_genH5PySliceForDirectIO_expr_runtime_2(self):
         # This was also previously tested. This ensures it's robust.
         rank_var_name = "my_rank_variable_for_runtime_slice"
