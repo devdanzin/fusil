@@ -43,7 +43,10 @@ python -m unittest tests.python.test_values    # single module
 python -m unittest tests.python.test_oom_dedup tests.python.test_oom_dedup_wiring  # OOM dedup
 
 python test_doc.py   # doctest-based tests over doc/*.rst and a few modules (not chmod +x)
-ruff check fusil/    # lint — ruff is installed; pyflakes.sh needs pyflakes, which is not
+# CI runs BOTH of these (ruff 0.15.18, pinned) over fusil/ tests/ fuzzers/fusil-python-threaded
+# -- run both before pushing; `ruff check` passing does NOT imply `ruff format --check` passes.
+ruff check fusil/ tests/ fuzzers/fusil-python-threaded          # lint (pyflakes.sh needs pyflakes, not installed)
+ruff format --check fusil/ tests/ fuzzers/fusil-python-threaded # format check; `ruff format <paths>` to fix
 
 # Build/install. Packaging is defined entirely in pyproject.toml (setuptools
 # backend; no setup.py). pip install pulls in python-ptrace; build isolation

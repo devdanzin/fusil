@@ -62,8 +62,7 @@ def _cap_lines(text):
     if _STDOUT_LINE_CAP <= 0:
         return text
     return "\n".join(
-        ln if len(ln) <= _STDOUT_LINE_CAP else ln[:_STDOUT_LINE_CAP]
-        for ln in text.split("\n")
+        ln if len(ln) <= _STDOUT_LINE_CAP else ln[:_STDOUT_LINE_CAP] for ln in text.split("\n")
     )
 
 
@@ -118,9 +117,7 @@ def classify(text):
             return dict(
                 kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None
             )
-        return dict(
-            kind="fatal", file=None, line=None, func=None, assert_expr=None, fatal_msg=msg
-        )
+        return dict(kind="fatal", file=None, line=None, func=None, assert_expr=None, fatal_msg=msg)
     if SEGV.search(text):
         return dict(kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None)
     if IMPORTERR.search(text):
@@ -160,8 +157,14 @@ def load_snapshot(lines):
             by_line.setdefault((f, int(ln)), set()).add(oid)
             per_file_lines[f].append((int(ln), oid))
     return dict(
-        func=by_func, assert_=by_assert, line=by_line, fl=per_file_lines, msg=by_msg,
-        msgfam=by_msgfam, kind=kind_of, funcname=by_funcname,
+        func=by_func,
+        assert_=by_assert,
+        line=by_line,
+        fl=per_file_lines,
+        msg=by_msg,
+        msgfam=by_msgfam,
+        kind=kind_of,
+        funcname=by_funcname,
     )
 
 
