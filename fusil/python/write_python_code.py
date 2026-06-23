@@ -1273,38 +1273,40 @@ class WritePythonCode(WriteCode):
             self.emptyLine()
             return
 
-        self.write(0, f"# Deep dive on result of {callable_name}")
-        self.write(
-            0,
-            f"if 'res_{prefix}' in locals() and res_{prefix} is not None and res_{prefix} is not SENTINEL_VALUE:",
-        )
-        # We need to ensure SENTINEL_VALUE is defined if callMethod uses it.
-        # Let's assume res_{prefix} is the actual return value.
-        L_deep_dive_res = self.addLevel(1)
-        try:
-            self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
-            self.write(0, f"try:")
-            L_before_repr = self.addLevel(1)
-            self.write_print_to_stderr(
+        # Deep dive on the result: recursively fuzz the method's return value. This is
+        # opt-in (--deep-dive, default off) -- it is multiplicative (every returning call
+        # spawns another round of fuzzing on the result) and has not historically paid off.
+        if self.options.deep_dive:
+            self.write(0, f"# Deep dive on result of {callable_name}")
+            self.write(
                 0,
-                f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
+                f"if 'res_{prefix}' in locals() and res_{prefix} is not None and res_{prefix} is not SENTINEL_VALUE:",
             )
-            self.restoreLevel(L_before_repr)
-            self.write(0, f"except Exception as e:")
-            L_after_repr = self.addLevel(1)
-            self.write_print_to_stderr(
-                0,
-                f"f'EXCEPTION printing CALL_RESULT: {{ e }}'",
-            )
-            self.restoreLevel(L_after_repr)
-            self._dispatch_fuzz_on_instance(
-                current_prefix=f"{prefix}_res_dive",
-                target_obj_expr_str=f"res_{prefix}",  # The variable holding the result
-                class_name_hint=f"{prefix}_res_type_name",  # Runtime type name
-                generation_depth=generation_depth + 1,  # Incremented depth
-            )
-        finally:
-            self.restoreLevel(L_deep_dive_res)
+            L_deep_dive_res = self.addLevel(1)
+            try:
+                self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
+                self.write(0, f"try:")
+                L_before_repr = self.addLevel(1)
+                self.write_print_to_stderr(
+                    0,
+                    f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
+                )
+                self.restoreLevel(L_before_repr)
+                self.write(0, f"except Exception as e:")
+                L_after_repr = self.addLevel(1)
+                self.write_print_to_stderr(
+                    0,
+                    f"f'EXCEPTION printing CALL_RESULT: {{ e }}'",
+                )
+                self.restoreLevel(L_after_repr)
+                self._dispatch_fuzz_on_instance(
+                    current_prefix=f"{prefix}_res_dive",
+                    target_obj_expr_str=f"res_{prefix}",  # The variable holding the result
+                    class_name_hint=f"{prefix}_res_type_name",  # Runtime type name
+                    generation_depth=generation_depth + 1,  # Incremented depth
+                )
+            finally:
+                self.restoreLevel(L_deep_dive_res)
 
         if self.enable_threads or self.enable_async:
             self.write(0, "target_func = None")

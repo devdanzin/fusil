@@ -246,6 +246,36 @@ class TestWritePythonCode(unittest.TestCase):
                 expected = " ".join(expected_output.split())
                 self.assertEqual(actual, expected)
 
+    def _generate_one_call(self):
+        """Run _generate_and_write_call for a simple function and return the generated code."""
+        def sample_func_for_test(a, b): pass
+        self.mock_module.sample_func_for_test = sample_func_for_test
+        self.writer.output = StringIO()
+        with patch.object(self.writer, '_write_arguments_for_call_lines'):
+            self.writer._generate_and_write_call(
+                prefix="dd",
+                callable_name="sample_func_for_test",
+                callable_obj=sample_func_for_test,
+                min_arg_count=1,
+                target_obj_expr="fuzz_target_module",
+                is_method_call=True,
+                generation_depth=0,
+            )
+        return self.writer.output.getvalue()
+
+    def test_deep_dive_is_off_by_default(self):
+        """--deep-dive defaults off: no recursive result-fuzzing code is generated."""
+        self.writer.options.deep_dive = False
+        code = self._generate_one_call()
+        self.assertNotIn("Deep dive on result", code)
+        self.assertNotIn("Attempting deep dive", code)
+
+    def test_deep_dive_emitted_when_enabled(self):
+        """With --deep-dive, the result of the call is recursively fuzzed."""
+        self.writer.options.deep_dive = True
+        code = self._generate_one_call()
+        self.assertIn("Deep dive on result", code)
+
     @patch('fusil.python.write_python_code.get_arg_number', return_value=(2, 4))
     @patch('fusil.python.write_python_code.randint')
     def test_generate_and_write_call_argument_logic(self, mock_randint, mock_get_args):

@@ -174,6 +174,13 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
+            "--deep-dive",
+            help="Recursively fuzz the return value of every method call (multiplicative; "
+                 "off by default)",
+            action="store_true",
+            default=False,
+        )
+        fuzzing_options.add_option(
             "--no-async",
             help="Don't run code asynchronously (default: False)",
             action="store_true",
