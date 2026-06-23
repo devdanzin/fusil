@@ -27,7 +27,7 @@ class CodeTemplate:
 
             def replacer(match):
                 """A replacer function for re.sub that indents the value."""
-                indent_str = match.group('indent')
+                indent_str = match.group("indent")
                 # Dedent the value to normalize it, then re-indent it to match the placeholder.
                 return textwrap.indent(textwrap.dedent(str(value)).strip(), indent_str)
 

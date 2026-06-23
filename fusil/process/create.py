@@ -105,9 +105,7 @@ class CreateProcess(ProjectAgent):
                     % (index, type(argument).__name__, argument)
                 )
             if has_null:
-                raise ValueError(
-                    "Process argument %s contains nul byte: %r" % (index, argument)
-                )
+                raise ValueError("Process argument %s contains nul byte: %r" % (index, argument))
         arguments[0] = locateProgram(arguments[0], raise_error=True)
         popen_args = self.createPopenArguments()
         self.info("Create process: %s" % repr(arguments))
@@ -172,7 +170,9 @@ class CreateProcess(ProjectAgent):
         # Ignore stdout?
         if self.stdout != "null":
             # Otherwise, create a "stdout" file as output
-            filename = self.stdout_file if self.stdout_file else self.session().createFilename("stdout")
+            filename = (
+                self.stdout_file if self.stdout_file else self.session().createFilename("stdout")
+            )
             self.send("process_stdout", self, filename)
         else:
             filename = devnull
@@ -291,16 +291,14 @@ class CreateProcess(ProjectAgent):
             diff = time() - start
             if timeout < diff:
                 raise ValueError(
-                    "Unable to kill process %s after %.1f seconds"
-                    % (self.process.pid, diff)
+                    "Unable to kill process %s after %.1f seconds" % (self.process.pid, diff)
                 )
 
             # Inform user about this loop
             if next_msg <= time():
                 next_msg = time() + 5.0
                 self.error(
-                    "Wait until process %s death (since %.1f seconds)..."
-                    % (self.process.pid, diff)
+                    "Wait until process %s death (since %.1f seconds)..." % (self.process.pid, diff)
                 )
 
             # Is process terminated?

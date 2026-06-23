@@ -50,9 +50,10 @@ class SessionDirectory(SessionAgent, Directory):
             if err.errno != EPERM:
                 raise
             help = permissionHelp(self.application().options)
-            message = (
-                "You are not allowed to change the owner of the directory %s to %s:%s"
-                % (self.directory, uid, gid)
+            message = "You are not allowed to change the owner of the directory %s to %s:%s" % (
+                self.directory,
+                uid,
+                gid,
             )
             if help:
                 message += " (%s)" % help

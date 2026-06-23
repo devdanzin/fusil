@@ -430,13 +430,17 @@ class H5PyArgumentGenerator:
             if numpy.issubdtype(dt_val, numpy.integer):
                 return str(randint(-100, 100))
             if numpy.issubdtype(dt_val, numpy.floating):
-                return choice([str(round(uniform(-100, 100), 2)), "numpy.nan", "numpy.inf", "-numpy.inf"])
+                return choice(
+                    [str(round(uniform(-100, 100), 2)), "numpy.nan", "numpy.inf", "-numpy.inf"]
+                )
             if numpy.issubdtype(dt_val, numpy.bool_):
                 return choice(["True", "False"])
             # For string/bytes or complex types, "None" might be acceptable or lead to other behavior.
             # If it's a string/bytes dtype, an empty string/bytes might be better than None for numpy.full
-            if dt_val.kind in ('S', 'a'): return "b''"  # Empty bytes
-            if dt_val.kind == 'U': return "''"  # Empty unicode string
+            if dt_val.kind in ("S", "a"):
+                return "b''"  # Empty bytes
+            if dt_val.kind == "U":
+                return "''"  # Empty unicode string
         except Exception:
             # Fallback if evaling dtype_expr_str fails or type is complex
             pass
@@ -592,7 +596,9 @@ class H5PyArgumentGenerator:
         """
         options = [
             self.genH5PySimpleDtype_expr,
-            lambda: f"h5py.string_dtype(encoding='{choice(['ascii', 'utf-8'])}', length={choice([None, 5, 20])})",
+            lambda: (
+                f"h5py.string_dtype(encoding='{choice(['ascii', 'utf-8'])}', length={choice([None, 5, 20])})"
+            ),
             self.genH5PyVlenDtype_expr,
             self.genH5PyEnumDtype_expr,
             self.genH5PyCompoundDtype_expr,
@@ -661,7 +667,7 @@ class H5PyArgumentGenerator:
         return f"_fusil_h5_create_dynamic_slice_for_rank({rank_variable_name_in_script})"
 
     def genNumpyArrayForDirectIO_expr(
-            self, array_shape_expr: str, dtype_expr: str, allow_non_contiguous: bool = True
+        self, array_shape_expr: str, dtype_expr: str, allow_non_contiguous: bool = True
     ) -> str:
         """
         Generates a NumPy array expression for `read_direct` (destination) or
@@ -675,16 +681,22 @@ class H5PyArgumentGenerator:
         is_bool_dtype = "'bool'" in dtype_expr.lower()
         if random() < 0.5 and not is_bool_dtype:
             num_elements_expr = f"int(numpy.prod({array_shape_expr}))"
-            return (f"numpy.arange({num_elements_expr}, dtype={dtype_expr})"
-                    f".reshape({array_shape_expr}{order_opt})")
+            return (
+                f"numpy.arange({num_elements_expr}, dtype={dtype_expr})"
+                f".reshape({array_shape_expr}{order_opt})"
+            )
 
         fill_value_expr = self.genH5PyFillvalue_expr(dtype_expr)
 
-        if fill_value_expr == "None" and not ('S' in dtype_expr or 'U' in dtype_expr or 'object' in dtype_expr):
+        if fill_value_expr == "None" and not (
+            "S" in dtype_expr or "U" in dtype_expr or "object" in dtype_expr
+        ):
             fill_value_expr = "0"
 
-        return (f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, "
-                f"fill_value={fill_value_expr}, dtype={dtype_expr}{order_opt})")
+        return (
+            f"numpy.full(shape={array_shape_expr if array_shape_expr else '(10,)'}, "
+            f"fill_value={fill_value_expr}, dtype={dtype_expr}{order_opt})"
+        )
 
     def genH5PyAsTypeDtype_expr(self) -> str:
         """
@@ -912,7 +924,9 @@ class H5PyArgumentGenerator:
             # Use numpy.random.rand for floats and scale
             return f"(numpy.random.rand(*{block_shape_expr_str}) * 255).astype({dtype_expr_str})"
         else:
-            return f"numpy.random.randint(0, 255, size={block_shape_expr_str}, dtype={dtype_expr_str})"
+            return (
+                f"numpy.random.randint(0, 255, size={block_shape_expr_str}, dtype={dtype_expr_str})"
+            )
 
     def genLargePythonInt_expr(self) -> str:
         """
@@ -946,9 +960,11 @@ class H5PyArgumentGenerator:
             "numpy.arange(numpy.prod(shape_tuple)).astype(dtype).reshape(shape_tuple)".
         """
         # Ensure prod operates on an actual tuple, not its string representation
-        prod_arg = f"ast.literal_eval({element_shape_tuple_expr_str})" \
-            if element_shape_tuple_expr_str.startswith("'(") \
+        prod_arg = (
+            f"ast.literal_eval({element_shape_tuple_expr_str})"
+            if element_shape_tuple_expr_str.startswith("'(")
             else element_shape_tuple_expr_str
+        )
         return (
             f"numpy.arange(int(numpy.prod({prod_arg})))"
             f".astype({base_dtype_expr_str})"

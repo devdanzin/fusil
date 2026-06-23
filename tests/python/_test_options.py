@@ -9,6 +9,7 @@ the fuzzer's own option parser, so new options appear automatically.
 Not collected by ``unittest discover`` (the default pattern is ``test*.py``; this module's
 name starts with an underscore).
 """
+
 from functools import lru_cache
 from types import SimpleNamespace
 
@@ -24,9 +25,7 @@ def _harvested_defaults():
     so a tiny stub is enough to drive it without constructing a full Application.
     """
     parser = OptionParserWithSections()
-    stub = SimpleNamespace(
-        plugin_manager=SimpleNamespace(get_cli_options=lambda: [])
-    )
+    stub = SimpleNamespace(plugin_manager=SimpleNamespace(get_cli_options=lambda: []))
     Fuzzer.createFuzzerOptions(stub, parser)
     return vars(parser.get_default_values())
 

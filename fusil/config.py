@@ -53,18 +53,14 @@ def createFilename(name=None, configdir=None):
 
 
 class FusilConfig:
-    def __init__(
-        self, options=None, filename=None, configdir=None, read=False, write=False
-    ):
+    def __init__(self, options=None, filename=None, configdir=None, read=False, write=False):
         self._parser = ConfigParserWithHelp(allow_unnamed_section=True)
         self.filename = createFilename(filename, configdir)
         if read and path_exists(self.filename):
             self._parser.read([self.filename])
 
         # Fusil application options
-        self.fusil_max_memory = self.getint(
-            "fusil", "max_memory", DEFAULTS["fusil_max_memory"]
-        )
+        self.fusil_max_memory = self.getint("fusil", "max_memory", DEFAULTS["fusil_max_memory"])
         self.fusil_success_score = self.getfloat(
             "fusil", "success_score", DEFAULTS["fusil_success_score"]
         )
@@ -96,9 +92,7 @@ class FusilConfig:
         self.process_max_memory = self.getint(
             "process", "max_memory", DEFAULTS["process_max_memory"]
         )
-        self.process_core_dump = self.getbool(
-            "process", "core_dump", DEFAULTS["process_core_dump"]
-        )
+        self.process_core_dump = self.getbool("process", "core_dump", DEFAULTS["process_core_dump"])
         self.process_max_user_process = self.getint(
             "process", "max_user_process", DEFAULTS["process_max_user_process"]
         )
@@ -156,9 +150,7 @@ class FusilConfig:
                         self._parser.add_section(section)
                     elif self._parser.has_option(section, name):
                         value = get_and_convert(self._parser, section, name)
-                        print(
-                            f"{section}: {name} = {value} {type(value)} (from config file)"
-                        )
+                        print(f"{section}: {name} = {value} {type(value)} (from config file)")
 
                     self._parser.set(section, name, str(value), help)
                     setattr(self, name, value)
@@ -213,19 +205,13 @@ class FusilConfig:
         return self._gettype(self._parser.get, "a string", section, key, default_value)
 
     def getbool(self, section, key, default_value):
-        return self._gettype(
-            self._parser.getboolean, "a boolean", section, key, default_value
-        )
+        return self._gettype(self._parser.getboolean, "a boolean", section, key, default_value)
 
     def getint(self, section, key, default_value):
-        return self._gettype(
-            self._parser.getint, "an integer", section, key, default_value
-        )
+        return self._gettype(self._parser.getint, "an integer", section, key, default_value)
 
     def getfloat(self, section, key, default_value):
-        return self._gettype(
-            self._parser.getfloat, "a float", section, key, default_value
-        )
+        return self._gettype(self._parser.getfloat, "a float", section, key, default_value)
 
 
 def optparse_to_configparser(parser, output=None, defaults=False, options=None):

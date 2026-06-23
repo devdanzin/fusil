@@ -6,8 +6,9 @@ from random import randint, sample, seed, choice as random_choice
 from unittest.mock import patch, MagicMock  # MagicMock for placeholders
 
 import os
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(SCRIPT_DIR, '..', '..'))
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
 import fusil.python.argument_generator
 from fusil.config import FusilConfig
@@ -33,30 +34,37 @@ except ImportError:
 
 
 class TestArgumentGenerator(unittest.TestCase):
-
-    def _setup_arg_gen(self, use_numpy=True, use_templates=True, use_h5py_arg_gen=True,  # Renamed use_h5py for clarity
-                       no_numpy_opt=False, no_tstrings_opt=False):
+    def _setup_arg_gen(
+        self,
+        use_numpy=True,
+        use_templates=True,
+        use_h5py_arg_gen=True,  # Renamed use_h5py for clarity
+        no_numpy_opt=False,
+        no_tstrings_opt=False,
+    ):
         mock_options = FusilConfig(read=False)
         mock_options.no_numpy = no_numpy_opt
         mock_options.no_tstrings = no_tstrings_opt
-        mock_options.functions_number = getattr(mock_options, 'functions_number', 10)
-        mock_options.methods_number = getattr(mock_options, 'methods_number', 5)
-        mock_options.classes_number = getattr(mock_options, 'classes_number', 5)
-        mock_options.objects_number = getattr(mock_options, 'objects_number', 5)
-        mock_options.fuzz_exceptions = getattr(mock_options, 'fuzz_exceptions', False)
+        mock_options.functions_number = getattr(mock_options, "functions_number", 10)
+        mock_options.methods_number = getattr(mock_options, "methods_number", 5)
+        mock_options.classes_number = getattr(mock_options, "classes_number", 5)
+        mock_options.objects_number = getattr(mock_options, "objects_number", 5)
+        mock_options.fuzz_exceptions = getattr(mock_options, "fuzz_exceptions", False)
 
         default_filenames = ["/tmp/testfile1.txt", "/tmp/testfile2.log"]
-        if hasattr(mock_options, 'filenames') and not mock_options.filenames:
+        if hasattr(mock_options, "filenames") and not mock_options.filenames:
             mock_options.filenames = ",".join(default_filenames)
-        elif not hasattr(mock_options, 'filenames'):
+        elif not hasattr(mock_options, "filenames"):
             mock_options.filenames = ",".join(default_filenames)
 
         self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(
             options=mock_options,
-            filenames=mock_options.filenames.split(',') if mock_options.filenames else default_filenames,
+            filenames=mock_options.filenames.split(",")
+            if mock_options.filenames
+            else default_filenames,
             use_numpy=use_numpy,
             use_templates=use_templates,
-            use_h5py=use_h5py_arg_gen  # Pass the renamed flag
+            use_h5py=use_h5py_arg_gen,  # Pass the renamed flag
         )
 
         # --- Define globals for eval() ---
@@ -68,13 +76,29 @@ class TestArgumentGenerator(unittest.TestCase):
             "Liar1": MagicMock(name="Liar1_mock"),
             "Liar2": MagicMock(name="Liar2_mock"),
             "Evil": MagicMock(name="Evil_mock"),
-            fusil.python.argument_generator.ERRBACK_NAME_CONST: MagicMock(name="errback_mock"),  # For "errback"
-            "True": True, "False": False, "None": None,  # Basic builtins
-            "object": object, "list": list, "dict": dict, "tuple": tuple, "set": set,
-            "int": int, "float": float, "str": str, "bytes": bytes, "bytearray": bytearray,
+            fusil.python.argument_generator.ERRBACK_NAME_CONST: MagicMock(
+                name="errback_mock"
+            ),  # For "errback"
+            "True": True,
+            "False": False,
+            "None": None,  # Basic builtins
+            "object": object,
+            "list": list,
+            "dict": dict,
+            "tuple": tuple,
+            "set": set,
+            "int": int,
+            "float": float,
+            "str": str,
+            "bytes": bytes,
+            "bytearray": bytearray,
             "Exception": Exception,
-            "range": range, "len": len, "repr": repr, "choice": random_choice,  # if generated code uses them
-            "randint": randint, "sample": sample,  # if generated code uses them
+            "range": range,
+            "len": len,
+            "repr": repr,
+            "choice": random_choice,  # if generated code uses them
+            "randint": randint,
+            "sample": sample,  # if generated code uses them
             # For template strings, if they were to be eval'd directly (they usually create Template objects)
             "Template": MagicMock(name="Template_mock"),
             "Interpolation": MagicMock(name="Interpolation_mock"),
@@ -83,7 +107,9 @@ class TestArgumentGenerator(unittest.TestCase):
         # Placeholder for h5py_tricky_objects.get('name')
         # The .get() method will be called on this mock.
         h5py_tricky_objects_mock = MagicMock(name="h5py_tricky_objects_mock")
-        h5py_tricky_objects_mock.get.return_value = "mocked_h5py_object"  # Default return for any .get()
+        h5py_tricky_objects_mock.get.return_value = (
+            "mocked_h5py_object"  # Default return for any .get()
+        )
         self.test_globals["h5py_tricky_objects"] = h5py_tricky_objects_mock
 
         # Placeholders for tricky_numpy names
@@ -107,15 +133,23 @@ class TestArgumentGenerator(unittest.TestCase):
         self.test_globals["big_union"] = "mocked_big_union"
 
     def setUp(self):
-        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py_arg_gen=True,
-                            no_numpy_opt=False, no_tstrings_opt=False)
+        self._setup_arg_gen(
+            use_numpy=True,
+            use_templates=True,
+            use_h5py_arg_gen=True,
+            no_numpy_opt=False,
+            no_tstrings_opt=False,
+        )
 
     def assertIsListOfStrings(self, result, method_name):
         self.assertIsInstance(result, list, f"{method_name} should return a list.")
         if result:
             for item in result:
-                self.assertIsInstance(item, str,
-                                      f"Items in list from {method_name} should be strings. Got: {type(item)} for item '{item}'")
+                self.assertIsInstance(
+                    item,
+                    str,
+                    f"Items in list from {method_name} should be strings. Got: {type(item)} for item '{item}'",
+                )
 
     # --- Previous test methods (genNone, genBool, genInt, genString) ---
     # (Keep them as they are good base cases)
@@ -134,7 +168,9 @@ class TestArgumentGenerator(unittest.TestCase):
         outputs = {self.arg_gen.genBool()[0] for _ in range(20)}
         self.assertTrue(len(outputs) >= 1, "genBool should produce at least one valid output.")
         if "True" in outputs and "False" in outputs:  # Ideal case for variety
-            self.assertTrue(len(outputs) > 1, "genBool should ideally produce varied outputs over time.")
+            self.assertTrue(
+                len(outputs) > 1, "genBool should ideally produce varied outputs over time."
+            )
 
     def test_genInt(self):
         result = self.arg_gen.genInt()
@@ -155,9 +191,9 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('"') and val_str.endswith('"')) or \
-            (val_str.startswith("'") and val_str.endswith("'")),
-            f"genString output '{val_str}' should be a quoted string."
+            (val_str.startswith('"') and val_str.endswith('"'))
+            or (val_str.startswith("'") and val_str.endswith("'")),
+            f"genString output '{val_str}' should be a quoted string.",
         )
         try:
             evaluated_content = ast.literal_eval(val_str)
@@ -166,19 +202,27 @@ class TestArgumentGenerator(unittest.TestCase):
             # self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_content), ...)
         except (ValueError, SyntaxError) as e:
             self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
+
     # --- Tests for collection types ---
     def test_genList_structure(self):
         result = self.arg_gen.genList()
         self.assertIsListOfStrings(result, "genList")
         full_expr = "".join(result)
-        self.assertTrue(full_expr.startswith("[") and full_expr.endswith("]"),
-                        f"genList output '{full_expr}' should start with [ and end with ].")
+        self.assertTrue(
+            full_expr.startswith("[") and full_expr.endswith("]"),
+            f"genList output '{full_expr}' should start with [ and end with ].",
+        )
         try:
             parsed_ast = ast.parse(full_expr)  # Parse the expression
             self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
-            self.assertIsInstance(parsed_ast.body[0], ast.Expr, "Parsed expression should be an ast.Expr")
-            self.assertIsInstance(parsed_ast.body[0].value, ast.List,  # Check the value is an ast.List node
-                                  f"Parsed expression '{full_expr}' is not an AST List node.")
+            self.assertIsInstance(
+                parsed_ast.body[0], ast.Expr, "Parsed expression should be an ast.Expr"
+            )
+            self.assertIsInstance(
+                parsed_ast.body[0].value,
+                ast.List,  # Check the value is an ast.List node
+                f"Parsed expression '{full_expr}' is not an AST List node.",
+            )
         except SyntaxError as e:
             self.fail(f"genList produced a syntactically invalid expression '{full_expr}': {e}")
 
@@ -189,7 +233,7 @@ class TestArgumentGenerator(unittest.TestCase):
         full_expr = " ".join(self.arg_gen.genTuple())
         try:
             # Use mode='eval' for single expressions
-            parsed_ast = ast.parse(full_expr, mode='eval')
+            parsed_ast = ast.parse(full_expr, mode="eval")
         except SyntaxError as e:
             self.fail(f"genTuple produced a syntax error in expression '{full_expr}': {e}")
 
@@ -199,32 +243,43 @@ class TestArgumentGenerator(unittest.TestCase):
 
         if isinstance(node, ast.Call):
             # If it's a Call, verify it's a call to the name 'tuple'.
-            self.assertEqual(getattr(node.func, 'id', None), 'tuple',
-                             f"Expression '{full_expr}' is a Call, but not to tuple()")
+            self.assertEqual(
+                getattr(node.func, "id", None),
+                "tuple",
+                f"Expression '{full_expr}' is a Call, but not to tuple()",
+            )
         else:
             # Otherwise, it must be a literal tuple.
-            self.assertIsInstance(node, ast.Tuple,
-                                  f"Parsed expression '{full_expr}' is not an AST Tuple or Call node.")
+            self.assertIsInstance(
+                node,
+                ast.Tuple,
+                f"Parsed expression '{full_expr}' is not an AST Tuple or Call node.",
+            )
 
     def test_genDict_structure(self):
         result = self.arg_gen.genDict()
         self.assertIsListOfStrings(result, "genDict")
         full_expr = "".join(result)
-        self.assertTrue(full_expr.startswith("{") and full_expr.endswith("}"),
-                        f"genDict output '{full_expr}' should start with {{ and end with }}.")
+        self.assertTrue(
+            full_expr.startswith("{") and full_expr.endswith("}"),
+            f"genDict output '{full_expr}' should start with {{ and end with }}.",
+        )
         try:
             parsed_ast = ast.parse(full_expr)
             self.assertTrue(parsed_ast.body, "ast.parse result should not be empty")
             self.assertIsInstance(parsed_ast.body[0], ast.Expr)
-            self.assertIsInstance(parsed_ast.body[0].value, ast.Dict,
-                                  f"Parsed expression '{full_expr}' is not an AST Dict node.")
+            self.assertIsInstance(
+                parsed_ast.body[0].value,
+                ast.Dict,
+                f"Parsed expression '{full_expr}' is not an AST Dict node.",
+            )
         except SyntaxError as e:
             self.fail(f"genDict produced a syntactically invalid expression '{full_expr}': {e}")
 
     def test_genList_empty(self):
         # To test empty list generation, we might need to influence randint or run many times
         # For now, let's assume it *can* generate empty lists. A more targeted test:
-        with patch('fusil.python.argument_generator.randint', return_value=0):  # Force nb_item = 0
+        with patch("fusil.python.argument_generator.randint", return_value=0):  # Force nb_item = 0
             result = self.arg_gen.genList()
             self.assertEqual("".join(result), "[]")
 
@@ -235,13 +290,20 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertIsListOfStrings(result, "genExistingFilename")
         self.assertEqual(len(result), 1)
         # Ensure the returned string is one of the provided filenames, correctly quoted
-        expected_filenames_quoted = [f"'{f.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
-                                     for f in self.arg_gen.filenames]
-        self.assertIn(result[0], expected_filenames_quoted,
-                      f"genExistingFilename did not return one of the expected filenames: {result[0]}")
+        expected_filenames_quoted = [
+            f"'{f.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+            for f in self.arg_gen.filenames
+        ]
+        self.assertIn(
+            result[0],
+            expected_filenames_quoted,
+            f"genExistingFilename did not return one of the expected filenames: {result[0]}",
+        )
 
         # Test with no filenames provided to ArgumentGenerator
-        self._setup_arg_gen(use_numpy=False, use_templates=False, use_h5py_arg_gen=False)  # Re-init with no filenames
+        self._setup_arg_gen(
+            use_numpy=False, use_templates=False, use_h5py_arg_gen=False
+        )  # Re-init with no filenames
         self.arg_gen.filenames = []  # Explicitly empty it
         result_no_files = self.arg_gen.genExistingFilename()
         self.assertIsListOfStrings(result_no_files, "genExistingFilename (no files)")
@@ -251,15 +313,21 @@ class TestArgumentGenerator(unittest.TestCase):
         result = self.arg_gen.genTrickyObjects()
         self.assertIsListOfStrings(result, "genTrickyObjects")
         self.assertEqual(len(result), 1)
-        self.assertIn(result[0], fusil.python.tricky_weird.tricky_objects_names,
-                      "genTrickyObjects should pick from tricky_objects_names.")
+        self.assertIn(
+            result[0],
+            fusil.python.tricky_weird.tricky_objects_names,
+            "genTrickyObjects should pick from tricky_objects_names.",
+        )
 
     def test_genInterestingValues(self):
         result = self.arg_gen.genInterestingValues()
         self.assertIsListOfStrings(result, "genInterestingValues")
         self.assertEqual(len(result), 1)
-        self.assertIn(result[0], fusil.python.values.INTERESTING,
-                      "genInterestingValues should pick from INTERESTING values.")
+        self.assertIn(
+            result[0],
+            fusil.python.values.INTERESTING,
+            "genInterestingValues should pick from INTERESTING values.",
+        )
 
     # --- Testing the effect of options on create_simple_argument ---
 
@@ -272,11 +340,14 @@ class TestArgumentGenerator(unittest.TestCase):
             else:
                 actual_func = gen_func_or_tuple
 
-            if hasattr(actual_func, '__name__') and actual_func.__name__ == generator_method_name:
+            if hasattr(actual_func, "__name__") and actual_func.__name__ == generator_method_name:
                 return True
             # For methods of H5PyArgumentGenerator, which are bound methods
-            if hasattr(actual_func, '__func__') and hasattr(actual_func.__func__,
-                                                            '__name__') and actual_func.__func__.__name__ == generator_method_name:
+            if (
+                hasattr(actual_func, "__func__")
+                and hasattr(actual_func.__func__, "__name__")
+                and actual_func.__func__.__name__ == generator_method_name
+            ):
                 if actual_func.__self__ == self.arg_gen.h5py_argument_generator:
                     return True
         return False
@@ -284,39 +355,74 @@ class TestArgumentGenerator(unittest.TestCase):
     @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
     def test_simple_generators_composition_with_numpy_h5py(self):
         self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=False)
-        self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
-        self.assertTrue(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
+        self.assertTrue(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
+        )
+        self.assertTrue(
+            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
+        )
 
     def test_simple_generators_composition_without_numpy_opt(self):
-        self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=True)  # no_numpy option is True
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
+        self._setup_arg_gen(
+            use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=True
+        )  # no_numpy option is True
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
+        )
         # genH5PyObject also depends on numpy not being disabled by options
-        self.assertFalse(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
+        )
 
     def test_simple_generators_composition_without_numpy_init(self):
-        self._setup_arg_gen(use_numpy=False, use_h5py_arg_gen=True, no_numpy_opt=False)  # use_numpy init flag is False
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'simple_argument_generators'))
-        self.assertFalse(self._check_if_generator_in_tuple('genH5PyObject', 'simple_argument_generators'))
+        self._setup_arg_gen(
+            use_numpy=False, use_h5py_arg_gen=True, no_numpy_opt=False
+        )  # use_numpy init flag is False
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
+        )
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
+        )
 
     def test_complex_generators_composition_with_templates(self):
-        if fusil.python.argument_generator.TEMPLATES:  # Only run if templates are supposed to be available
+        if (
+            fusil.python.argument_generator.TEMPLATES
+        ):  # Only run if templates are supposed to be available
             self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)
-            self.assertTrue(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+            self.assertTrue(
+                self._check_if_generator_in_tuple(
+                    "genTrickyTemplate", "complex_argument_generators"
+                )
+            )
         else:
-            self.skipTest("Template strings (TEMPLATES) not available for testing genTrickyTemplate.")
+            self.skipTest(
+                "Template strings (TEMPLATES) not available for testing genTrickyTemplate."
+            )
 
     def test_complex_generators_composition_without_templates_opt(self):
         self._setup_arg_gen(use_templates=True, no_tstrings_opt=True)  # no_tstrings option is True
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyTemplate", "complex_argument_generators")
+        )
 
     def test_complex_generators_composition_without_templates_init(self):
-        self._setup_arg_gen(use_templates=False, no_tstrings_opt=False)  # use_templates init flag is False
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+        self._setup_arg_gen(
+            use_templates=False, no_tstrings_opt=False
+        )  # use_templates init flag is False
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyTemplate", "complex_argument_generators")
+        )
 
     def test_create_simple_argument_variety(self):
         """Try to detect if create_simple_argument uses different sub-generators."""
-        self._setup_arg_gen(use_numpy=True, use_templates=True, use_h5py_arg_gen=True,
-                            no_numpy_opt=False, no_tstrings_opt=False)
+        self._setup_arg_gen(
+            use_numpy=True,
+            use_templates=True,
+            use_h5py_arg_gen=True,
+            no_numpy_opt=False,
+            no_tstrings_opt=False,
+        )
 
         # This is a probabilistic test. We try to see if different kinds of expressions are generated.
         # A more robust way would be to mock 'random.choice' used within create_simple_argument
@@ -330,7 +436,7 @@ class TestArgumentGenerator(unittest.TestCase):
                 seen_types.add("None")
             elif arg_str in ["True", "False"]:
                 seen_types.add("Bool")
-            elif arg_str.isdigit() or (arg_str.startswith('-') and arg_str[1:].isdigit()):
+            elif arg_str.isdigit() or (arg_str.startswith("-") and arg_str[1:].isdigit()):
                 seen_types.add("Int")
             elif arg_str.startswith("b'") or arg_str.startswith('b"'):
                 seen_types.add("Bytes")
@@ -345,7 +451,10 @@ class TestArgumentGenerator(unittest.TestCase):
             # Add more checks for other types if needed
 
         # Expect to see a few different types of arguments generated
-        self.assertTrue(len(seen_types) > 3, f"create_simple_argument did not show much variety. Seen: {seen_types}")
+        self.assertTrue(
+            len(seen_types) > 3,
+            f"create_simple_argument did not show much variety. Seen: {seen_types}",
+        )
 
     def test_genSmallUint(self):
         result = self.arg_gen.genSmallUint()
@@ -355,15 +464,19 @@ class TestArgumentGenerator(unittest.TestCase):
             try:
                 val = ast.literal_eval(result[0])  # Use ast.literal_eval
                 self.assertIsInstance(val, int, f"{result[0]} did not evaluate to an integer.")
-                self.assertTrue(-19 <= val <= 19,
-                                f"genSmallUint produced {val}, which is outside the expected range -19 to 19.")
+                self.assertTrue(
+                    -19 <= val <= 19,
+                    f"genSmallUint produced {val}, which is outside the expected range -19 to 19.",
+                )
             except (ValueError, SyntaxError) as e:  # ast.literal_eval raises these
                 self.fail(f"ast.literal_eval({result[0]}) failed: {e}")
         except Exception as e:
             self.fail(f"eval({result[0]}) from genSmallUint failed: {e}")
 
         # Check for variety
-        outputs = {int(self.arg_gen.genSmallUint()[0]) for _ in range(50)} # More iterations for better chance of variety
+        outputs = {
+            int(self.arg_gen.genSmallUint()[0]) for _ in range(50)
+        }  # More iterations for better chance of variety
         self.assertTrue(len(outputs) > 1, "genSmallUint should ideally produce varied outputs.")
 
     def test_genBytes(self):
@@ -372,9 +485,9 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('b"') and val_str.endswith('"')) or \
-            (val_str.startswith("b'") and val_str.endswith("'")),
-            f"genBytes output '{val_str}' should be a quoted bytes literal."
+            (val_str.startswith('b"') and val_str.endswith('"'))
+            or (val_str.startswith("b'") and val_str.endswith("'")),
+            f"genBytes output '{val_str}' should be a quoted bytes literal.",
         )
         try:
             val_bytes = ast.literal_eval(val_str)  # ast.literal_eval handles bytes literals
@@ -384,7 +497,7 @@ class TestArgumentGenerator(unittest.TestCase):
 
         # Test for empty bytes generation (might require mocking or many runs)
         # Forcing it with a patch:
-        with patch.object(self.arg_gen.bytes_generator, 'createLength', return_value=0):
+        with patch.object(self.arg_gen.bytes_generator, "createLength", return_value=0):
             result_empty = self.arg_gen.genBytes()
             # self.assertEqual(eval("".join(result_empty)), b"") # Old
             self.assertEqual(ast.literal_eval("".join(result_empty)), b"")
@@ -395,9 +508,9 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('"') and val_str.endswith('"')) or \
-            (val_str.startswith("'") and val_str.endswith("'")),
-            f"genLetterDigit output '{val_str}' should be a quoted string."
+            (val_str.startswith('"') and val_str.endswith('"'))
+            or (val_str.startswith("'") and val_str.endswith("'")),
+            f"genLetterDigit output '{val_str}' should be a quoted string.",
         )
         # Check if it's a valid string literal. Content check is harder without knowing exact charset.
         try:
@@ -414,20 +527,26 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('"') and val_str.endswith('"')) or \
-            (val_str.startswith("'") and val_str.endswith("'")),
-            f"genAsciiString output '{val_str}' should be a quoted string."
+            (val_str.startswith('"') and val_str.endswith('"'))
+            or (val_str.startswith("'") and val_str.endswith("'")),
+            f"genAsciiString output '{val_str}' should be a quoted string.",
         )
         try:
             try:
                 evaluated_content = ast.literal_eval(val_str)
-                self.assertIsInstance(evaluated_content, str)  # Ensure it evaluated to a Python string
+                self.assertIsInstance(
+                    evaluated_content, str
+                )  # Ensure it evaluated to a Python string
             except (ValueError, SyntaxError) as e:
                 self.fail(f"ast.literal_eval on '{val_str}' failed: {e}")
-            self.assertTrue(all(0 <= ord(c) < 256 for c in evaluated_content), # From ASCII8
-                            f"genAsciiString content '{evaluated_content}' not in ASCII8 range.")
-        except Exception as e: # Catches eval errors or issues in ord(c)
-            self.fail(f"genAsciiString produced an invalid string or content: {val_str}, error: {e}")
+            self.assertTrue(
+                all(0 <= ord(c) < 256 for c in evaluated_content),  # From ASCII8
+                f"genAsciiString content '{evaluated_content}' not in ASCII8 range.",
+            )
+        except Exception as e:  # Catches eval errors or issues in ord(c)
+            self.fail(
+                f"genAsciiString produced an invalid string or content: {val_str}, error: {e}"
+            )
 
     def test_genUnixPath(self):
         result = self.arg_gen.genUnixPath()
@@ -435,9 +554,9 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('"') and val_str.endswith('"')) or \
-            (val_str.startswith("'") and val_str.endswith("'")),
-            f"genUnixPath output '{val_str}' should be a quoted string."
+            (val_str.startswith('"') and val_str.endswith('"'))
+            or (val_str.startswith("'") and val_str.endswith("'")),
+            f"genUnixPath output '{val_str}' should be a quoted string.",
         )
         # Content check: should ideally resemble a path. For now, just eval.
         try:
@@ -460,24 +579,34 @@ class TestArgumentGenerator(unittest.TestCase):
         result = self.arg_gen.genErrback()
         self.assertIsListOfStrings(result, "genErrback")
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], self.arg_gen.errback_name,
-                         f"genErrback should return the errback_name ('{self.arg_gen.errback_name}').")
+        self.assertEqual(
+            result[0],
+            self.arg_gen.errback_name,
+            f"genErrback should return the errback_name ('{self.arg_gen.errback_name}').",
+        )
 
     def test_genOpenFile(self):
         # Case 1: Filenames are available
-        self._setup_arg_gen() # Ensures self.arg_gen.filenames is populated
+        self._setup_arg_gen()  # Ensures self.arg_gen.filenames is populated
         result_with_files = self.arg_gen.genOpenFile()
         self.assertIsListOfStrings(result_with_files, "genOpenFile (with files)")
         self.assertEqual(len(result_with_files), 1)
         expr_str = result_with_files[0]
-        self.assertTrue(expr_str.startswith("open(") and expr_str.endswith(")"),
-                        "genOpenFile should produce an open(...) expression.")
+        self.assertTrue(
+            expr_str.startswith("open(") and expr_str.endswith(")"),
+            "genOpenFile should produce an open(...) expression.",
+        )
         # Ensure the filename inside open() is one of the provided ones
-        opened_file_arg = expr_str[len("open("):-1]
-        expected_filenames_quoted = [f"'{f.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
-                                     for f in self.arg_gen.filenames]
-        self.assertIn(opened_file_arg, expected_filenames_quoted,
-                      f"genOpenFile arg {opened_file_arg} not in expected {expected_filenames_quoted}")
+        opened_file_arg = expr_str[len("open(") : -1]
+        expected_filenames_quoted = [
+            f"'{f.replace(chr(92), chr(92) * 2).replace(chr(39), chr(92) + chr(39))}'"
+            for f in self.arg_gen.filenames
+        ]
+        self.assertIn(
+            opened_file_arg,
+            expected_filenames_quoted,
+            f"genOpenFile arg {opened_file_arg} not in expected {expected_filenames_quoted}",
+        )
 
         # Case 2: No filenames available
         self.arg_gen.filenames = []
@@ -490,11 +619,13 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertIsListOfStrings(result, "genException")
         self.assertEqual(len(result), 1)
         expr_str = result[0]
-        self.assertTrue(expr_str.startswith("Exception(") and expr_str.endswith(")"),
-                        "genException should produce an Exception(...) expression.")
+        self.assertTrue(
+            expr_str.startswith("Exception(") and expr_str.endswith(")"),
+            "genException should produce an Exception(...) expression.",
+        )
         try:
             # Check it's a valid expression that would create an Exception
-            compile(expr_str, '<string>', 'eval')
+            compile(expr_str, "<string>", "eval")
         except SyntaxError:
             self.fail(f"genException produced a syntactically invalid expression: {expr_str}")
 
@@ -502,8 +633,11 @@ class TestArgumentGenerator(unittest.TestCase):
         result = self.arg_gen.genBufferObject()
         self.assertIsListOfStrings(result, "genBufferObject")
         self.assertEqual(len(result), 1)
-        self.assertIn(result[0], fusil.python.values.BUFFER_OBJECTS,
-                      "genBufferObject should pick from BUFFER_OBJECTS.")
+        self.assertIn(
+            result[0],
+            fusil.python.values.BUFFER_OBJECTS,
+            "genBufferObject should pick from BUFFER_OBJECTS.",
+        )
 
     def test_genTricky(self):
         result = self.arg_gen.genTricky()
@@ -511,8 +645,19 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         # Just check it's one of the predefined strings, actual behavior is too complex for unit test here
         predefined_tricky = [
-            "liar1", "liar2", "lambda *args, **kwargs: 1/0", "int", "type", "object()",
-            "[[[[[[[[[[[[[[]]]]]]]]]]]]]]", "MagicMock()", "Evil()", "MagicMock", "Evil", "Liar1", "Liar2",
+            "liar1",
+            "liar2",
+            "lambda *args, **kwargs: 1/0",
+            "int",
+            "type",
+            "object()",
+            "[[[[[[[[[[[[[[]]]]]]]]]]]]]]",
+            "MagicMock()",
+            "Evil()",
+            "MagicMock",
+            "Evil",
+            "Liar1",
+            "Liar2",
         ]
         self.assertIn(result[0], predefined_tricky)
 
@@ -522,22 +667,32 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         expr_str = result[0]
         # Example: "weird_classes['weird_list']"
-        self.assertTrue(expr_str.startswith("weird_classes['") and expr_str.endswith("']"),
-                        f"genWeirdClass expression '{expr_str}' has incorrect format.")
-        weird_class_key = expr_str[len("weird_classes['"):-len("']")]
-        self.assertIn(weird_class_key, fusil.python.tricky_weird.weird_names,
-                      f"Key '{weird_class_key}' from genWeirdClass not in tricky_weird.weird_names")
+        self.assertTrue(
+            expr_str.startswith("weird_classes['") and expr_str.endswith("']"),
+            f"genWeirdClass expression '{expr_str}' has incorrect format.",
+        )
+        weird_class_key = expr_str[len("weird_classes['") : -len("']")]
+        self.assertIn(
+            weird_class_key,
+            fusil.python.tricky_weird.weird_names,
+            f"Key '{weird_class_key}' from genWeirdClass not in tricky_weird.weird_names",
+        )
 
     def test_genWeirdInstance(self):
         result = self.arg_gen.genWeirdInstance()
         self.assertIsListOfStrings(result, "genWeirdInstance")
         self.assertEqual(len(result), 1)
         expr_str = result[0]
-        self.assertTrue(expr_str.startswith("weird_instances['") and expr_str.endswith("']"),
-                        f"genWeirdInstance expression '{expr_str}' has incorrect format.")
-        weird_instance_key = expr_str[len("weird_instances['"):-len("']")]
-        self.assertIn(weird_instance_key, fusil.python.tricky_weird.weird_instance_names,
-                      f"Key '{weird_instance_key}' from genWeirdInstance not in tricky_weird.weird_instance_names")
+        self.assertTrue(
+            expr_str.startswith("weird_instances['") and expr_str.endswith("']"),
+            f"genWeirdInstance expression '{expr_str}' has incorrect format.",
+        )
+        weird_instance_key = expr_str[len("weird_instances['") : -len("']")]
+        self.assertIn(
+            weird_instance_key,
+            fusil.python.tricky_weird.weird_instance_names,
+            f"Key '{weird_instance_key}' from genWeirdInstance not in tricky_weird.weird_instance_names",
+        )
 
     def test_genRawString(self):
         result = self.arg_gen.genRawString()
@@ -545,22 +700,27 @@ class TestArgumentGenerator(unittest.TestCase):
         self.assertEqual(len(result), 1)
         val_str = result[0]
         self.assertTrue(
-            (val_str.startswith('r"') and val_str.endswith('"')) or \
-            (val_str.startswith("r'") and val_str.endswith("'")),
-            f"genRawString output '{val_str}' should be a raw string literal (r'...' or r\"...\")."
+            (val_str.startswith('r"') and val_str.endswith('"'))
+            or (val_str.startswith("r'") and val_str.endswith("'")),
+            f"genRawString output '{val_str}' should be a raw string literal (r'...' or r\"...\").",
         )
         # Check if it's a valid Python string expression (compiles as a raw string)
         try:
-            compile(val_str, '<string>', 'eval')
+            compile(val_str, "<string>", "eval")
         except SyntaxError:
-            self.fail(f"genRawString produced a syntactically invalid raw string literal: {val_str}")
+            self.fail(
+                f"genRawString produced a syntactically invalid raw string literal: {val_str}"
+            )
 
     def test_genSurrogates(self):
         result = self.arg_gen.genSurrogates()
         self.assertIsListOfStrings(result, "genSurrogates")
         self.assertEqual(len(result), 1)
-        self.assertIn(result[0], fusil.python.values.SURROGATES,
-                      "genSurrogates should pick from fusil.python.values.SURROGATES.")
+        self.assertIn(
+            result[0],
+            fusil.python.values.SURROGATES,
+            "genSurrogates should pick from fusil.python.values.SURROGATES.",
+        )
 
     def test_genWeirdType(self):
         result = self.arg_gen.genWeirdType()
@@ -570,15 +730,20 @@ class TestArgumentGenerator(unittest.TestCase):
         # Example: "list[weird_classes['weird_someclass']]"
         # We need to check if it matches the pattern: type_name[weird_classes['class_name']]
         match = re.match(r"(\w+)\[weird_classes\['(\w+)'\]\]", expr_str)
-        self.assertIsNotNone(match,
-                             f"genWeirdType expression '{expr_str}' has incorrect format.")
+        self.assertIsNotNone(match, f"genWeirdType expression '{expr_str}' has incorrect format.")
         if match:
             type_name_generated = match.group(1)
             weird_class_key_generated = match.group(2)
-            self.assertIn(type_name_generated, fusil.python.tricky_weird.type_names,
-                          f"Type name '{type_name_generated}' from genWeirdType not in tricky_weird.type_names.")
-            self.assertIn(weird_class_key_generated, fusil.python.tricky_weird.weird_names,
-                          f"Key '{weird_class_key_generated}' from genWeirdType not in tricky_weird.weird_names.")
+            self.assertIn(
+                type_name_generated,
+                fusil.python.tricky_weird.type_names,
+                f"Type name '{type_name_generated}' from genWeirdType not in tricky_weird.type_names.",
+            )
+            self.assertIn(
+                weird_class_key_generated,
+                fusil.python.tricky_weird.weird_names,
+                f"Key '{weird_class_key_generated}' from genWeirdType not in tricky_weird.weird_names.",
+            )
 
     def test_genWeirdUnion(self):
         result = self.arg_gen.genWeirdUnion()
@@ -589,83 +754,124 @@ class TestArgumentGenerator(unittest.TestCase):
         # This regex is a bit more complex due to the optional type_name[] part
         # It tries to match the general structure.
         # type_name[weird_classes['weird_class1']] | weird_classes['weird_class2'] | big_union
-        pattern = r"(\w+)\[weird_classes\['(\w+)'\]\]\s*\|\s*weird_classes\['(\w+)'\]\s*\|\s*big_union"
+        pattern = (
+            r"(\w+)\[weird_classes\['(\w+)'\]\]\s*\|\s*weird_classes\['(\w+)'\]\s*\|\s*big_union"
+        )
         match = re.match(pattern, expr_str)
 
-        self.assertIsNotNone(match,
-                             f"genWeirdUnion expression '{expr_str}' did not match expected format.")
+        self.assertIsNotNone(
+            match, f"genWeirdUnion expression '{expr_str}' did not match expected format."
+        )
 
         if match:
             type_name_generated = match.group(1)
             weird_class_key1_generated = match.group(2)
             weird_class_key2_generated = match.group(3)
 
-            self.assertIn(type_name_generated, fusil.python.tricky_weird.type_names,
-                          f"Type name '{type_name_generated}' from genWeirdUnion not in tricky_weird.type_names.")
-            self.assertIn(weird_class_key1_generated, fusil.python.tricky_weird.weird_names,
-                          f"Key 1 '{weird_class_key1_generated}' from genWeirdUnion not in tricky_weird.weird_names.")
-            self.assertIn(weird_class_key2_generated, fusil.python.tricky_weird.weird_names,
-                          f"Key 2 '{weird_class_key2_generated}' from genWeirdUnion not in tricky_weird.weird_names.")
+            self.assertIn(
+                type_name_generated,
+                fusil.python.tricky_weird.type_names,
+                f"Type name '{type_name_generated}' from genWeirdUnion not in tricky_weird.type_names.",
+            )
+            self.assertIn(
+                weird_class_key1_generated,
+                fusil.python.tricky_weird.weird_names,
+                f"Key 1 '{weird_class_key1_generated}' from genWeirdUnion not in tricky_weird.weird_names.",
+            )
+            self.assertIn(
+                weird_class_key2_generated,
+                fusil.python.tricky_weird.weird_names,
+                f"Key 2 '{weird_class_key2_generated}' from genWeirdUnion not in tricky_weird.weird_names.",
+            )
 
     # --- Testing create_complex_argument composition ---
     @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
     def test_create_complex_argument_with_numpy(self):
         self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
-        self.assertTrue(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+        self.assertTrue(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
+        )
 
         # Probabilistic check that genTrickyNumpy can be chosen
         numpy_seen = False
         for _ in range(100):  # Increase iterations if this is flaky
             # Temporarily make genTrickyNumpy the only choice to ensure it's picked
-            with patch.object(self.arg_gen, 'complex_argument_generators', (self.arg_gen.genTrickyNumpy,)):
+            with patch.object(
+                self.arg_gen, "complex_argument_generators", (self.arg_gen.genTrickyNumpy,)
+            ):
                 result = self.arg_gen.create_complex_argument()
                 if "numpy" in "".join(result) or any(
-                        name in "".join(result) for name in fusil.python.tricky_weird.tricky_numpy_names):
+                    name in "".join(result) for name in fusil.python.tricky_weird.tricky_numpy_names
+                ):
                     numpy_seen = True
                     break
-        self.assertTrue(numpy_seen,
-                        "create_complex_argument with numpy enabled did not seem to produce numpy output after forced choice.")
+        self.assertTrue(
+            numpy_seen,
+            "create_complex_argument with numpy enabled did not seem to produce numpy output after forced choice.",
+        )
         # Restore original setup for other tests
         self.setUp()
 
     def test_create_complex_argument_without_numpy_opt(self):
         self._setup_arg_gen(use_numpy=True, no_numpy_opt=True)  # no_numpy option is True
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
+        )
 
     def test_create_complex_argument_without_numpy_init(self):
         self._setup_arg_gen(use_numpy=False, no_numpy_opt=False)  # use_numpy init flag is False
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyNumpy', 'complex_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
+        )
 
     def test_create_complex_argument_with_templates(self):
         if fusil.python.argument_generator.TEMPLATES:
             self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)
-            self.assertTrue(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+            self.assertTrue(
+                self._check_if_generator_in_tuple(
+                    "genTrickyTemplate", "complex_argument_generators"
+                )
+            )
 
             # Probabilistic check
             template_seen = False
             # Temporarily make genTrickyTemplate the only choice
-            with patch.object(self.arg_gen, 'complex_argument_generators', (self.arg_gen.genTrickyTemplate,)):
+            with patch.object(
+                self.arg_gen, "complex_argument_generators", (self.arg_gen.genTrickyTemplate,)
+            ):
                 with patch("fusil.python.argument_generator.randint", lambda *args: 1):
-                    assert self.arg_gen.complex_argument_generators == (self.arg_gen.genTrickyTemplate,)
+                    assert self.arg_gen.complex_argument_generators == (
+                        self.arg_gen.genTrickyTemplate,
+                    )
                     for _ in range(10):  # Should be quick if it's the only choice
                         result = self.arg_gen.create_complex_argument()
-                        if any(tmpl_part in "".join(result) for tmpl_part in ["Template(", "Interpolation("]):
+                        if any(
+                            tmpl_part in "".join(result)
+                            for tmpl_part in ["Template(", "Interpolation("]
+                        ):
                             template_seen = True
                             break
-            self.assertTrue(template_seen,
-                            "create_complex_argument with templates enabled did not seem to produce template output after forced choice.")
+            self.assertTrue(
+                template_seen,
+                "create_complex_argument with templates enabled did not seem to produce template output after forced choice.",
+            )
             self.setUp()  # Restore
         else:
             self.skipTest(
-                "Template strings (TEMPLATES) not available for testing genTrickyTemplate with create_complex_argument.")
+                "Template strings (TEMPLATES) not available for testing genTrickyTemplate with create_complex_argument."
+            )
 
     def test_create_complex_argument_without_templates_opt(self):
         self._setup_arg_gen(use_templates=True, no_tstrings_opt=True)
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyTemplate", "complex_argument_generators")
+        )
 
     def test_create_complex_argument_without_templates_init(self):
         self._setup_arg_gen(use_templates=False, no_tstrings_opt=False)
-        self.assertFalse(self._check_if_generator_in_tuple('genTrickyTemplate', 'complex_argument_generators'))
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genTrickyTemplate", "complex_argument_generators")
+        )
 
 
 class TestArgumentGeneratorCoverage(unittest.TestCase):
@@ -682,20 +888,26 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         # Mock the parent PythonSource object
         self.mock_python_source = MagicMock()
         self.mock_python_source.options = self.config
-        self.mock_python_source.filenames = ['/tmp/dummy_file.txt']
-        self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(self.mock_python_source, [""])
+        self.mock_python_source.filenames = ["/tmp/dummy_file.txt"]
+        self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(
+            self.mock_python_source, [""]
+        )
 
-    @patch.dict(sys.modules, {'h5py': None})
+    @patch.dict(sys.modules, {"h5py": None})
     def test_init_without_h5py(self):
         """
         Covers lines 46-47, 53-55:
         Tests that H5PyArgumentGenerator is not created if h5py is not installed.
         """
-        arg_gen_no_h5py = fusil.python.argument_generator.ArgumentGenerator(self.mock_python_source, [""], use_h5py=False)
-        self.assertIsNone(arg_gen_no_h5py.h5py_argument_generator,
-                          "h5py_argument_generator should be None when h5py is not available.")
+        arg_gen_no_h5py = fusil.python.argument_generator.ArgumentGenerator(
+            self.mock_python_source, [""], use_h5py=False
+        )
+        self.assertIsNone(
+            arg_gen_no_h5py.h5py_argument_generator,
+            "h5py_argument_generator should be None when h5py is not available.",
+        )
 
-    @patch('fusil.python.argument_generator.choice')
+    @patch("fusil.python.argument_generator.choice")
     def test_create_complex_argument_with_file_arg(self, mock_choice):
         """
         Covers lines 376-381:
@@ -710,7 +922,7 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         # The result should be a list containing the filename string
         self.assertEqual(result_expr, ["'/tmp/dummy_file.txt'"])
 
-    @patch('fusil.python.argument_generator.choice')
+    @patch("fusil.python.argument_generator.choice")
     def test_genTricky_lambda_with_error(self, mock_choice):
         """
         Covers lines 192-193: Tests the branch that returns a lambda
@@ -730,8 +942,10 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         with self.assertRaises(ZeroDivisionError):
             func()
 
-    @patch('fusil.python.argument_generator.randint', side_effect=[10] * 18 + [10, 3, 9])  # range=10, sample_size=3, if_check=9
-    @patch('random.choice')
+    @patch(
+        "fusil.python.argument_generator.randint", side_effect=[10] * 18 + [10, 3, 9]
+    )  # range=10, sample_size=3, if_check=9
+    @patch("random.choice")
     def test_genRawString_with_special_chars(self, mock_choice, mock_randint):
         """
         Covers lines 231-232: Tests the branch in genRawString that adds
@@ -752,7 +966,9 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         self.assertTrue(result_expr.startswith('r"'))
         self.assertTrue(result_expr.endswith('"'))
 
-    @patch('fusil.python.argument_generator.randint', side_effect=[2, 5])  # nb_item=5, same_type=2 (True)
+    @patch(
+        "fusil.python.argument_generator.randint", side_effect=[2, 5]
+    )  # nb_item=5, same_type=2 (True)
     def test_genDict_with_same_type_items(self, mock_randint):
         """
         Covers lines 377-384: Tests the 'if same_type' branch in
@@ -762,7 +978,9 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         # The second randint ensures same_type is True (2 != 1).
 
         # We need to mock the underlying generators to produce predictable output
-        self.arg_gen.create_hashable_argument = MagicMock(side_effect=["'key1'", "'key2'", "'key3'", "'key4'", "'key5'"])
+        self.arg_gen.create_hashable_argument = MagicMock(
+            side_effect=["'key1'", "'key2'", "'key3'", "'key4'", "'key5'"]
+        )
         self.arg_gen.create_simple_argument = MagicMock(return_value=["123"])
 
         result_lines = self.arg_gen.genDict()
@@ -782,5 +1000,5 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
             self.fail(f"genDict() produced an invalid dict literal: {full_expr} | Error: {e}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

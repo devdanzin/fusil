@@ -25,14 +25,12 @@ weird_names = list(weird_classes.weird_classes.keys())
 tricky_objects_dict = tricky_objects.__dict__
 
 tricky_objects_names = [
-    key for key in tricky_objects_dict.keys()
-    if isinstance(key, str) and not key.startswith('_')
+    key for key in tricky_objects_dict.keys() if isinstance(key, str) and not key.startswith("_")
 ]
 
-tricky_numpy_names = [
-    name for name in dir(tricky_numpy)
-    if name.startswith('numpy_')
-] if tricky_numpy else []
+tricky_numpy_names = (
+    [name for name in dir(tricky_numpy) if name.startswith("numpy_")] if tricky_numpy else []
+)
 
 weird_classes = pathlib.Path(weird_classes.__file__).read_text()
 tricky_typing = pathlib.Path(tricky_typing.__file__).read_text()

@@ -169,7 +169,7 @@ class ListAllModules:
                 filename = None
 
             module_data = self._get_module_metadata(name)
-            search_path = finder.path if hasattr(finder, 'path') else ""
+            search_path = finder.path if hasattr(finder, "path") else ""
 
             if not self._is_valid_module(
                 name,
@@ -178,7 +178,7 @@ class ListAllModules:
                 module_data.get("path"),
                 module_data.get("package"),
                 prefix,
-                search_path=search_path
+                search_path=search_path,
             ):
                 if self.verbose:
                     print(f"SKIPPED {name}", file=sys.stderr)

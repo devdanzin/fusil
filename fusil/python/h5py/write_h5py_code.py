@@ -18,7 +18,9 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fusil.python.write_python_code import WritePythonCode # Assuming WriteH5PyCode's parent is WritePythonCode
+    from fusil.python.write_python_code import (
+        WritePythonCode,
+    )  # Assuming WriteH5PyCode's parent is WritePythonCode
 
 
 def _h5_unique_name(base="item"):

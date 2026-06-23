@@ -13,6 +13,7 @@ them — the write just fails and exercises the error path), and they are regene
 run, so even if a privileged child does truncate one, only a throwaway file is lost and it
 comes back next session.
 """
+
 from __future__ import annotations
 
 import os

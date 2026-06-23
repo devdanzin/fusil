@@ -4,13 +4,14 @@ import os
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
     # numpy is optional; when absent the whole suite skips (see skipIf below) rather
     # than erroring on import.
     import numpy
+
     # --- Import all the objects to be tested ---
     from fusil.python.samples import tricky_numpy
 
@@ -67,14 +68,14 @@ class TestTrickyNumpy(unittest.TestCase):
         """
         simple_struct = tricky_numpy.numpy_structured_array_simple
         self.assertEqual(simple_struct.shape, (2,))
-        self.assertEqual(simple_struct.dtype.names, ('id', 'name', 'score'))
-        self.assertEqual(simple_struct[1]['name'], 'Bob')
+        self.assertEqual(simple_struct.dtype.names, ("id", "name", "score"))
+        self.assertEqual(simple_struct[1]["name"], "Bob")
 
         nested_struct = tricky_numpy.numpy_structured_array_nested
         self.assertEqual(nested_struct.shape, (2,))
-        self.assertEqual(nested_struct.dtype.names, ('coords', 'label'))
-        self.assertEqual(nested_struct['coords'].dtype.names, ('x', 'y'))
-        self.assertEqual(nested_struct[0]['coords']['y'], 2.0)
+        self.assertEqual(nested_struct.dtype.names, ("coords", "label"))
+        self.assertEqual(nested_struct["coords"].dtype.names, ("x", "y"))
+        self.assertEqual(nested_struct[0]["coords"]["y"], 2.0)
 
     def test_memory_layout_and_flags(self):
         """
@@ -112,5 +113,5 @@ class TestTrickyNumpy(unittest.TestCase):
         self.assertEqual(tricky_numpy.numpy_array_with_zero_size_dim.shape, (5, 0, 5))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

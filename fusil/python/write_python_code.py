@@ -50,6 +50,7 @@ _ARG_GEN_USE_H5PY = False
 if _ARG_GEN_USE_NUMPY:
     try:
         import h5py
+
         logger.info("h5py is available.")
         _ARG_GEN_USE_H5PY = True
         from fusil.python.h5py.write_h5py_code import WriteH5PyCode
@@ -134,7 +135,9 @@ class WritePythonCode(WriteCode):
                 f"Module {self.module_name} has no function, no class, and no object to fuzz!"
             )
 
-    def write_print_to_stderr(self, level: int, arguments_str: str, return_str: bool = False) -> str:
+    def write_print_to_stderr(
+        self, level: int, arguments_str: str, return_str: bool = False
+    ) -> str:
         """
         Writes a print statement to stderr and now also returns the
         statement as a string.
@@ -206,8 +209,7 @@ class WritePythonCode(WriteCode):
                 if isinstance(attr, ModuleType) or type(attr) in TRIVIAL_TYPES:
                     continue
                 if (
-                    not self.options.fuzz_exceptions
-                    and isinstance(attr, BaseException)
+                    not self.options.fuzz_exceptions and isinstance(attr, BaseException)
                     # and attr.__class__.__name__ in _EXCEPTION_NAMES
                 ):
                     continue
@@ -307,7 +309,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         if self.options.oom_fuzz:
-            self.write_block(0, '''
+            self.write_block(
+                0,
+                """
                 import faulthandler
                 faulthandler.enable()
                 try:
@@ -328,7 +332,8 @@ class WritePythonCode(WriteCode):
                 _OOM_DISABLE = 2_000_000_000
                 if _OOM_AVAILABLE:
                     _set_nomemory(_OOM_DISABLE, 0)
-            ''')
+            """,
+            )
             self.emptyLine()
 
     def _write_tricky_definitions(self) -> None:
@@ -392,10 +397,7 @@ class WritePythonCode(WriteCode):
 
         # Add plugin-provided definitions
         if self.plugin_manager:
-            plugin_defs = self.plugin_manager.get_definitions(
-                self.options,
-                self.module_name
-            )
+            plugin_defs = self.plugin_manager.get_definitions(self.options, self.module_name)
             for definition_code in plugin_defs:
                 self.write(0, "# --- Plugin-provided definitions ---")
                 self.write(0, definition_code)
@@ -413,7 +415,9 @@ class WritePythonCode(WriteCode):
         self.write(0, "# This function calls its target in a loop to make it 'hot' for the JIT.")
         self.write(0, "def jit_harness(func, iterations, *args, **kwargs):")
         self.addLevel(1)
-        self.write_print_to_stderr(0, f'f"[+] Warming up {{func.__name__}} for {{iterations}} iterations..."')
+        self.write_print_to_stderr(
+            0, f'f"[+] Warming up {{func.__name__}} for {{iterations}} iterations..."'
+        )
         self.write(0, "for _ in range(iterations):")
         self.addLevel(1)
         self.write(0, "func(*args, **kwargs)")
@@ -422,7 +426,9 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)
         self.emptyLine()
 
-        self.write(0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers.")
+        self.write(
+            0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers."
+        )
         self.write(0, "import math")
         self.write(0, "import types")
         self.write(0, "def compare_results(a, b):")
@@ -443,7 +449,10 @@ class WritePythonCode(WriteCode):
         self.write(0, "return real_match and imag_match")
         self.restoreLevel(self.base_level - 1)
 
-        self.write(0, "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):")
+        self.write(
+            0,
+            "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):",
+        )
         self.write(1, "return True")
 
         self.write(0, "if isinstance(a, object) and isinstance(b, object):")
@@ -465,7 +474,7 @@ class WritePythonCode(WriteCode):
             f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
         )
         self.write(0, 'message = f"[{prefix}] {func_display_name}"')
-        self.write(0, 'if verbose:')
+        self.write(0, "if verbose:")
         self.write_print_to_stderr(1, "message")
         self.write(0, "result = SENTINEL_VALUE")
         self.write(0, "try:")
@@ -481,7 +490,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "except Exception as e_repr:")
         self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
         self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
-        self.write(0, 'if verbose:')
+        self.write(0, "if verbose:")
         self.write_print_to_stderr(
             1,
             'f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}"',
@@ -489,7 +498,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "result = SENTINEL_VALUE")
         self.restoreLevel(current_level + 1)
 
-        self.write(0, 'if verbose:')
+        self.write(0, "if verbose:")
         self.write_print_to_stderr(1, 'f"[{prefix}] -explicit garbage collection-"')
         self.write(0, "collect()")
 
@@ -511,7 +520,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         if self.options.oom_fuzz:
-            self.write_block(0, f'''
+            self.write_block(
+                0,
+                f"""
                 _OOM_MAX_START = {self.options.oom_max_start}
                 _OOM_VERBOSE = {bool(self.options.oom_verbose)}
 
@@ -546,11 +557,14 @@ class WritePythonCode(WriteCode):
                             print("[OOM] SystemError in " + label, file=stderr)
                         except BaseException:
                             pass
-            ''')
+            """,
+            )
             self.emptyLine()
 
         if self.options.oom_fuzz and self.options.oom_seq:
-            self.write_block(0, f'''
+            self.write_block(
+                0,
+                f"""
                 _OOM_WINDOW = {self.options.oom_window}
 
                 def oom_run(label, thunk):
@@ -587,7 +601,8 @@ class WritePythonCode(WriteCode):
                             print("[OOM-SEQ] SystemError in " + label, file=stderr)
                         except BaseException:
                             pass
-            ''')
+            """,
+            )
             self.emptyLine()
 
     def _write_main_fuzzing_logic(self) -> None:
@@ -602,14 +617,15 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         self.write(0, "\n# FUSIL_BOILERPLATE_END\n")
-        self.write(0,
-                   dedent(
-            """
+        self.write(
+            0,
+            dedent(
+                """
             import sys
             from random import choice, randint, random, sample
             from sys import stderr, path as sys_path
             """
-                   )
+            ),
         )
         self.emptyLine()
 
@@ -619,9 +635,7 @@ class WritePythonCode(WriteCode):
                 f'"--- Fuzzing {len(self.module_functions)} functions in {self.module_name} ---"',
             )
             n_calls = (
-                self.options.oom_calls
-                if self.options.oom_fuzz
-                else self.options.functions_number
+                self.options.oom_calls if self.options.oom_fuzz else self.options.functions_number
             )
             for i in range(n_calls):
                 prefix = f"f{i + 1}"
@@ -733,7 +747,7 @@ class WritePythonCode(WriteCode):
         )
         if class_name_str in OBJECT_BLACKLIST:
             self.write_print_to_stderr(
-            0, f'"[{prefix}] Skipping blacklisted class: {class_name_str}"'
+                0, f'"[{prefix}] Skipping blacklisted class: {class_name_str}"'
             )
             return
         instance_var_name = (
@@ -764,7 +778,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         if self.options.jit_fuzz:
-            self.jit_writer.generate_stateful_object_scenario(prefix, instance_var_name, class_name_str, class_type)
+            self.jit_writer.generate_stateful_object_scenario(
+                prefix, instance_var_name, class_name_str, class_type
+            )
         else:
             self._dispatch_fuzz_on_instance(
                 current_prefix=f"{prefix}_{class_name_str.lower()}_ops",
@@ -1061,7 +1077,6 @@ class WritePythonCode(WriteCode):
                     arg_line_part + (last_char if arg_line_part == arg_lines[-1] else ""),
                 )
 
-
     def _generate_oom_function_call(
         self, prefix: str, func_name: str, func_obj: Callable[..., Any]
     ) -> None:
@@ -1127,11 +1142,13 @@ class WritePythonCode(WriteCode):
                 continue
             min_arg, max_arg = get_arg_number(func_obj, func_name, 1)
             num_args = randint(min_arg, max_arg)
-            steps.append((
-                f"s{j + 1}:{func_name}",
-                f'getattr(fuzz_target_module, "{func_name}", None)',
-                num_args,
-            ))
+            steps.append(
+                (
+                    f"s{j + 1}:{func_name}",
+                    f'getattr(fuzz_target_module, "{func_name}", None)',
+                    num_args,
+                )
+            )
             names.append(func_name)
         if not steps:
             return
@@ -1139,9 +1156,7 @@ class WritePythonCode(WriteCode):
         self.write(0, f"# OOM sequence: {' > '.join(names)}")
         self._write_oom_sequence(f"_oom_seq_{prefix}", seq_label, steps)
 
-    def _generate_oom_class_fuzzing(
-        self, prefix: str, class_name: str, class_obj: type
-    ) -> None:
+    def _generate_oom_class_fuzzing(self, prefix: str, class_name: str, class_obj: type) -> None:
         """Emits an OOM sweep over a class constructor and, on a live instance, its methods.
 
         Phase 2 of OOM fuzzing: constructors and methods reach allocation paths the
@@ -1155,7 +1170,9 @@ class WritePythonCode(WriteCode):
         ctor_args = class_arg_number(class_name, class_obj)
         ctor_label = f"{prefix}:{self.module_name}.{class_name}"
         self.write(0, f"# OOM sweep: {class_name}() constructor")
-        self.write(0, f'oom_call("{ctor_label}", getattr(fuzz_target_module, "{class_name}", None),')
+        self.write(
+            0, f'oom_call("{ctor_label}", getattr(fuzz_target_module, "{class_name}", None),'
+        )
         self._write_arguments_for_call_lines(ctor_args, 1)
         self.write(0, ")")
         self.emptyLine()
@@ -1191,11 +1208,13 @@ class WritePythonCode(WriteCode):
                 m_obj = methods[m_name]
                 min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
                 num_args = randint(min_arg, max_arg)
-                steps.append((
-                    f"m{j + 1}:{m_name}",
-                    f'getattr({inst}, "{m_name}", None)',
-                    num_args,
-                ))
+                steps.append(
+                    (
+                        f"m{j + 1}:{m_name}",
+                        f'getattr({inst}, "{m_name}", None)',
+                        num_args,
+                    )
+                )
                 mnames.append(m_name)
             seq_label = f"{prefix}:{self.module_name}.{class_name}[" + ">".join(mnames) + "]"
             self.write(0, f"# OOM sequence on {class_name}: {' > '.join(mnames)}")
@@ -1376,7 +1395,6 @@ class WritePythonCode(WriteCode):
             self.addLevel(-1)
             self.emptyLine()
 
-
     def _write_concurrency_finalization(self) -> None:
         """Writes code to start/join threads and run asyncio tasks."""
         if self.enable_threads:
@@ -1433,7 +1451,7 @@ class WritePythonCode(WriteCode):
 
         # Check for active plugin mode
         active_mode = None
-        if hasattr(self, 'plugin_manager') and self.plugin_manager:
+        if hasattr(self, "plugin_manager") and self.plugin_manager:
             active_mode = self.plugin_manager.get_active_mode(self.options)
 
         if active_mode:

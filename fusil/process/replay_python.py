@@ -155,9 +155,7 @@ class WriteReplayScript(WriteCode):
         self.write(level, code)
 
     def safetyConfirmation(self):
-        self.writePrint(
-            0, "!!!WARNING!!! The fuzzer will run as user %s and group %s,", "uid, gid"
-        )
+        self.writePrint(0, "!!!WARNING!!! The fuzzer will run as user %s and group %s,", "uid, gid")
         self.writePrint(
             0,
             "!!!WARNING!!! and may remove arbitrary files and kill arbitrary processes.",
@@ -226,9 +224,7 @@ class WriteReplayScript(WriteCode):
     def parseOptions(self):
         self.write(0, "parser = OptionParser()")
         self.write(0, 'parser.add_option("-q", "--quiet",')
-        self.write(
-            1, 'help="Be quiet (don\'t write debug messages)", action="store_true")'
-        )
+        self.write(1, 'help="Be quiet (don\'t write debug messages)", action="store_true")')
         self.write(0, 'parser.add_option("-u", "--user",')
         self.write(1, 'help="Don\'t change user/group", action="store_true")')
         self.write(0, 'parser.add_option("-l", "--limit",')
@@ -243,9 +239,7 @@ class WriteReplayScript(WriteCode):
         self.write(0, 'parser.add_option("--valgrind",')
         self.write(1, ' help="Run command in valgrind", action="store_true")')
         self.write(0, 'parser.add_option("--ptrace",')
-        self.write(
-            1, ' help="Run command in the python-ptrace debugger", action="store_true")'
-        )
+        self.write(1, ' help="Run command in the python-ptrace debugger", action="store_true")')
         self.write(0, "options, arguments = parser.parse_args()")
         self.write(0, "if arguments:")
         self.write(1, "parser.print_help()")
@@ -286,9 +280,7 @@ class WriteReplayScript(WriteCode):
         self.write(1, "'-x',")
         self.write(1, "filename,")
         self.write(0, "]")
-        self.debug(
-            0, "Execute %r in environment %r", "' '.join(gdb_arguments)", "gdb_env"
-        )
+        self.debug(0, "Execute %r in environment %r", "' '.join(gdb_arguments)", "gdb_env")
         self.write(0, "execvpe(gdb_arguments[0], gdb_arguments, gdb_env)")
 
     def runCommand(self):
@@ -432,17 +424,11 @@ class WriteReplayScript(WriteCode):
         self.writeFunction("debug(message)", self.writeDebugFunction)
         self.writeFunction("parseOptions()", self.parseOptions)
         self.writeFunction("safetyConfirmation(uid, gid)", self.safetyConfirmation)
-        self.writeFunction(
-            "changeUserGroup(uid, gid)", self.changeUserGroup, process, config
-        )
+        self.writeFunction("changeUserGroup(uid, gid)", self.changeUserGroup, process, config)
         self.writeFunction("limitResources(options)", self.limitResources)
-        self.writeFunction(
-            "writeGdbCommands(arguments, gdb_env, env)", self.writeGdbCommands
-        )
+        self.writeFunction("writeGdbCommands(arguments, gdb_env, env)", self.writeGdbCommands)
         self.writeFunction("runGdb(gdb_program, arguments, env)", self.runGdb)
-        self.writeFunction(
-            "runCommand(arguments, program_env, options)", self.runCommand
-        )
+        self.writeFunction("runCommand(arguments, program_env, options)", self.runCommand)
         self.writeFunction("main()", self.writeMain)
         self.callMain()
         self.close()

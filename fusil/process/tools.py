@@ -22,6 +22,7 @@ except ImportError:
     def nice(level):
         pass
 
+
 def _setrlimit(key, value, change_hard):
     try:
         soft, hard = getrlimit(key)
@@ -58,9 +59,14 @@ def target_is_asan(program):
         return False
     try:
         out = run(
-            [program, "-c",
-             "import sysconfig; print(sysconfig.get_config_var('CONFIG_ARGS') or '')"],
-            capture_output=True, text=True, timeout=15,
+            [
+                program,
+                "-c",
+                "import sysconfig; print(sysconfig.get_config_var('CONFIG_ARGS') or '')",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
         ).stdout.lower()
         if "sanitiz" in out or "address-sanitizer" in out:
             return True
@@ -111,9 +117,7 @@ def displayProcessStatus(logger, status, prefix="Process"):
         logger.warning("%s exited with error code: %s" % (prefix, status))
 
 
-def runCommand(
-    logger, command, stdin=False, stdout=True, options=None, raise_error=True
-):
+def runCommand(logger, command, stdin=False, stdout=True, options=None, raise_error=True):
     """
     Run specified command:
      - logger is an object with a info() method
@@ -147,7 +151,7 @@ def runCommand(
     elif stdout is not True:
         options["stdout"] = stdout
         options["stderr"] = STDOUT
-    if ("close_fds" not in options):
+    if "close_fds" not in options:
         options["close_fds"] = True
 
     process = Popen(command, **options)

@@ -70,9 +70,18 @@ def _make_options(oom_fuzz, oom_verbose=False):
     return o
 
 
-def _generate(oom_fuzz, oom_verbose=False, module=math, module_name="math",
-              oom_classes=0, oom_methods=0, test_private=False,
-              oom_seq=False, oom_seq_len=3, oom_window=1):
+def _generate(
+    oom_fuzz,
+    oom_verbose=False,
+    module=math,
+    module_name="math",
+    oom_classes=0,
+    oom_methods=0,
+    test_private=False,
+    oom_seq=False,
+    oom_seq_len=3,
+    oom_window=1,
+):
     """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
     options = _make_options(oom_fuzz, oom_verbose)
@@ -88,8 +97,13 @@ def _generate(oom_fuzz, oom_verbose=False, module=math, module_name="math",
     os.close(fd)
     try:
         writer = WritePythonCode(
-            parent, path, module, module_name,
-            threads=False, _async=False, plugin_manager=None,
+            parent,
+            path,
+            module,
+            module_name,
+            threads=False,
+            _async=False,
+            plugin_manager=None,
         )
         writer.generate_fuzzing_script()
         with open(path) as fp:
@@ -161,13 +175,14 @@ class TestOOMClassFuzzGeneration(unittest.TestCase):
     """Phase 2: constructor + method sweeps for module classes (json has classes)."""
 
     def test_constructor_and_method_sweeps_emitted(self):
-        src = _generate(oom_fuzz=True, module=json, module_name="json",
-                        oom_classes=2, oom_methods=3)
+        src = _generate(
+            oom_fuzz=True, module=json, module_name="json", oom_classes=2, oom_methods=3
+        )
         ast.parse(src)  # valid Python
         # A constructor sweep: the class object is the swept callable.
         self.assertIn("() constructor", src)
         self.assertIn('oom_call("oc1:json.', src)
-        self.assertIn('getattr(fuzz_target_module, ', src)
+        self.assertIn("getattr(fuzz_target_module, ", src)
         # A live instance is built once (outside the sweep) for method fuzzing.
         self.assertIn('callFunc("oc1_init"', src)
         self.assertIn("is not SENTINEL_VALUE:", src)
@@ -177,8 +192,9 @@ class TestOOMClassFuzzGeneration(unittest.TestCase):
         self.assertRegex(src, r"getattr\(oom_inst_oc1_\w+, ")
 
     def test_oom_classes_zero_disables_class_fuzzing(self):
-        src = _generate(oom_fuzz=True, module=json, module_name="json",
-                        oom_classes=0, oom_methods=3)
+        src = _generate(
+            oom_fuzz=True, module=json, module_name="json", oom_classes=0, oom_methods=3
+        )
         ast.parse(src)
         self.assertNotIn("constructor", src)
         self.assertNotIn("oom_inst_", src)
@@ -188,9 +204,10 @@ class TestOOMClassFuzzGeneration(unittest.TestCase):
     def test_method_target_uses_safe_getattr_default(self):
         # getattr(inst, "m", None) + the harness's `func is None` guard means a
         # missing bound method degrades to a no-op sweep, never a NameError/raise.
-        src = _generate(oom_fuzz=True, module=json, module_name="json",
-                        oom_classes=1, oom_methods=2)
-        self.assertIn(", None)", src)               # safe getattr default on method
+        src = _generate(
+            oom_fuzz=True, module=json, module_name="json", oom_classes=1, oom_methods=2
+        )
+        self.assertIn(", None)", src)  # safe getattr default on method
         self.assertIn("if not _OOM_AVAILABLE or func is None:", src)
 
 
@@ -204,7 +221,7 @@ class TestOOMSeqGeneration(unittest.TestCase):
         self.assertIn("def oom_run(label, thunk):", src)
         self.assertIn("_OOM_WINDOW = 2", src)
         self.assertIn("_set_nomemory(_start, _start + _OOM_WINDOW)", src)
-        self.assertIn("_set_nomemory(_start, 0)", src)   # window==0 fallback branch
+        self.assertIn("_set_nomemory(_start, 0)", src)  # window==0 fallback branch
         self.assertIn('print("[OOM-SEQ] " + label', src)
         # Function sequences: a guarded multi-step thunk fed to oom_run.
         self.assertRegex(src, r"def _oom_seq_f\d+\(\):")
@@ -215,8 +232,8 @@ class TestOOMSeqGeneration(unittest.TestCase):
         # contain >1 call (a real sequence) and parse.
         src = _generate(oom_fuzz=True, oom_seq=True, oom_seq_len=3)
         ast.parse(src)
-        thunk = src[src.index("def _oom_seq_f1"):]
-        thunk = thunk[:thunk.index("oom_run(")]
+        thunk = src[src.index("def _oom_seq_f1") :]
+        thunk = thunk[: thunk.index("oom_run(")]
         self.assertGreaterEqual(thunk.count("except BaseException:"), 3)
         self.assertGreaterEqual(thunk.count("getattr(fuzz_target_module, "), 3)
 
@@ -227,14 +244,21 @@ class TestOOMSeqGeneration(unittest.TestCase):
     def test_seq_method_chain_reuses_one_instance(self):
         # Method-chain sequence: several methods on the SAME live instance under one
         # window (the OOM-0035 write...->getvalue() shape).
-        src = _generate(oom_fuzz=True, oom_seq=True, module=json, module_name="json",
-                        oom_classes=1, oom_methods=3, oom_seq_len=3)
+        src = _generate(
+            oom_fuzz=True,
+            oom_seq=True,
+            module=json,
+            module_name="json",
+            oom_classes=1,
+            oom_methods=3,
+            oom_seq_len=3,
+        )
         ast.parse(src)
         self.assertRegex(src, r"def _oom_seq_oc1\(\):")
         self.assertRegex(src, r'oom_run\("oc1:json\.')
         # all steps target the same oom_inst_oc1_* instance (not the module)
         self.assertRegex(src, r"getattr\(oom_inst_oc1_\w+, ")
-        self.assertNotIn('oom_call("oc1m', src)   # single-call method sweep replaced
+        self.assertNotIn('oom_call("oc1m', src)  # single-call method sweep replaced
 
     def test_non_seq_oom_mode_has_no_seq_artifacts(self):
         src = _generate(oom_fuzz=True, oom_seq=False)

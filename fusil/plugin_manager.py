@@ -22,9 +22,7 @@ class ArgumentGeneratorRegistration:
     generator_func: Callable[[], list[str]]
     category: str  # 'simple', 'complex', 'hashable'
     weight: int = 1
-    condition: Callable[[Any, str], bool] = (
-        lambda cfg, mod: True
-    )  # Default: always active
+    condition: Callable[[Any, str], bool] = lambda cfg, mod: True  # Default: always active
 
 
 @dataclass
@@ -161,9 +159,7 @@ class PluginManager:
         )
         self.argument_generators.append(registration)
 
-    def add_definitions_provider(
-        self, provider_func: Callable[[Any, str], str | None]
-    ) -> None:
+    def add_definitions_provider(self, provider_func: Callable[[Any, str], str | None]) -> None:
         """
         Register a definitions/boilerplate code provider.
 
@@ -171,9 +167,7 @@ class PluginManager:
             provider_func: Function(config, module_name) -> str | None
                           Returns source code to embed in generated scripts, or None
         """
-        self.definitions_providers.append(
-            DefinitionsProvider(provider_func=provider_func)
-        )
+        self.definitions_providers.append(DefinitionsProvider(provider_func=provider_func))
 
     def add_scenario_provider(
         self, provider_func: Callable[[Any, str], dict[str, Callable] | None]
@@ -204,9 +198,7 @@ class PluginManager:
         if name in self.fuzzing_modes:
             raise ValueError(f"Fuzzing mode '{name}' already registered")
 
-        mode = FuzzingMode(
-            name=name, activation_check=activation_check, setup_script=setup_script
-        )
+        mode = FuzzingMode(name=name, activation_check=activation_check, setup_script=setup_script)
         self.fuzzing_modes[name] = mode
 
     def add_hook(self, hook_name: str, hook_func: Callable) -> None:
@@ -218,15 +210,11 @@ class PluginManager:
             hook_func: Callable to run at the specified lifecycle point
         """
         if hook_name not in self.hooks:
-            raise ValueError(
-                f"Unknown hook: {hook_name}. Valid hooks: {list(self.hooks.keys())}"
-            )
+            raise ValueError(f"Unknown hook: {hook_name}. Valid hooks: {list(self.hooks.keys())}")
 
         self.hooks[hook_name].append(hook_func)
 
-    def declare_dependency(
-        self, plugin_name: str, required_version: str | None = None
-    ) -> None:
+    def declare_dependency(self, plugin_name: str, required_version: str | None = None) -> None:
         """
         Declare that the current plugin depends on another plugin.
 
@@ -241,9 +229,7 @@ class PluginManager:
         # For V1, we can just add it to the last loaded plugin's metadata.
         if self.plugins:
             last_plugin = list(self.plugins.values())[-1]
-            dep_str = (
-                f"{plugin_name}@{required_version}" if required_version else plugin_name
-            )
+            dep_str = f"{plugin_name}@{required_version}" if required_version else plugin_name
             last_plugin.dependencies.append(dep_str)
 
     def declare_incompatibility(self, plugin_name: str) -> None:
@@ -356,9 +342,7 @@ class PluginManager:
             try:
                 hook_func(*args, **kwargs)
             except Exception as e:
-                print(
-                    f"[PluginManager] ERROR in hook {hook_name}: {e}", file=sys.stderr
-                )
+                print(f"[PluginManager] ERROR in hook {hook_name}: {e}", file=sys.stderr)
                 import traceback
 
                 traceback.print_exc()

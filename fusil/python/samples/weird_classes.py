@@ -8,9 +8,11 @@ from string import printable
 
 try:
     from _decimal import Decimal
+
     has__decimal = True
 except ImportError:
     from decimal import Decimal
+
     has__decimal = False
 
 sequences = [Queue, deque, frozenset, list, set, str, tuple]
@@ -21,36 +23,50 @@ dicts = [Counter, OrderedDict, dict]
 bases = sequences + bytes_ + numbers + dicts + [object]
 
 large_num = 2**64
-class WeirdBase(ABCMeta):
-  def __hash__(self):
-    return randint(0, large_num)
 
-  def __eq__(self, other):
-    return False
+
+class WeirdBase(ABCMeta):
+    def __hash__(self):
+        return randint(0, large_num)
+
+    def __eq__(self, other):
+        return False
 
 
 weird_instances = dict()
 weird_classes = dict()
 for cls in bases:
+
     class weird_cls(cls, metaclass=WeirdBase):
         def add(self, *args, **kwargs):
             pass
+
         append = clear = close = write = sort = reversed = add
+
         def encode(self, *args, **kwargs):
             return b""
+
         def decode(self, *args, **kwargs):
             return ""
+
         format = getvalue = join = read = replace = strip = rstrip = decode
+
         def get(self, *args, **kwargs):
             return self
+
         open = pop = update = get
+
         def readlines(self, *args, **kwargs):
             return [""]
+
         rsplit = split = partition = rpartition = readlines
+
         def items(self):
             return {}.items()
+
         def keys(self):
             return {}.keys()
+
         def values(self):
             return {}.values()
 
@@ -58,7 +74,16 @@ for cls in bases:
     weird_instances[f"weird_{cls.__name__}_empty"] = weird_cls()
     weird_classes[f"weird_{cls.__name__}"] = weird_cls
 
-tricky_strs = (chr(0), chr(127), chr(255), chr(0x10FFFF), "𝒜","\\x00" * 10, "A" * (2 ** 16), "💻" * 2**10,)
+tricky_strs = (
+    chr(0),
+    chr(127),
+    chr(255),
+    chr(0x10FFFF),
+    "𝒜",
+    "\\x00" * 10,
+    "A" * (2**16),
+    "💻" * 2**10,
+)
 
 # We cannot create a Decimal larger than 10 ** 4300 with _pydecimal, only with _decimal
 max_str_digits_adjustment = 1 if has__decimal else -1
@@ -66,34 +91,76 @@ big_int_for_decimal = 10 ** (sys.int_info.default_max_str_digits + max_str_digit
 
 for cls in sequences:
     weird_instances[f"weird_{cls.__name__}_single"] = weird_classes[f"weird_{cls.__name__}"]("a")
-    weird_instances[f"weird_{cls.__name__}_range"] = weird_classes[f"weird_{cls.__name__}"](range(20))
+    weird_instances[f"weird_{cls.__name__}_range"] = weird_classes[f"weird_{cls.__name__}"](
+        range(20)
+    )
     weird_instances[f"weird_{cls.__name__}_types"] = weird_classes[f"weird_{cls.__name__}"](bases)
-    weird_instances[f"weird_{cls.__name__}_printable"] = weird_classes[f"weird_{cls.__name__}"](printable)
-    weird_instances[f"weird_{cls.__name__}_special"] = weird_classes[f"weird_{cls.__name__}"](tricky_strs)
+    weird_instances[f"weird_{cls.__name__}_printable"] = weird_classes[f"weird_{cls.__name__}"](
+        printable
+    )
+    weird_instances[f"weird_{cls.__name__}_special"] = weird_classes[f"weird_{cls.__name__}"](
+        tricky_strs
+    )
 for cls in bytes_:
-    weird_instances[f"weird_{cls.__name__}_bytes"] = weird_classes[f"weird_{cls.__name__}"](b"abcdefgh_" * 10)
+    weird_instances[f"weird_{cls.__name__}_bytes"] = weird_classes[f"weird_{cls.__name__}"](
+        b"abcdefgh_" * 10
+    )
 for cls in numbers:
-    weird_instances[f"weird_{cls.__name__}_sys_maxsize"] = weird_classes[f"weird_{cls.__name__}"](sys.maxsize)
-    weird_instances[f"weird_{cls.__name__}_sys_maxsize_minus_one"] = weird_classes[f"weird_{cls.__name__}"](sys.maxsize - 1)
-    weird_instances[f"weird_{cls.__name__}_sys_maxsize_plus_one"] = weird_classes[f"weird_{cls.__name__}"](sys.maxsize + 1)
-    weird_instances[f"weird_{cls.__name__}_neg_sys_maxsize"] = weird_classes[f"weird_{cls.__name__}"](-sys.maxsize)
-    weird_instances[f"weird_{cls.__name__}_2**63-1"] = weird_classes[f"weird_{cls.__name__}"](2 ** 63 - 1)
-    weird_instances[f"weird_{cls.__name__}_2**63"] = weird_classes[f"weird_{cls.__name__}"](2 ** 63)
-    weird_instances[f"weird_{cls.__name__}_2**63+1"] = weird_classes[f"weird_{cls.__name__}"](2 ** 63 + 1)
-    weird_instances[f"weird_{cls.__name__}_-2**63+1"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 63 + 1)
-    weird_instances[f"weird_{cls.__name__}_-2**63"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 63)
-    weird_instances[f"weird_{cls.__name__}_-2**63-1"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 63 -1)
-    weird_instances[f"weird_{cls.__name__}_2**31-1"] = weird_classes[f"weird_{cls.__name__}"](2 ** 31 - 1)
-    weird_instances[f"weird_{cls.__name__}_2**31"] = weird_classes[f"weird_{cls.__name__}"](2 ** 31)
-    weird_instances[f"weird_{cls.__name__}_2**31+1"] = weird_classes[f"weird_{cls.__name__}"](2 ** 31 + 1)
-    weird_instances[f"weird_{cls.__name__}_-2**31+1"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 31 + 1)
-    weird_instances[f"weird_{cls.__name__}_-2**31"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 31)
-    weird_instances[f"weird_{cls.__name__}_-2**31-1"] = weird_classes[f"weird_{cls.__name__}"](-2 ** 31 - 1)
-    if cls not in (float, complex) and hasattr(sys, 'int_info'):
-        weird_instances[f"weird_{cls.__name__}_10**default_max_str_digits+1"] = weird_classes[f"weird_{cls.__name__}"](big_int_for_decimal)
+    weird_instances[f"weird_{cls.__name__}_sys_maxsize"] = weird_classes[f"weird_{cls.__name__}"](
+        sys.maxsize
+    )
+    weird_instances[f"weird_{cls.__name__}_sys_maxsize_minus_one"] = weird_classes[
+        f"weird_{cls.__name__}"
+    ](sys.maxsize - 1)
+    weird_instances[f"weird_{cls.__name__}_sys_maxsize_plus_one"] = weird_classes[
+        f"weird_{cls.__name__}"
+    ](sys.maxsize + 1)
+    weird_instances[f"weird_{cls.__name__}_neg_sys_maxsize"] = weird_classes[
+        f"weird_{cls.__name__}"
+    ](-sys.maxsize)
+    weird_instances[f"weird_{cls.__name__}_2**63-1"] = weird_classes[f"weird_{cls.__name__}"](
+        2**63 - 1
+    )
+    weird_instances[f"weird_{cls.__name__}_2**63"] = weird_classes[f"weird_{cls.__name__}"](2**63)
+    weird_instances[f"weird_{cls.__name__}_2**63+1"] = weird_classes[f"weird_{cls.__name__}"](
+        2**63 + 1
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**63+1"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**63) + 1
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**63"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**63)
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**63-1"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**63) - 1
+    )
+    weird_instances[f"weird_{cls.__name__}_2**31-1"] = weird_classes[f"weird_{cls.__name__}"](
+        2**31 - 1
+    )
+    weird_instances[f"weird_{cls.__name__}_2**31"] = weird_classes[f"weird_{cls.__name__}"](2**31)
+    weird_instances[f"weird_{cls.__name__}_2**31+1"] = weird_classes[f"weird_{cls.__name__}"](
+        2**31 + 1
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**31+1"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**31) + 1
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**31"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**31)
+    )
+    weird_instances[f"weird_{cls.__name__}_-2**31-1"] = weird_classes[f"weird_{cls.__name__}"](
+        -(2**31) - 1
+    )
+    if cls not in (float, complex) and hasattr(sys, "int_info"):
+        weird_instances[f"weird_{cls.__name__}_10**default_max_str_digits+1"] = weird_classes[
+            f"weird_{cls.__name__}"
+        ](big_int_for_decimal)
 for cls in dicts:
-    weird_instances[f"weird_{cls.__name__}_basic"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in range(100)})
-    weird_instances[f"weird_{cls.__name__}_tricky_strs"] = weird_classes[f"weird_{cls.__name__}"]({a: a for a in tricky_strs})
+    weird_instances[f"weird_{cls.__name__}_basic"] = weird_classes[f"weird_{cls.__name__}"](
+        {a: a for a in range(100)}
+    )
+    weird_instances[f"weird_{cls.__name__}_tricky_strs"] = weird_classes[f"weird_{cls.__name__}"](
+        {a: a for a in tricky_strs}
+    )
 
 
 # Class with a __del__ side effect to attack the JIT optimizer
@@ -110,10 +177,15 @@ class FrameModifier:
             # On destruction, get the calling frame (1 level up).
             frame = sys._getframe(1)
             # Maliciously modify the local variable in that frame.
-            print(f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}", file=sys.stderr)
+            print(
+                f"  [Side Effect] In __del__: Modifying '{self.var_name}' to {self.new_value!r}",
+                file=sys.stderr,
+            )
             if self.var_name in frame.f_locals:
                 frame.f_locals[self.var_name] = self.new_value
-            elif self.var_name.split(".")[0] in frame.f_locals and self.var_name.count(".") == 1:  # instance_or_class.attribute
+            elif (
+                self.var_name.split(".")[0] in frame.f_locals and self.var_name.count(".") == 1
+            ):  # instance_or_class.attribute
                 instance_or_class_str, attr_str = self.var_name.split(".")
                 setattr(frame.f_locals[instance_or_class_str], attr_str, self.new_value)
             else:  # module.instance_or_class.attribute

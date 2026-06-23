@@ -6,7 +6,7 @@ import types
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
@@ -36,6 +36,7 @@ try:
         tricky_traceback,
         tricky_list_with_cycle,
     )
+
     SAMPLES_AVAILABLE = True
 except (ImportError, TypeError, SyntaxError) as e:
     print(f"Could not import tricky_objects module, skipping tests: {e}", file=sys.stderr)
@@ -102,5 +103,5 @@ class TestTrickyObjects(unittest.TestCase):
         self.assertIsInstance(tricky_instance.tricky_descriptor, TrickyDescriptor)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

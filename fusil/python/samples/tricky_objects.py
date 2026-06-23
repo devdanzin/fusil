@@ -1,6 +1,7 @@
 import types
 import inspect
 import itertools
+
 tricky_cell = types.CellType(None)
 tricky_simplenamespace = types.SimpleNamespace(dummy=None, cell=tricky_cell)
 tricky_simplenamespace.dummy = tricky_simplenamespace
@@ -13,18 +14,23 @@ except AttributeError:
     tricky_genericalias = None
 
 tricky_dict = {}
-if tricky_capsule: tricky_dict[tricky_capsule] = tricky_cell
-if tricky_module: tricky_dict[tricky_module] = tricky_genericalias
+if tricky_capsule:
+    tricky_dict[tricky_capsule] = tricky_cell
+if tricky_module:
+    tricky_dict[tricky_module] = tricky_genericalias
 tricky_dict["tricky_dict"] = tricky_dict
 tricky_mappingproxy = types.MappingProxyType(tricky_dict)
 
 
 def tricky_function(*args, **kwargs):
-    if len(args) > 150: raise RecursionError("Fuzzer controlled depth")
+    if len(args) > 150:
+        raise RecursionError("Fuzzer controlled depth")
     a = 1
+
     def b(x=a):
         v = x
         return v
+
     return tricky_function(*(args + (1,)), **kwargs)
 
 
@@ -34,17 +40,19 @@ tricky_staticmethod = staticmethod(tricky_lambda)
 tricky_property = property(tricky_lambda)
 tricky_code = tricky_lambda.__code__
 tricky_closure = tricky_function.__code__.co_freevars
-tricky_classmethod_descriptor = types.ClassMethodDescriptorType # This is the type itself
+tricky_classmethod_descriptor = types.ClassMethodDescriptorType  # This is the type itself
 
 
 class TrickyDescriptor:
     def __get__(self, obj, objtype=None):
         return self
+
     def __set__(self, obj, value):
         try:
             obj.__dict__["_value_descriptor"] = value
         except AttributeError:
             pass
+
     def __delete__(self, obj):
         try:
             del obj.__dict__["_value_descriptor"]
@@ -56,9 +64,10 @@ class TrickyMeta(type):
     @property
     def __signature__(self):
         raise AttributeError("Signature denied by TrickyMeta")
+
     def __mro_entries__(self, bases):
         return (object,)
-        #return super().__mro_entries__(bases)
+        # return super().__mro_entries__(bases)
 
 
 class TrickyClass(metaclass=TrickyMeta):
@@ -71,14 +80,15 @@ class TrickyClass(metaclass=TrickyMeta):
         self._value_init = None
 
     def __getattr__(self, name):
-        if name == "crash_on_getattr": raise ValueError("getattr manipulated")
+        if name == "crash_on_getattr":
+            raise ValueError("getattr manipulated")
         return self
 
 
 tricky_instance = TrickyClass()
 try:
     tricky_frame = inspect.currentframe()
-    if tricky_frame: # currentframe() can be None
+    if tricky_frame:  # currentframe() can be None
         # tricky_frame.f_builtins.update(tricky_dict)
         tricky_frame.f_globals.update(tricky_dict)
         tricky_frame.f_locals.update(tricky_dict)

@@ -26,169 +26,210 @@ from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 from fusil.write_code import CodeTemplate as CT
+
 if TYPE_CHECKING:
     from fusil.python.write_python_code import WritePythonCode
 
 UOP_RECIPES = {
     # --- Attribute and Subscript Operations ---
-    '_STORE_ATTR': {
-        'pattern': "{target_obj}.x = {value}",
-        'placeholders': {'target_obj': ('object','object_with_attr', 'stateful_getattr_object'), 'value': ('any',)}
+    "_STORE_ATTR": {
+        "pattern": "{target_obj}.x = {value}",
+        "placeholders": {
+            "target_obj": ("object", "object_with_attr", "stateful_getattr_object"),
+            "value": ("any",),
+        },
     },
-    '_LOAD_ATTR_METHOD_WITH_VALUES': {
-        'pattern': "{result_var} = {target_obj}.get_value()",
-        'placeholders': {'result_var': ('new_variable',), 'target_obj': ('object_with_method',  'stateful_getattr_object')}
+    "_LOAD_ATTR_METHOD_WITH_VALUES": {
+        "pattern": "{result_var} = {target_obj}.get_value()",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "target_obj": ("object_with_method", "stateful_getattr_object"),
+        },
     },
-    '_BINARY_SUBSCR_LIST_INT': {
-        'pattern': "{result_var} = {target_list}[{index}]",
-        'placeholders': {'result_var': ('new_variable',), 'target_list': ('list', 'object_with_getitem', 'stateful_getitem_object'), 'index': ('small_int','stateful_index_object')}
+    "_BINARY_SUBSCR_LIST_INT": {
+        "pattern": "{result_var} = {target_list}[{index}]",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "target_list": ("list", "object_with_getitem", "stateful_getitem_object"),
+            "index": ("small_int", "stateful_index_object"),
+        },
     },
-    '_BINARY_OP_SUBSCR_GETITEM': {
-        'pattern': "{result_var} = {target_obj}[{key}]",
-        'placeholders': {'result_var': ('new_variable',), 'target_obj': ('object_with_getitem', 'stateful_getitem_object'), 'key': ('any', 'stateful_index_object')}
+    "_BINARY_OP_SUBSCR_GETITEM": {
+        "pattern": "{result_var} = {target_obj}[{key}]",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "target_obj": ("object_with_getitem", "stateful_getitem_object"),
+            "key": ("any", "stateful_index_object"),
+        },
     },
-    '_DELETE_ATTR': {
-        'pattern': "del {target_obj}.x",
-        'placeholders': {'target_obj': ('object_with_attr',), 'value': ('int',)}
+    "_DELETE_ATTR": {
+        "pattern": "del {target_obj}.x",
+        "placeholders": {"target_obj": ("object_with_attr",), "value": ("int",)},
     },
-
     # --- Binary Operations ---
-    '_BINARY_OP_ADD_INT': {
-        'pattern': "{result_var} = {operand_a} + {operand_b}",
-        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('int',), 'operand_b': ('int',)}
+    "_BINARY_OP_ADD_INT": {
+        "pattern": "{result_var} = {operand_a} + {operand_b}",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "operand_a": ("int",),
+            "operand_b": ("int",),
+        },
     },
-    '_BINARY_OP_ADD_FLOAT': {
-        'pattern': "{result_var} = {operand_a} + {operand_b}",
-        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('float',), 'operand_b': ('float',)}
+    "_BINARY_OP_ADD_FLOAT": {
+        "pattern": "{result_var} = {operand_a} + {operand_b}",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "operand_a": ("float",),
+            "operand_b": ("float",),
+        },
     },
-    '_BINARY_OP_MULTIPLY_TUPLE_INT': {
-        'pattern': "{result_var} = {operand_a} * {operand_b}",
-        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('tuple',), 'operand_b': ('small_int', 'stateful_index_object')}
+    "_BINARY_OP_MULTIPLY_TUPLE_INT": {
+        "pattern": "{result_var} = {operand_a} * {operand_b}",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "operand_a": ("tuple",),
+            "operand_b": ("small_int", "stateful_index_object"),
+        },
     },
-
     # --- Collection and Iteration ---
-    '_BUILD_LIST': {
-        'pattern': "{result_var} = [" + "{val_a}, {val_b}, {val_c}," * 50 + "]",
-        'placeholders': {'result_var': ('new_variable',), 'val_a': ('any',), 'val_b': ('any',), 'val_c': ('any',)}
+    "_BUILD_LIST": {
+        "pattern": "{result_var} = [" + "{val_a}, {val_b}, {val_c}," * 50 + "]",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "val_a": ("any",),
+            "val_b": ("any",),
+            "val_c": ("any",),
+        },
     },
-    '_CONTAINS_OP_DICT': {
-        'pattern': "{result_var} = {key} in {target_dict}",
-        'placeholders': {'result_var': ('new_variable',), 'key': ('any', 'unstable_hash_object'), 'target_dict': ('dict',)}
+    "_CONTAINS_OP_DICT": {
+        "pattern": "{result_var} = {key} in {target_dict}",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "key": ("any", "unstable_hash_object"),
+            "target_dict": ("dict",),
+        },
     },
-
     # --- Compare and Boolean Operations ---
-    '_COMPARE_OP_INT': {
-        'pattern': "{result_var} = {operand_a} > {operand_b}",
-        'placeholders': {'result_var': ('new_variable',), 'operand_a': ('int',), 'operand_b': ('int', 'stateful_index_object')}
+    "_COMPARE_OP_INT": {
+        "pattern": "{result_var} = {operand_a} > {operand_b}",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "operand_a": ("int",),
+            "operand_b": ("int", "stateful_index_object"),
+        },
     },
-    '_TO_BOOL_INT': {
-        'pattern': "if {target_int}: pass",
-        'placeholders': {'target_int': ('int', 'stateful_index_object', 'stateful_len_object')}
+    "_TO_BOOL_INT": {
+        "pattern": "if {target_int}: pass",
+        "placeholders": {"target_int": ("int", "stateful_index_object", "stateful_len_object")},
     },
-    '_LOAD_ATTR': {
-        'pattern': '{target_obj}.x',
-        'placeholders': {'target_obj': ('object_with_attr', 'stateful_getattr_object')}
+    "_LOAD_ATTR": {
+        "pattern": "{target_obj}.x",
+        "placeholders": {"target_obj": ("object_with_attr", "stateful_getattr_object")},
     },
-    '_BINARY_SUBSCR_TUPLE_INT': {
-        'pattern': '{target_tuple}[{index}]',
-        'placeholders': {'target_tuple': ('tuple',), 'index': ('small_int', 'stateful_index_object')}
+    "_BINARY_SUBSCR_TUPLE_INT": {
+        "pattern": "{target_tuple}[{index}]",
+        "placeholders": {
+            "target_tuple": ("tuple",),
+            "index": ("small_int", "stateful_index_object"),
+        },
     },
-    '_BINARY_OP_SUB_INT': {
-        'pattern': '{a} - {b}',
-        'placeholders': {'a': ('int',), 'b': ('int',)}
+    "_BINARY_OP_SUB_INT": {"pattern": "{a} - {b}", "placeholders": {"a": ("int",), "b": ("int",)}},
+    "_BINARY_OP_MUL_INT": {
+        "pattern": "{a} * {b}",
+        "placeholders": {"a": ("int",), "b": ("int", "stateful_index_object")},
     },
-    '_BINARY_OP_MUL_INT': {
-        'pattern': '{a} * {b}',
-        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
+    "_BINARY_OP_SUB_FLOAT": {
+        "pattern": "{a} - {b}",
+        "placeholders": {"a": ("float",), "b": ("float",)},
     },
-    '_BINARY_OP_SUB_FLOAT': {
-        'pattern': '{a} - {b}',
-        'placeholders': {'a': ('float',), 'b': ('float',)}
+    "_BINARY_OP_MUL_FLOAT": {
+        "pattern": "{a} * {b}",
+        "placeholders": {"a": ("float",), "b": ("float",)},
     },
-    '_BINARY_OP_MUL_FLOAT': {
-        'pattern': '{a} * {b}',
-        'placeholders': {'a': ('float',), 'b': ('float',)}
+    "_BINARY_OP_AND_INT": {
+        "pattern": "{a} & {b}",
+        "placeholders": {
+            "a": ("int", "stateful_index_object"),
+            "b": ("int", "stateful_index_object"),
+        },
     },
-    '_BINARY_OP_AND_INT': {
-        'pattern': '{a} & {b}',
-        'placeholders': {'a': ('int', 'stateful_index_object'), 'b': ('int', 'stateful_index_object')}
+    "_BINARY_OP_OR_INT": {
+        "pattern": "{a} | {b}",
+        "placeholders": {
+            "a": ("int", "stateful_index_object"),
+            "b": ("int", "stateful_index_object"),
+        },
     },
-    '_BINARY_OP_OR_INT': {
-        'pattern': '{a} | {b}',
-        'placeholders': {'a': ('int', 'stateful_index_object'), 'b': ('int', 'stateful_index_object')}
+    "_BINARY_OP_XOR_INT": {
+        "pattern": "{a} ^ {b}",
+        "placeholders": {"a": ("int",), "b": ("int", "stateful_index_object")},
     },
-    '_BINARY_OP_XOR_INT': {
-        'pattern': '{a} ^ {b}',
-        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
+    "_COMPARE_OP_EQ_INT": {
+        "pattern": "{a} == {b}",
+        "placeholders": {"a": ("int",), "b": ("int", "stateful_index_object")},
     },
-    '_COMPARE_OP_EQ_INT': {
-        'pattern': '{a} == {b}',
-        'placeholders': {'a': ('int',), 'b': ('int', 'stateful_index_object')}
+    "_COMPARE_OP_LT_INT": {"pattern": "{a} < {b}", "placeholders": {"a": ("int",), "b": ("int",)}},
+    "_COMPARE_OP_GT_INT": {"pattern": "{a} > {b}", "placeholders": {"a": ("int",), "b": ("int",)}},
+    "_COMPARE_OP_EQ_STR": {"pattern": "{a} == {b}", "placeholders": {"a": ("str",), "b": ("str",)}},
+    "_COMPARE_OP_LT_STR": {"pattern": "{a} < {b}", "placeholders": {"a": ("str",), "b": ("str",)}},
+    "_COMPARE_OP_GT_STR": {"pattern": "{a} > {b}", "placeholders": {"a": ("str",), "b": ("str",)}},
+    "_UNARY_NOT": {
+        "pattern": "not {value}",
+        "placeholders": {"value": ("any", "stateful_index_object")},
     },
-    '_COMPARE_OP_LT_INT': {
-        'pattern': '{a} < {b}',
-        'placeholders': {'a': ('int',), 'b': ('int',)}
+    "_TO_BOOL": {
+        "pattern": "if {obj}: pass",
+        "placeholders": {
+            "obj": (
+                "object",
+                "stateful_bool_object",
+                "stateful_len_object",
+                "stateful_index_object",
+            )
+        },
     },
-    '_COMPARE_OP_GT_INT': {
-        'pattern': '{a} > {b}',
-        'placeholders': {'a': ('int',), 'b': ('int',)}
+    "_BUILD_TUPLE": {
+        "pattern": "(" + "{a}, {b}," * 50 + ")",
+        "placeholders": {"a": ("any",), "b": ("any",)},
     },
-    '_COMPARE_OP_EQ_STR': {
-        'pattern': '{a} == {b}',
-        'placeholders': {'a': ('str',), 'b': ('str',)}
+    "_BUILD_SET": {
+        "pattern": "{{ {a}, {b} }}",
+        "placeholders": {
+            "a": ("any", "unstable_hash_object"),
+            "b": ("any", "unstable_hash_object"),
+        },
     },
-    '_COMPARE_OP_LT_STR': {
-        'pattern': '{a} < {b}',
-        'placeholders': {'a': ('str',), 'b': ('str',)}
+    "_BUILD_MAP": {
+        "pattern": "{{ {key}: {value} }}",
+        "placeholders": {"key": ("str", "int", "unstable_hash_object"), "value": ("any",)},
     },
-    '_COMPARE_OP_GT_STR': {
-        'pattern': '{a} > {b}',
-        'placeholders': {'a': ('str',), 'b': ('str',)}
+    "_UNPACK_SEQUENCE_TUPLE": {
+        "pattern": "x, *y = {iterable}",
+        "placeholders": {"iterable": ("tuple", "stateful_iter_object")},
     },
-    '_UNARY_NOT': {
-        'pattern': 'not {value}',
-        'placeholders': {'value': ('any', 'stateful_index_object')}
+    "_UNPACK_SEQUENCE_LIST": {
+        "pattern": "x, *y = {iterable}",
+        "placeholders": {"iterable": ("list", "stateful_iter_object")},
     },
-    '_TO_BOOL': {
-        'pattern': 'if {obj}: pass',
-        'placeholders': {'obj': ('object', 'stateful_bool_object', 'stateful_len_object', 'stateful_index_object')}
+    "_FOR_ITER_LIST": {
+        "pattern": "for {result_var} in {iterable}: pass",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "iterable": ("list", "stateful_iter_object"),
+        },
     },
-    '_BUILD_TUPLE': {
-        'pattern': '(' + '{a}, {b},' * 50 + ')',
-        'placeholders': {'a': ('any',), 'b': ('any',)}
+    "_FOR_ITER_TUPLE": {
+        "pattern": "for {result_var} in {iterable}: pass",
+        "placeholders": {
+            "result_var": ("new_variable",),
+            "iterable": ("tuple", "stateful_iter_object"),
+        },
     },
-    '_BUILD_SET': {
-        'pattern': '{{ {a}, {b} }}',
-        'placeholders': {'a': ('any', 'unstable_hash_object'), 'b': ('any', 'unstable_hash_object')}
+    "_CALL_LIST_APPEND": {
+        "pattern": "{target_list}.append({value})",
+        "placeholders": {"target_list": ("list",), "value": ("any",)},
     },
-    '_BUILD_MAP': {
-        'pattern': '{{ {key}: {value} }}',
-        'placeholders': {'key': ('str', 'int', 'unstable_hash_object'), 'value': ('any',)}
-    },
-    '_UNPACK_SEQUENCE_TUPLE': {
-        'pattern': 'x, *y = {iterable}',
-        'placeholders': {'iterable': ('tuple', 'stateful_iter_object')}
-    },
-    '_UNPACK_SEQUENCE_LIST': {
-        'pattern': 'x, *y = {iterable}',
-        'placeholders': {'iterable': ('list', 'stateful_iter_object')}
-    },
-    '_FOR_ITER_LIST': {
-        'pattern': 'for {result_var} in {iterable}: pass',
-        'placeholders': {'result_var': ('new_variable',), 'iterable': ('list', 'stateful_iter_object')}
-    },
-    '_FOR_ITER_TUPLE': {
-        'pattern': 'for {result_var} in {iterable}: pass',
-        'placeholders': {'result_var': ('new_variable',), 'iterable': ('tuple', 'stateful_iter_object')}
-    },
-    '_CALL_LIST_APPEND': {
-        'pattern': '{target_list}.append({value})',
-        'placeholders': {'target_list': ('list',), 'value': ('any',)}
-    },
-    '_YIELD_VALUE': {
-        'pattern': 'yield {value}',
-        'placeholders': {'value': ('any',)}
-    },
+    "_YIELD_VALUE": {"pattern": "yield {value}", "placeholders": {"value": ("any",)}},
 }
 
 
@@ -212,6 +253,7 @@ class ASTPatternGenerator:
       that are known to be stressful for the JIT, such as `__del__`
       side-effect attacks and "Twin Execution" correctness tests.
     """
+
     def __init__(self, parent: "WritePythonCode"):
         self.parent = parent
         self.arg_generator = parent.arg_generator
@@ -250,8 +292,17 @@ class ASTPatternGenerator:
 
         # Recursive Step: We know variables exist, so we can build a complex expression.
         ast_ops = [
-            ast.Add(), ast.Sub(), ast.Mult(), ast.Div(), ast.FloorDiv(), ast.Mod(),
-            ast.BitAnd(), ast.BitOr(), ast.BitXor(), ast.LShift(), ast.RShift()
+            ast.Add(),
+            ast.Sub(),
+            ast.Mult(),
+            ast.Div(),
+            ast.FloorDiv(),
+            ast.Mod(),
+            ast.BitAnd(),
+            ast.BitOr(),
+            ast.BitXor(),
+            ast.LShift(),
+            ast.RShift(),
         ]
         chosen_op = random.choice(ast_ops)
 
@@ -301,10 +352,10 @@ class ASTPatternGenerator:
             func=ast.Attribute(
                 value=ast.Name(id=self.parent.module_name, ctx=ast.Load()),
                 attr=func_name,
-                ctx=ast.Load()
+                ctx=ast.Load(),
             ),
             args=args,
-            keywords=[]
+            keywords=[],
         )
         return ast.Expr(value=call_node)
 
@@ -345,9 +396,9 @@ class ASTPatternGenerator:
         target = ast.Name(id=loop_var_name, ctx=ast.Store())
 
         iterator = ast.Call(
-            func=ast.Name(id='range', ctx=ast.Load()),
+            func=ast.Name(id="range", ctx=ast.Load()),
             args=[ast.Constant(value=random.randint(5, 50))],
-            keywords=[]
+            keywords=[],
         )
 
         # Recursively generate the loop body.
@@ -390,7 +441,7 @@ class ASTPatternGenerator:
             chosen_generator = random.choices(
                 population=list(statement_grammar.keys()),
                 weights=list(statement_grammar.values()),
-                k=1
+                k=1,
             )[0]
 
             # Pass the current depth to generators that need it.
@@ -405,12 +456,14 @@ class ASTPatternGenerator:
                     # as that could lead to invalid syntax (e.g., try: if ...: ...).
                     if isinstance(new_node, (ast.Assign, ast.Expr, ast.Delete)):
                         handler = ast.ExceptHandler(
-                            type=ast.Name(id='Exception', ctx=ast.Load()),
+                            type=ast.Name(id="Exception", ctx=ast.Load()),
                             name=None,
-                            body=[ast.Pass()]
+                            body=[ast.Pass()],
                         )
                         # Replace the node with a Try block containing the node.
-                        new_node = ast.Try(body=[new_node], handlers=[handler], orelse=[], finalbody=[])
+                        new_node = ast.Try(
+                            body=[new_node], handlers=[handler], orelse=[], finalbody=[]
+                        )
 
                 # ast.Delete returns a single node, others might return a list
                 if isinstance(new_node, list):
@@ -445,36 +498,43 @@ class ASTPatternGenerator:
         body_logic = self.generate_statement_list(num_statements=3)
 
         # 3. Choose a variable created in the loop body to be the victim.
-        target_var = random.choice(list(self.scope_variables)) if self.scope_variables else 'x'
+        target_var = random.choice(list(self.scope_variables)) if self.scope_variables else "x"
 
         # 4. Create the setup for the attack.
         fm_instance_creation = ast.Assign(
-            targets=[ast.Name(id='fm', ctx=ast.Store())],
+            targets=[ast.Name(id="fm", ctx=ast.Store())],
             value=ast.Call(
-                func=ast.Name(id='FrameModifier', ctx=ast.Load()),
-                args=[ast.Constant(value=target_var), ast.Constant(value='corrupted')],
-                keywords=[]
-            )
+                func=ast.Name(id="FrameModifier", ctx=ast.Load()),
+                args=[ast.Constant(value=target_var), ast.Constant(value="corrupted")],
+                keywords=[],
+            ),
         )
 
         # 5. Create the trigger.
-        del_trigger = ast.Delete(targets=[ast.Name(id='fm', ctx=ast.Del())])
+        del_trigger = ast.Delete(targets=[ast.Name(id="fm", ctx=ast.Del())])
 
         # 6. Assemble the final attack structure within a loop.
         loop = ast.For(
-            target=ast.Name(id='i_del', ctx=ast.Store()),
-            iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[ast.Constant(value=500)], keywords=[]),
+            target=ast.Name(id="i_del", ctx=ast.Store()),
+            iter=ast.Call(
+                func=ast.Name(id="range", ctx=ast.Load()),
+                args=[ast.Constant(value=500)],
+                keywords=[],
+            ),
             body=[
                 *body_logic,
                 # On the penultimate iteration, delete the frame modifier.
                 ast.If(
-                    test=ast.Compare(left=ast.Name(id='i_del', ctx=ast.Load()), ops=[ast.Eq()],
-                                     comparators=[ast.Constant(value=498)]),
+                    test=ast.Compare(
+                        left=ast.Name(id="i_del", ctx=ast.Load()),
+                        ops=[ast.Eq()],
+                        comparators=[ast.Constant(value=498)],
+                    ),
                     body=[del_trigger],
-                    orelse=[]
-                )
+                    orelse=[],
+                ),
             ],
-            orelse=[]
+            orelse=[],
         )
 
         return [*fm_class_nodes, fm_instance_creation, loop]
@@ -495,18 +555,18 @@ class ASTPatternGenerator:
 
         # 2. Create the JIT target function.
         jit_target_func = ast.FunctionDef(
-            name='jit_target',
+            name="jit_target",
             args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
             body=test_body_ast,
-            decorator_list=[]
+            decorator_list=[],
         )
 
         # 3. Create the Control function with an identical body.
         control_func = ast.FunctionDef(
-            name='control',
+            name="control",
             args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]),
             body=copy.deepcopy(test_body_ast),  # Use a deep copy
-            decorator_list=[]
+            decorator_list=[],
         )
 
         # 4. Programmatically build the harness calls and assertion.
@@ -532,12 +592,12 @@ class ASTPatternGenerator:
             keywords=[],
             body=[ast.Pass()],
             decorator_list=[],
-            type_params=[]
+            type_params=[],
         )
 
         instance_creation = ast.Assign(
             targets=[ast.Name(id=instance_name, ctx=ast.Store())],
-            value=ast.Call(func=ast.Name(id=class_name, ctx=ast.Load()), args=[], keywords=[])
+            value=ast.Call(func=ast.Name(id=class_name, ctx=ast.Load()), args=[], keywords=[]),
         )
 
         # Track the new instance and initialize its attribute set
@@ -561,9 +621,7 @@ class ASTPatternGenerator:
             self.known_objects[target_obj_name].add(attr_name)
 
         target = ast.Attribute(
-            value=ast.Name(id=target_obj_name, ctx=ast.Load()),
-            attr=attr_name,
-            ctx=ast.Store()
+            value=ast.Name(id=target_obj_name, ctx=ast.Load()), attr=attr_name, ctx=ast.Store()
         )
         value = self._generate_expression_ast()
         return ast.Assign(targets=[target], value=value)
@@ -582,9 +640,7 @@ class ASTPatternGenerator:
         self.known_objects[target_obj_name].remove(attr_to_delete)
 
         target = ast.Attribute(
-            value=ast.Name(id=target_obj_name, ctx=ast.Load()),
-            attr=attr_to_delete,
-            ctx=ast.Del()
+            value=ast.Name(id=target_obj_name, ctx=ast.Load()), attr=attr_to_delete, ctx=ast.Del()
         )
         return ast.Delete(targets=[target])
 
@@ -614,8 +670,7 @@ class ASTPatternGenerator:
         for var_name in sorted(list(self.scope_variables)):
             # Create an AST node for `var_name = None`
             assign_node = ast.Assign(
-                targets=[ast.Name(id=var_name, ctx=ast.Store())],
-                value=ast.Constant(value=None)
+                targets=[ast.Name(id=var_name, ctx=ast.Store())], value=ast.Constant(value=None)
             )
             initializers.append(assign_node)
 
@@ -656,9 +711,9 @@ class ASTPatternGenerator:
                 assigned_vars.add(node.name)
 
             # Recursively check inside control flow blocks
-            if hasattr(node, 'body'):
+            if hasattr(node, "body"):
                 assigned_vars.update(self._collect_assigned_variables(node.body))
-            if hasattr(node, 'orelse'):
+            if hasattr(node, "orelse"):
                 assigned_vars.update(self._collect_assigned_variables(node.orelse))
 
         return assigned_vars
@@ -682,13 +737,15 @@ class ASTPatternGenerator:
         for i, uop_name in enumerate(uop_names):
             recipe = UOP_RECIPES.get(uop_name)
             if not recipe:
-                all_core_logic_nodes.append(ast.Expr(value=ast.Constant(value=f"# ERROR: No recipe for {uop_name}")))
+                all_core_logic_nodes.append(
+                    ast.Expr(value=ast.Constant(value=f"# ERROR: No recipe for {uop_name}"))
+                )
                 continue
 
             # --- Generate variables for the current recipe ---
             # This loop ensures we create any new types needed for the current recipe,
             # adding them to the global var_map.
-            for p_name, p_types in recipe['placeholders'].items():
+            for p_name, p_types in recipe["placeholders"].items():
                 # Check if we already have a suitable variable from a previous step
                 has_suitable_var = any(p_type in var_map for p_type in p_types)
 
@@ -706,7 +763,7 @@ class ASTPatternGenerator:
             # --- Generate the core pattern for the current uop ---
             substitutions = self._get_substitutions_for_recipe(uop_name, recipe, var_map)
             # --- Core Pattern Generation ---
-            if uop_name == '_DELETE_ATTR':
+            if uop_name == "_DELETE_ATTR":
                 # Create a robust del/set pair
                 core_template = CT("""
                     try:
@@ -718,7 +775,7 @@ class ASTPatternGenerator:
                 core_code_str = core_template.render(**substitutions)
             else:
                 # The standard pattern for other uops
-                core_code_str = recipe['pattern'].format(**substitutions)
+                core_code_str = recipe["pattern"].format(**substitutions)
             core_repeats = random.randint(3, 5)  # Fewer repeats per uop in a chain
             core_ast_nodes = ast.parse(dedent(core_code_str)).body * core_repeats
             all_core_logic_nodes.extend(core_ast_nodes)
@@ -731,28 +788,28 @@ class ASTPatternGenerator:
                 target_var_name = substitutions[target_placeholder]
 
                 # We need to find the original type hint tuple for this placeholder
-                target_var_type_hints = recipe['placeholders'][target_placeholder]
+                target_var_type_hints = recipe["placeholders"][target_placeholder]
                 # And pick one to pass to the evil generator
                 target_var_type = random.choice(target_var_type_hints)
 
-                if 0 and target_var_type != 'new_variable':  # Disable
+                if 0 and target_var_type != "new_variable":  # Disable
                     evil_print = self.parent.write_print_to_stderr(
-                        0, f'"[{self._get_prefix()}] Injecting INTER-PATTERN EVIL!"', return_str=True
+                        0,
+                        f'"[{self._get_prefix()}] Injecting INTER-PATTERN EVIL!"',
+                        return_str=True,
                     )
                     all_evil_prints.append(evil_print)
                     evil_nodes = self._generate_evil_snippet(substitutions, var_map)
                     probabilistic_if_node = ast.If(
                         test=ast.Compare(
                             left=ast.Call(
-                                func=ast.Name(id='random', ctx=ast.Load()),
-                                args=[],
-                                keywords=[]
+                                func=ast.Name(id="random", ctx=ast.Load()), args=[], keywords=[]
                             ),
                             ops=[ast.Lt()],
-                            comparators=[ast.Constant(value=evil_probability)]
+                            comparators=[ast.Constant(value=evil_probability)],
                         ),
                         body=evil_nodes,
-                        orelse=[]
+                        orelse=[],
                     )
                     all_core_logic_nodes.append(probabilistic_if_node)
 
@@ -769,11 +826,12 @@ class ASTPatternGenerator:
                 # Create an AST node for: `var_name = globals(var_name)`
                 shadowing_assignment = ast.Assign(
                     targets=[ast.Name(id=var_name, ctx=ast.Store())],
-                    value=ast.Subscript(value=ast.Call(
-                        func=ast.Name(id='globals', ctx=ast.Load()),
-                        args=[],
-                        keywords=[]
-                    ), slice=ast.Constant(value=var_name))
+                    value=ast.Subscript(
+                        value=ast.Call(
+                            func=ast.Name(id="globals", ctx=ast.Load()), args=[], keywords=[]
+                        ),
+                        slice=ast.Constant(value=var_name),
+                    ),
                 )
                 shadowing_assignments.append(shadowing_assignment)
 
@@ -792,8 +850,8 @@ class ASTPatternGenerator:
         """
         substitutions = {}
 
-        for placeholder, type_hints in recipe['placeholders'].items():
-            if 'new_variable' in type_hints:
+        for placeholder, type_hints in recipe["placeholders"].items():
+            if "new_variable" in type_hints:
                 substitutions[placeholder] = f"res_{uop_name.lower().replace('_', '')}"
                 continue
 
@@ -803,12 +861,15 @@ class ASTPatternGenerator:
 
             if not candidate_vars:
                 raise ValueError(
-                    f"No variable in var_map for placeholder '{placeholder}' with types {type_hints} in recipe '{uop_name}'")
+                    f"No variable in var_map for placeholder '{placeholder}' with types {type_hints} in recipe '{uop_name}'"
+                )
 
             substitutions[placeholder] = random.choice(candidate_vars)
         return substitutions
 
-    def _generate_evil_snippet(self, available_vars: dict[str, Any], all_vars_by_type: dict[str, list[str]]) -> list[ast.stmt]:
+    def _generate_evil_snippet(
+        self, available_vars: dict[str, Any], all_vars_by_type: dict[str, list[str]]
+    ) -> list[ast.stmt]:
         """
         Selects and generates a random "evil snippet" of code designed to
         violate the JIT's assumptions about a target variable.
@@ -840,12 +901,21 @@ class ASTPatternGenerator:
 
         # Find all available object variables that could be targets
         object_types = [
-            'object', 'object_with_method', 'object_with_attr'
-            'lying_eq_object', 'stateful_len_object', 'unstable_hash_object',
-            'stateful_str_object', 'stateful_getitem_object', 'stateful_getattr_object',
-            'stateful_bool_object', 'stateful_iter_object', 'stateful_index_object',
+            "object",
+            "object_with_method",
+            "object_with_attrlying_eq_object",
+            "stateful_len_object",
+            "unstable_hash_object",
+            "stateful_str_object",
+            "stateful_getitem_object",
+            "stateful_getattr_object",
+            "stateful_bool_object",
+            "stateful_iter_object",
+            "stateful_index_object",
         ]
-        candidate_objects = [var for type_hint in object_types for var in all_vars_by_type.get(type_hint, [])]
+        candidate_objects = [
+            var for type_hint in object_types for var in all_vars_by_type.get(type_hint, [])
+        ]
 
         if not candidate_objects:
             # No objects to attack, do nothing
@@ -861,27 +931,29 @@ class ASTPatternGenerator:
             chosen_action = random.choice(single_target_actions)
             target_var = random.choice(candidate_objects)
             # Find the type hint for the chosen variable to pass to the helper
-            target_var_type = 'object'  # Default, can be refined if needed
+            target_var_type = "object"  # Default, can be refined if needed
             for type_hint, var_list in all_vars_by_type.items():
                 if target_var in var_list:
                     target_var_type = type_hint
                     break
             return chosen_action(target_var=target_var, target_var_type=target_var_type)
 
-    def _create_type_confusion_node(self, target_var: str, target_var_type: str, **kwargs) -> list[ast.AST]:
+    def _create_type_confusion_node(
+        self, target_var: str, target_var_type: str, **kwargs
+    ) -> list[ast.AST]:
         """
         Generates AST nodes to perform a type corruption attack on the target variable.
         """
         # A mapping from a type to a "confusable" type for corruption.
         corruption_map = {
-            'int': 'float',
-            'float': 'int',
-            'list': 'tuple',
-            'tuple': 'list',
-            'str': 'int',
-            'object': 'int',
+            "int": "float",
+            "float": "int",
+            "list": "tuple",
+            "tuple": "list",
+            "str": "int",
+            "object": "int",
         }
-        evil_type = corruption_map.get(target_var_type, 'str')
+        evil_type = corruption_map.get(target_var_type, "str")
 
         evil_var_name = self._get_unique_var_name(base="evil_val")
         evil_setup_code = self.arg_generator.generate_arg_by_type(evil_type, evil_var_name)
@@ -889,88 +961,119 @@ class ASTPatternGenerator:
         evil_setup_nodes = ast.parse(dedent(evil_setup_code)).body
         final_corruption_node = ast.Assign(
             targets=[ast.Name(id=target_var, ctx=ast.Store())],
-            value=ast.Name(id=evil_var_name, ctx=ast.Load())
+            value=ast.Name(id=evil_var_name, ctx=ast.Load()),
         )
         return evil_setup_nodes + [final_corruption_node]
 
     def _create_type_corruption_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to corrupt the type of a variable (e.g., `x = 'string'`)."""
         # Choose a random, incompatible type to corrupt the variable with.
-        corruption_value = random.choice([
-            ast.Constant(value="corrupted by string"),
-            ast.Constant(value=None),
-            ast.Constant(value=123.456),
-        ])
+        corruption_value = random.choice(
+            [
+                ast.Constant(value="corrupted by string"),
+                ast.Constant(value=None),
+                ast.Constant(value=123.456),
+            ]
+        )
 
-        return [ast.Assign(
-            targets=[ast.Name(id=target_var, ctx=ast.Store())],
-            value=corruption_value
-        )]
+        return [
+            ast.Assign(targets=[ast.Name(id=target_var, ctx=ast.Store())], value=corruption_value)
+        ]
 
     def _create_uop_attribute_deletion_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to delete an attribute (e.g., `del obj.x`)."""
         # Try to delete a common but potentially unexpected attribute.
-        attr_to_delete = random.choice(['value'])
+        attr_to_delete = random.choice(["value"])
 
-        return [ast.Delete(targets=[ast.Attribute(
-            value=ast.Name(id=target_var, ctx=ast.Load()),
-            attr=attr_to_delete,
-            ctx=ast.Del()
-        )])]
+        return [
+            ast.Delete(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Name(id=target_var, ctx=ast.Load()),
+                        attr=attr_to_delete,
+                        ctx=ast.Del(),
+                    )
+                ]
+            )
+        ]
 
     def _create_method_patch_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """Generates code to monkey-patch a method (e.g., `obj.meth = ...`)."""
         # Target a common method name.
-        method_to_patch = 'get_value'
+        method_to_patch = "get_value"
 
         # The payload is a simple lambda that returns a constant.
         lambda_payload = ast.Lambda(
             args=ast.arguments(
                 posonlyargs=[],
                 args=[],
-                vararg=ast.arg(arg='a'),
-                kwarg=ast.arg(arg='kw'),
+                vararg=ast.arg(arg="a"),
+                kwarg=ast.arg(arg="kw"),
                 kw_defaults=[],
-                defaults=[]
+                defaults=[],
             ),
-            body=ast.Constant(value='patched!')
+            body=ast.Constant(value="patched!"),
         )
 
         # Generate: `target_var.__class__.get_value = lambda: 'patched!'`
         # Patching the class is more effective for JIT invalidation.
-        return [ast.Assign(
-            targets=[ast.Attribute(
-                value=ast.Attribute(
-                    value=ast.Name(id=target_var, ctx=ast.Load()),
-                    attr='__class__',
-                    ctx=ast.Load()
-                ),
-                attr=method_to_patch,
-                ctx=ast.Store()
-            )],
-            value=lambda_payload
-        )]
+        return [
+            ast.Assign(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Attribute(
+                            value=ast.Name(id=target_var, ctx=ast.Load()),
+                            attr="__class__",
+                            ctx=ast.Load(),
+                        ),
+                        attr=method_to_patch,
+                        ctx=ast.Store(),
+                    )
+                ],
+                value=lambda_payload,
+            )
+        ]
 
     def _create_dict_swap_node(self, var1_name: str, var2_name: str, **kwargs) -> list[ast.stmt]:
         """
         Generates AST for: obj1.__dict__, obj2.__dict__ = obj2.__dict__, obj1.__dict__
         """
-        return [ast.Assign(
-            targets=[ast.Tuple(
-                elts=[
-                    ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store()),
-                    ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Store())
+        return [
+            ast.Assign(
+                targets=[
+                    ast.Tuple(
+                        elts=[
+                            ast.Attribute(
+                                value=ast.Name(id=var1_name, ctx=ast.Load()),
+                                attr="__dict__",
+                                ctx=ast.Store(),
+                            ),
+                            ast.Attribute(
+                                value=ast.Name(id=var2_name, ctx=ast.Load()),
+                                attr="__dict__",
+                                ctx=ast.Store(),
+                            ),
+                        ],
+                        ctx=ast.Store(),
+                    )
                 ],
-                ctx=ast.Store()
-            )],
-            value=ast.Tuple(
-                elts=[
-                    ast.Attribute(value=ast.Name(id=var2_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load()),
-                    ast.Attribute(value=ast.Name(id=var1_name, ctx=ast.Load()), attr='__dict__', ctx=ast.Load())
-                ],
-                ctx=ast.Load()
+                value=ast.Tuple(
+                    elts=[
+                        ast.Attribute(
+                            value=ast.Name(id=var2_name, ctx=ast.Load()),
+                            attr="__dict__",
+                            ctx=ast.Load(),
+                        ),
+                        ast.Attribute(
+                            value=ast.Name(id=var1_name, ctx=ast.Load()),
+                            attr="__dict__",
+                            ctx=ast.Load(),
+                        ),
+                    ],
+                    ctx=ast.Load(),
+                ),
             )
-        )]
+        ]
 
     def _create_class_reassignment_node(self, target_var: str, **kwargs) -> list[ast.stmt]:
         """
@@ -978,15 +1081,15 @@ class ASTPatternGenerator:
         """
         new_class_name = self._get_unique_var_name(base="SwappedClass")
         class_def_node = ast.ClassDef(
-            name=new_class_name,
-            bases=[],
-            keywords=[],
-            body=[ast.Pass()],
-            decorator_list=[]
+            name=new_class_name, bases=[], keywords=[], body=[ast.Pass()], decorator_list=[]
         )
         assign_node = ast.Assign(
-            targets=[ast.Attribute(value=ast.Name(id=target_var, ctx=ast.Load()), attr='__class__', ctx=ast.Store())],
-            value=ast.Name(id=new_class_name, ctx=ast.Load())
+            targets=[
+                ast.Attribute(
+                    value=ast.Name(id=target_var, ctx=ast.Load()), attr="__class__", ctx=ast.Store()
+                )
+            ],
+            value=ast.Name(id=new_class_name, ctx=ast.Load()),
         )
         return [class_def_node, assign_node]
 
@@ -1005,11 +1108,15 @@ class ASTPatternGenerator:
         # print(f"[EVIL] Stale object attack: overwriting '{target_var}' with global '{stale_var_name}'", file=sys.stderr)
 
         # Generates: `target_var = globals()['stale_var_name']`
-        return [ast.Assign(
-            targets=[ast.Name(id=target_var, ctx=ast.Store())],
-            value=ast.Subscript(
-                value=ast.Call(func=ast.Name(id='globals', ctx=ast.Load()), args=[], keywords=[]),
-                slice=ast.Constant(value=stale_var_name),
-                ctx=ast.Load()
+        return [
+            ast.Assign(
+                targets=[ast.Name(id=target_var, ctx=ast.Store())],
+                value=ast.Subscript(
+                    value=ast.Call(
+                        func=ast.Name(id="globals", ctx=ast.Load()), args=[], keywords=[]
+                    ),
+                    slice=ast.Constant(value=stale_var_name),
+                    ctx=ast.Load(),
+                ),
             )
-        )]
+        ]

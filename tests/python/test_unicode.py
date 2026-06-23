@@ -4,11 +4,12 @@ import os
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..')
+PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
     from fusil.python.unicode import escapeUnicode
+
     UNICODE_AVAILABLE = True
 except ImportError as e:
     print(f"Could not import unicode module, skipping tests: {e}", file=sys.stderr)
@@ -35,5 +36,5 @@ class TestUnicode(unittest.TestCase):
         self.assertEqual(escapeUnicode("😀"), "\\U0001F600")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

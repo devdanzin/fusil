@@ -31,8 +31,11 @@ def prepareProcess(process):
         try:
             chown(directory, config.process_uid, config.process_gid)
         except OSError as err:
-            print("Unable to chown %s to %s:%s: %s"
-                  % (directory, config.process_uid, config.process_gid, err), file=stderr)
+            print(
+                "Unable to chown %s to %s:%s: %s"
+                % (directory, config.process_uid, config.process_gid, err),
+                file=stderr,
+            )
     # Drop privileges. A failed or ineffective drop MUST abort the child (ChildError is
     # turned into a ProcessError by the parent); never continue running as root -- that is
     # how a fuzzed file-write clobbered /bin/sh and /etc/machine-id.
@@ -42,7 +45,10 @@ def prepareProcess(process):
         chdir(directory)
     except OSError as err:
         print(f"CHDIR ERROR: {err}", file=stderr)
-        print(f"Make sure the whole path is accessible to user 'fusil' (chmod +xr path_part).", file=stderr)
+        print(
+            f"Make sure the whole path is accessible to user 'fusil' (chmod +xr path_part).",
+            file=stderr,
+        )
         if err.errno != EACCES:
             raise
         user = getuid()

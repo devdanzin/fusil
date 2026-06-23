@@ -22,9 +22,7 @@ class Project(ProjectAgent):
     """
 
     def __init__(self, application):
-        ProjectAgent.__init__(
-            self, self, "project", mta=application.mta(), application=application
-        )
+        ProjectAgent.__init__(self, self, "project", mta=application.mta(), application=application)
         self.config = application.config
         options = application.options
         self.agents = AgentList()
@@ -223,10 +221,7 @@ class Project(ProjectAgent):
             log = self.error
         else:
             log = self.warning
-        log(
-            "End of session: score=%.1f%%, duration=%.3f second"
-            % (session_score * 100, duration)
-        )
+        log("End of session: score=%.1f%%, duration=%.3f second" % (session_score * 100, duration))
 
         # Destroy session
         self.destroySession()
@@ -250,8 +245,7 @@ class Project(ProjectAgent):
         # Hit maximum number of session?
         if 0 < self.max_session and self.max_session <= self.session_index:
             self.error(
-                "Stop! Limited to %s sessions, use --sessions option for more"
-                % self.max_session
+                "Stop! Limited to %s sessions, use --sessions option for more" % self.max_session
             )
             self.send("univers_stop")
             return

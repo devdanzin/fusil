@@ -4,6 +4,7 @@
 (handle_abort) while still exiting via SIGABRT (abort_on_error), so the in-loop OOM dedup can
 resolve an abort's crash site straight from stdout -- no gdb re-run. Pure-Python.
 """
+
 import os
 import tempfile
 import unittest
@@ -55,11 +56,13 @@ AddressSanitizer:DEADLYSIGNAL
     #17 0x55 in list_dealloc /src/Objects/listobject.c:567:13
 """
 
-SNAPSHOT = "\n".join([
-    "# oom_id\tkind\tkeytype\tkey",
-    "OOM-9001\tabort\tfunc\tObjects/tupleobject.c:tuple_dealloc",
-    "OOM-9001\tabort\tline\tObjects/tupleobject.c:277",
-])
+SNAPSHOT = "\n".join(
+    [
+        "# oom_id\tkind\tkeytype\tkey",
+        "OOM-9001\tabort\tfunc\tObjects/tupleobject.c:tuple_dealloc",
+        "OOM-9001\tabort\tline\tObjects/tupleobject.c:277",
+    ]
+)
 
 
 class TestDeduperResolvesAbortFromStdout(unittest.TestCase):
