@@ -10,7 +10,7 @@ from fusil.process.cmdline import CommandLine
 from fusil.process.env import Environment
 from fusil.process.prepare import ChildError, prepareProcess
 from fusil.process.replay_python import createReplayPythonScript
-from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand
+from fusil.process.tools import displayProcessStatus, locateProgram, splitCommand, target_is_asan
 from fusil.project_agent import ProjectAgent
 
 from pwd import getpwuid
@@ -54,6 +54,14 @@ class CreateProcess(ProjectAgent):
         self.cmdline = CommandLine(self, arguments)
         self.timeout = timeout
         self.max_memory = config.process_max_memory
+        # ASan targets reserve a huge virtual address space; applying RLIMIT_AS would
+        # kill them on startup (this is why the memory cap was historically disabled
+        # wholesale). Drop the cap for ASan builds (auto-detected) or when the user
+        # passes --no-memory-limit; the external cgroup cap (e.g. the fleet's systemd
+        # MemoryMax) is the real limit in that setup.
+        program = arguments[0] if arguments else None
+        if getattr(options, "no_memory_limit", False) or target_is_asan(program):
+            self.max_memory = 0
         self.max_user_process = config.process_max_user_process
         self.core_dump = config.process_core_dump
         self.stdout = stdout
