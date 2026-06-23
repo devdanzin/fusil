@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint + unit tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor is 3.13 (the code uses types.CapsuleType + PEP 701 f-strings).
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install fusil + tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .          # pulls python-ptrace (a hard runtime dependency)
+          pip install ruff==0.15.18  # pin so CI matches local lint results
+
+      - name: Ruff (lint)
+        run: ruff check fusil/ tests/ fuzzers/fusil-python-threaded
+
+      - name: Ruff (format check)
+        run: ruff format --check fusil/ tests/ fuzzers/fusil-python-threaded
+
+      - name: Unit tests
+        # numpy/h5py are optional; without them the relevant tests skip gracefully.
+        run: python -m unittest discover -s tests

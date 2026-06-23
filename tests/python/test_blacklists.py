@@ -36,8 +36,9 @@ class TestKnownEntriesPresent(unittest.TestCase):
     """Pin a few high-value entries so accidental deletion is caught."""
 
     def test_sys_trace_hooks_blacklisted(self):
-        self.assertEqual(bl.BLACKLIST["sys"] & {"settrace", "setprofile"},
-                         {"settrace", "setprofile"})
+        self.assertEqual(
+            bl.BLACKLIST["sys"] & {"settrace", "setprofile"}, {"settrace", "setprofile"}
+        )
 
     def test_resource_setrlimit_blacklisted(self):
         self.assertIn("setrlimit", bl.BLACKLIST["resource"])
