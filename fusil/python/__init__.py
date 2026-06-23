@@ -8,7 +8,7 @@ import warnings
 # recent Python versions; hide them while importing the fusil runtime stack.
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    import fusil.python.tricky_weird
+    import fusil.python.tricky_weird  # noqa: F401  (imported here to suppress its import warnings)
     from fusil.application import Application
     from fusil.config import (
         OptionGroupWithSections,

@@ -1,9 +1,9 @@
-import unittest
-import sys
+import collections.abc
 import os
+import sys
 import types
 import typing
-import collections.abc
+import unittest
 
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.

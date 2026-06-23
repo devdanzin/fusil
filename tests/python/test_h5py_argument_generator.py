@@ -1,8 +1,9 @@
-import unittest
+import ast  # For ast.literal_eval and ast.parse
 import re
 import sys
-import ast  # For ast.literal_eval and ast.parse
-from random import randint, random, sample, seed, uniform, choice as random_choice
+import unittest
+from random import choice as random_choice
+from random import randint, random, sample, uniform
 from unittest.mock import MagicMock, patch
 
 USE_NUMPY = USE_H5PY = True
@@ -14,6 +15,7 @@ except ImportError:
 
 try:
     import h5py
+
     import fusil.python.h5py.h5py_tricky_weird
     from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
 except ImportError:
@@ -22,11 +24,11 @@ except ImportError:
     H5PyArgumentGenerator = None
 
 
-import fusil.python.h5py.h5py_argument_generator
 import fusil.python.argument_generator
-from fusil.config import FusilConfig
+import fusil.python.h5py.h5py_argument_generator
 import fusil.python.h5py.h5py_tricky_weird  # For tricky names list
 import fusil.python.values  # For INTERESTING values, if parent methods are involved
+from fusil.config import FusilConfig
 
 
 class TestH5PyArgumentGenerator(unittest.TestCase):
@@ -315,7 +317,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         try:
             val = ast.literal_eval(result_expr)  # Handles True, False
             self.assertIn(val, [True, False, "invalid_track_times_val"])
-        except (ValueError, SyntaxError) as e:
+        except (ValueError, SyntaxError):
             # This case for "'invalid_track_times_val'" if ast.literal_eval fails on it directly
             # (it shouldn't, it should eval to the string itself)
             self.assertTrue(
@@ -639,19 +641,15 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     except SyntaxError as e:
                         self.fail(f"Setup line '{line}' is not valid Python: {e}")
                     if setup_snippets:  # Only check if we expect specific snippets for this case
-                        found_all_snippets = True
                         for snippet in setup_snippets:
                             if not any(snippet in line_code for line_code in setup_lines):
-                                found_all_snippets = False
                                 self.fail(
                                     f"Expected snippet '{snippet}' not found in any of the setup lines: {setup_lines}"
                                 )
-                                break
-                        # self.assertTrue(found_all_snippets, f"Not all expected snippets found for {driver}, {mode}") # Redundant if fail is used
                     elif not setup_snippets and any(
-                        "tempfile.mkstemp" in l or "os.close" in l
-                        for l in setup_lines
-                        if not l.startswith("#")
+                        "tempfile.mkstemp" in line or "os.close" in line
+                        for line in setup_lines
+                        if not line.startswith("#")
                     ):
                         # If we didn't expect disk operations but they seem to be there
                         self.fail(
@@ -1012,11 +1010,6 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         result_expr = self.h5_arg_gen.genDataForFancyIndexing_expr(block_shape_expr, dtype_expr)
         self.assertIsInstance(result_expr, str)
 
-        expected_call_structure = (
-            f"numpy.random.randint(0, 255, size={block_shape_expr}, dtype={dtype_expr})"
-        )
-        # This will fail due to the f-string evaluating block_shape_expr as a string rather than its value.
-        # We need to check the components.
         self.assertTrue(result_expr.startswith("numpy.random.randint(0, 255, size=("))
         self.assertIn(f"dtype={dtype_expr}", result_expr)
         self.assertTrue(result_expr.endswith(")"))
@@ -1075,7 +1068,7 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                     self.assertTrue(
                         val.startswith("/")
                         or val in [".", ".."]
-                        or (not "/" in val and len(val) > 0)
+                        or ("/" not in val and len(val) > 0)
                         or (
                             val == "/mocked/group/path" and group_path_expr.isidentifier()
                         ),  # from mock

@@ -27,14 +27,13 @@ import copy
 import inspect
 import os
 from pathlib import Path
-from textwrap import dedent
-from typing import Any
-from random import choice, randint, random, choices
+from random import choice, choices, randint, random
 from sys import stderr
-from typing import TYPE_CHECKING
+from textwrap import dedent
+from typing import TYPE_CHECKING, Any
 
 import fusil.python.values
-from fusil.python.jit.ast_pattern_generator import ASTPatternGenerator, UOP_RECIPES
+from fusil.python.jit.ast_pattern_generator import UOP_RECIPES, ASTPatternGenerator
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
 from fusil.write_code import CodeTemplate as CT
 

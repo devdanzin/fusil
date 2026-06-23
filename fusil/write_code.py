@@ -1,7 +1,7 @@
 import re
 import textwrap
 from os import chmod
-from textwrap import dedent, indent
+from textwrap import dedent
 
 
 class CodeTemplate:

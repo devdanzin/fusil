@@ -1,7 +1,7 @@
-import unittest
-import sys
-import os
 import ast
+import os
+import sys
+import unittest
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
-    from fusil.python.values import INTERESTING, BUFFER_OBJECTS, SURROGATES
+    from fusil.python.values import BUFFER_OBJECTS, INTERESTING, SURROGATES
 
     VALUES_AVAILABLE = True
 except ImportError as e:

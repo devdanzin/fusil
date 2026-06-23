@@ -9,7 +9,8 @@ undesirable behavior in Python code and C extensions.
 
 import logging
 import pathlib
-from fusil.python.samples import weird_classes, tricky_typing, tricky_objects
+
+from fusil.python.samples import tricky_objects, tricky_typing, weird_classes
 
 logger = logging.getLogger(__name__)
 

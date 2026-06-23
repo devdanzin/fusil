@@ -11,8 +11,8 @@ from fusil.config import FusilConfig
 from fusil.project import Project
 from fusil.project_agent import ProjectAgent
 from fusil.python.blacklists import MODULE_BLACKLIST
-from fusil.python.list_all_modules import ListAllModules
 from fusil.python.fixtures import ensure_fixture_files
+from fusil.python.list_all_modules import ListAllModules
 from fusil.python.utils import print_running_time
 from fusil.python.write_python_code import WritePythonCode
 

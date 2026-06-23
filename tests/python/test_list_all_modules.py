@@ -1,9 +1,9 @@
-import unittest
-import sys
 import os
 import shutil
+import sys
 import tempfile
-from unittest.mock import MagicMock, patch
+import unittest
+from unittest.mock import MagicMock
 
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
@@ -12,7 +12,6 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 from fusil.python.list_all_modules import ListAllModules
-
 
 # --- The Test Suite Class ---
 

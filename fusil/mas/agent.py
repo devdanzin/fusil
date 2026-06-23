@@ -36,9 +36,6 @@ class Agent(object):
             self.mta = None
             self.mailbox = None
 
-    def __cmp__(self, other):
-        return cmp(self.agent_id, other.agent_id)
-
     def __del__(self):
         try:
             if hasattr(self, "is_active"):

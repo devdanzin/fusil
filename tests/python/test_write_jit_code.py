@@ -1,15 +1,16 @@
-import unittest
 import ast
 import builtins
 import math
+import unittest
 from abc import ABC, abstractmethod
 from unittest.mock import MagicMock, patch
+
+from fusil.python.argument_generator import ArgumentGenerator
+from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 # Import the classes we want to test
 from fusil.python.jit.write_jit_code import WriteJITCode
 from fusil.python.write_python_code import WritePythonCode
-from fusil.python.argument_generator import ArgumentGenerator
-from fusil.python.jit.bug_patterns import BUG_PATTERNS
 
 # The AST mutator was extracted into the lafleur project; fusil imports it from there
 # (write_jit_code.py degrades gracefully when lafleur is absent). The test below that
@@ -494,13 +495,13 @@ class TestWriteJITCode(unittest.TestCase):
         self._assert_is_valid_python(generated_code)
 
         # Assert that the key components of the three-phase attack are present.
-        self.assertIn(f"PHASE 1: Warming up", generated_code)
-        self.assertIn(f"PHASE 2: Invalidating", generated_code)
+        self.assertIn("PHASE 1: Warming up", generated_code)
+        self.assertIn("PHASE 2: Invalidating", generated_code)
 
         # --- THE FIX ---
         # Use the semantic marker comments to check for correct ordering.
-        invalidation_marker = f"PHASE 2: Invalidating method on class."
-        reexecute_marker = f"PHASE 3: Re-executing to check for crash."
+        invalidation_marker = "PHASE 2: Invalidating method on class."
+        reexecute_marker = "PHASE 3: Re-executing to check for crash."
 
         invalidation_index = generated_code.find(invalidation_marker)
         reexecute_index = generated_code.find(reexecute_marker)

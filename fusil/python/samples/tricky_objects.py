@@ -1,6 +1,5 @@
-import types
 import inspect
-import itertools
+import types
 
 tricky_cell = types.CellType(None)
 tricky_simplenamespace = types.SimpleNamespace(dummy=None, cell=tricky_cell)

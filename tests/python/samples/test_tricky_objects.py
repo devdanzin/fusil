@@ -1,7 +1,7 @@
-import unittest
-import sys
 import os
+import sys
 import types
+import unittest
 
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
@@ -12,29 +12,29 @@ sys.path.insert(0, PROJECT_ROOT)
 try:
     # --- Import all the objects to be tested ---
     from fusil.python.samples.tricky_objects import (
+        TrickyClass,
         TrickyDescriptor,
         TrickyMeta,
-        TrickyClass,
-        tricky_instance,
-        tricky_cell,
-        tricky_simplenamespace,
         tricky_capsule,
+        tricky_cell,
+        tricky_classmethod,
+        tricky_classmethod_descriptor,
+        tricky_closure,
+        tricky_code,
+        tricky_dict,
+        tricky_frame,
+        tricky_function,
+        tricky_genericalias,
+        tricky_instance,
+        tricky_lambda,
+        tricky_list_with_cycle,
+        tricky_mappingproxy,
         tricky_module,
         tricky_module2,
-        tricky_genericalias,
-        tricky_dict,
-        tricky_mappingproxy,
-        tricky_function,
-        tricky_lambda,
-        tricky_classmethod,
-        tricky_staticmethod,
         tricky_property,
-        tricky_code,
-        tricky_closure,
-        tricky_classmethod_descriptor,
-        tricky_frame,
+        tricky_simplenamespace,
+        tricky_staticmethod,
         tricky_traceback,
-        tricky_list_with_cycle,
     )
 
     SAMPLES_AVAILABLE = True

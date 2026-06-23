@@ -1,17 +1,13 @@
-from os import rename
+import grp
+import re
+from errno import EPERM
+from os import chown, rename
 from os.path import basename
 
 from fusil.directory import Directory
 from fusil.error import FusilError
 from fusil.session_agent import SessionAgent
 from fusil.tools import makeUnicode
-
-from os import chown, getgid
-
-import grp
-import re
-from errno import EPERM
-
 from fusil.unsafe import permissionHelp
 
 # allow letters, digits, understand and dash

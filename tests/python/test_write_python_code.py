@@ -1,10 +1,10 @@
-import unittest
-import sys
-import os
 import ast
+import os
+import sys
+import unittest
 from io import StringIO
-from unittest.mock import patch, MagicMock
-from types import ModuleType, FunctionType, BuiltinFunctionType
+from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 # --- Test Setup: Path Configuration ---
 # This ensures the test runner can find the 'fusil' package.
@@ -15,16 +15,15 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, "..", "..")
 sys.path.insert(0, PROJECT_ROOT)
 
 # --- Imports of Code to be Tested ---
-from fusil.python.write_python_code import WritePythonCode, PythonFuzzerError
-from fusil.config import FusilConfig
 from python._test_options import make_test_options
 
 # The following are imported to create realistic mocks or for type checks
-import fusil.python.tricky_weird
+from fusil.python.write_python_code import PythonFuzzerError, WritePythonCode
 
 # Conditional import for h5py to match the logic in the tested code
 try:
     import h5py
+
     from fusil.python.h5py.write_h5py_code import WriteH5PyCode
 
     H5PY_AVAILABLE = True

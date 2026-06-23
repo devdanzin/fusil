@@ -1,12 +1,10 @@
 from errno import EACCES
-from os import X_OK, access, chdir
+from os import X_OK, access, chdir, getgid, getuid, setgid, setgroups, setuid
+from pwd import getpwuid
 from shutil import chown
 
 from fusil.process.tools import allowCoreDump, beNice, limitMemory, limitUserProcess
 from fusil.unsafe import permissionHelp
-
-from os import getgid, getuid, setgid, setgroups, setuid
-from pwd import getpwuid
 
 
 class ChildError(Exception):
@@ -46,7 +44,7 @@ def prepareProcess(process):
     except OSError as err:
         print(f"CHDIR ERROR: {err}", file=stderr)
         print(
-            f"Make sure the whole path is accessible to user 'fusil' (chmod +xr path_part).",
+            "Make sure the whole path is accessible to user 'fusil' (chmod +xr path_part).",
             file=stderr,
         )
         if err.errno != EACCES:

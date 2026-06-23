@@ -16,9 +16,9 @@ earlier assertion or a deeper frame is a known bug. The snapshot file format is 
 contract shared with the catalog's ``ingest.py``.
 """
 
-import re
-import os
 import collections
+import os
+import re
 import subprocess
 
 # ---- stdout classification ----
