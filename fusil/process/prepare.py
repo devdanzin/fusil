@@ -56,8 +56,7 @@ def prepareProcess(process):
 
     # Make sure that the program is executable by the current user
     program = process.current_arguments[0]
-    # if not access(program, X_OK):
-    if 0:
+    if not access(program, X_OK):
         user = getuid()
         user = getpwuid(user).pw_name
         message = "The user %s is not allowed to execute the file %s" % (user, program)
@@ -67,9 +66,9 @@ def prepareProcess(process):
         print(message, file=stderr)
         raise ChildError(message)
 
-    # Limit process resources
-    if 0:
-        limitResources(process, config, options)
+    # Limit process resources (memory cap is skipped for ASan targets / --no-memory-limit;
+    # see CreateProcess.__init__ where max_memory is zeroed in that case).
+    limitResources(process, config, options)
 
 
 def limitResources(process, config, options):

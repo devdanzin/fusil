@@ -1,8 +1,9 @@
 import re
+from functools import lru_cache
 from os import X_OK, access, devnull, getcwd, getenv, pathsep
 from os.path import dirname, isabs, normpath
 from os.path import join as path_join
-from subprocess import STDOUT, Popen
+from subprocess import STDOUT, Popen, SubprocessError, run
 
 
 from resource import (
@@ -40,6 +41,36 @@ def _setrlimit(key, value, change_hard):
 
 def limitMemory(nbytes, hard=False):
     return _setrlimit(RLIMIT_AS, nbytes, hard)
+
+
+@lru_cache(maxsize=8)
+def target_is_asan(program):
+    """Best-effort: is ``program`` (an interpreter) built with AddressSanitizer?
+
+    ASan reserves an enormous virtual address space, so applying ``RLIMIT_AS`` (the
+    fuzzed-child memory cap) to an ASan target kills it on startup. Detected from the
+    interpreter's own build configuration (``CONFIG_ARGS`` records
+    ``--with-address-sanitizer``), with an ``ldd`` fallback. Any failure -> ``False``
+    (assume not ASan; the caller then applies the normal cap). Cached so the one-time
+    probe doesn't re-run per process.
+    """
+    if not program:
+        return False
+    try:
+        out = run(
+            [program, "-c",
+             "import sysconfig; print(sysconfig.get_config_var('CONFIG_ARGS') or '')"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout.lower()
+        if "sanitiz" in out or "address-sanitizer" in out:
+            return True
+    except (OSError, ValueError, SubprocessError):
+        pass
+    try:
+        out = run(["ldd", program], capture_output=True, text=True, timeout=15).stdout.lower()
+        return "asan" in out
+    except (OSError, ValueError, SubprocessError):
+        return False
 
 
 def limitUserProcess(nproc, hard=False):

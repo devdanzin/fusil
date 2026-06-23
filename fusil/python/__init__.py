@@ -23,8 +23,6 @@ with warnings.catch_warnings():
     from fusil.python.utils import print_running_time, remove_logging_pycache
     from fusil.python.write_python_code import time_start
 
-print(sys.version)
-
 IGNORE_TIMEOUT = True
 IGNORE_CPU = True
 SHOW_STDOUT = False
@@ -104,6 +102,14 @@ class Fuzzer(Application):
             help="Python executable program path (default: %s)" % PYTHON,
             type="str",
             default=PYTHON,
+        )
+        running_options.add_option(
+            "--no-memory-limit",
+            help="Don't apply the per-child memory cap (RLIMIT_AS). Automatically "
+                 "implied for AddressSanitizer targets, whose huge address-space "
+                 "reservation is incompatible with RLIMIT_AS (default: False)",
+            action="store_true",
+            default=False,
         )
         running_options.add_option(
             "--record-timeouts",
