@@ -241,23 +241,6 @@ class WritePythonCode(WriteCode):
                 (not self.options.test_private) and name.startswith("_")
                 # and not name.endswith("__")
             ):
-                # if name not in {
-                #     "__init__",
-                #     "__call__",
-                #     "__getitem__",
-                #     "__setitem__",
-                #     "__iter__",
-                #     "__next__",
-                #     "__len__",
-                #     "__contains__",
-                #     "__eq__",
-                #     "__lt__",
-                #     "__gt__",
-                #     "__le__",
-                #     "__ge__",
-                #     "__repr__",
-                #     "__str__",
-                # }:
                 continue
 
             if is_exception_type_or_instance and name == "__init__":  # Avoid re-initing exceptions
@@ -790,19 +773,7 @@ class WritePythonCode(WriteCode):
                 generation_depth=0,
             )
 
-        # Cleanup for the instance variable created in this scope (if it wasn't None already)
-        # Note: _dispatch_fuzz_on_instance does not delete the object it's passed.
-        # self.write(0, f"if '{instance_var_name}' in locals() and {instance_var_name} is not None:")
-        # self.addLevel(1)
-        # self.write(0, f"try: del {instance_var_name}")
-        # self.write(0, f"except NameError: pass")  # Should not happen with check above but defensive
-        # self.restoreLevel(self.base_level - 1)
-        # self.write_print_to_stderr(0, f'"GC after _fuzz_one_class for {class_name_str}"')
-        # self.write(0, "collect()")
-        # self.emptyLine()
-
-        # Common logic: if instance_var_name was successfully created, fuzz its methods
-        # Inside _fuzz_one_class, after instance_var_name is potentially defined:
+        # If instance_var_name was successfully created, fuzz its methods.
         self.write(
             0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:"
         )
@@ -815,7 +786,6 @@ class WritePythonCode(WriteCode):
             target_obj_actual_type_obj=class_type,  # The actual type object
             num_method_calls_to_make=self.options.methods_number,
         )
-        # self.restoreLevel(self.base_level - 1)
         self.write(0, f"del {instance_var_name} # Cleanup instance")
         self.write_print_to_stderr(
             0, f'"[{prefix}] -explicit garbage collection for class instance-"'
@@ -911,8 +881,6 @@ class WritePythonCode(WriteCode):
         # ... (It gets methods using dir() and then calls _generate_and_write_call)
         # Important: If _generate_and_write_call itself captures results and calls
         # _dispatch_fuzz_on_instance, that's another way deep diving happens generically.
-        # self.write_print_to_stderr(0, f"f'Generic method fuzzing for {{ {target_obj_expr_str}!r }} with prefix {current_prefix}'")
-        # For brevity, this is a placeholder. Your actual generic fuzzing logic would go here.
         # This part usually involves:
         # 1. Getting a list of callable attributes (methods).
         # 2. Looping `num_calls` times.
@@ -1026,12 +994,11 @@ class WritePythonCode(WriteCode):
             methods_dict = self._get_object_methods(
                 target_obj_actual_type_obj, target_obj_class_name
             )
-        else:  # Try to get methods at runtime in generated script (less ideal for setup)
-            # self.write(0,
-            #            f"try: runtime_methods_{current_prefix} = {{name: getattr({target_obj_expr_str}, name) for name in dir({target_obj_expr_str}) if callable(getattr({target_obj_expr_str}, name, None))}}")
-            # This ^ is complex for generated code. Simpler to rely on type info if available.
-            # For now, we'll assume methods_dict comes from _get_object_methods based on type info.
-            pass  # Fallback or skip if no type info
+        else:
+            # No static type info: skip method discovery here (runtime discovery in the
+            # generated script proved too complex to be worth it; methods_dict comes from
+            # _get_object_methods based on type info).
+            pass
 
         # The original callFunction/writeCode loop for random methods would go here,
         # using methods_dict. This part is from your existing fuzzer logic.
@@ -1442,7 +1409,6 @@ class WritePythonCode(WriteCode):
             )
             self.write(1, "await asyncio.gather(*task_objects, return_exceptions=True)")
             self.emptyLine()
-            # self.write(0, "asyncio.run(main_async_fuzzer_tasks())") # Python 3.7+
             self.write(0, "runner = asyncio.Runner()")
             self.write(0, "try:")
             self.write(1, "runner.run(main_async_fuzzer_tasks())")
