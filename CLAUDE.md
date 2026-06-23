@@ -81,6 +81,9 @@ for fuzzing. Point it at a CPython checkout.
 
 ## Architecture
 
+For a narrative walkthrough of the Python fuzzer (lifecycle, generation pipeline, crash
+detection, OOM/JIT, plugins, safety, option reference), see **`doc/python-fuzzer.md`**.
+
 ### Multi-agent system (MAS) core — `fusil/mas/`
 
 Everything is an `Agent` communicating by asynchronous messages. This is the substrate the
