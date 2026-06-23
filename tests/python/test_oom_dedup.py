@@ -432,5 +432,64 @@ class TestGdbResolveDropsPrivileges(unittest.TestCase):
         self.assertEqual(kw["cwd"], self.SESSION_DIR)
 
 
+class TestReadCrashStdout(unittest.TestCase):
+    """Bounded stdout reader: huge OOM-verbose / binary stdout must not stall the regexes."""
+
+    def _write(self, data):
+        fd, path = tempfile.mkstemp(suffix=".stdout")
+        os.write(fd, data)
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_small_file_read_whole(self):
+        path = self._write(b"hello\nFatal Python error: boom\n")
+        text = oom_dedup.read_crash_stdout(path)
+        self.assertIn("Fatal Python error: boom", text)
+        self.assertNotIn("elided", text)  # small files are returned intact
+
+    def test_huge_file_keeps_tail_fatal(self):
+        body = b"[OOM-SEQ] start=x\n" * 200000  # ~3.4 MB of spew in the middle
+        fatal = (
+            b"Fatal Python error: _Py_Dealloc: Deallocator of type "
+            b"'collections.deque' cleared the current exception\n"
+        )
+        text = oom_dedup.read_crash_stdout(self._write(body + fatal))
+        self.assertIn("'collections.deque' cleared the current exception", text)
+        self.assertIn("elided", text)  # the middle was dropped
+        self.assertTrue(oom_dedup.FATAL.search(text))
+
+    def test_huge_file_keeps_head_assert(self):
+        head = (
+            b"python: Objects/codeobject.c:2440: void code_dealloc(PyObject *): "
+            b"Assertion `co != NULL' failed.\n"
+        )
+        text = oom_dedup.read_crash_stdout(self._write(head + b"x" * (4 * 1024 * 1024)))
+        self.assertEqual(len(oom_dedup.all_asserts(text)), 1)  # head assert survives + parses
+
+    def test_giant_binary_line_is_capped(self):
+        # A multi-MB line with no newline is what makes the `.*?` regexes backtrack; it must
+        # be truncated, and a trailing crash signature must still be found.
+        blob = b"A(:)" * (3 * 1024 * 1024)  # ~12 MB, no newline -> one giant "line"
+        text = oom_dedup.read_crash_stdout(
+            self._write(blob + b"\nFatal Python error: Segmentation fault\n")
+        )
+        self.assertTrue(all(len(ln) <= oom_dedup._STDOUT_LINE_CAP for ln in text.split("\n")))
+        self.assertTrue(oom_dedup.SEGV.search(text))  # regexes complete and see the segv
+
+    def test_huge_tail_fatal_still_dedupes(self):
+        # End-to-end: a huge stdout whose tail carries a known fatal still labels correctly.
+        fd, snap = tempfile.mkstemp(suffix=".tsv")
+        os.write(fd, SNAPSHOT.encode())
+        os.close(fd)
+        self.addCleanup(os.remove, snap)
+        d = oom_dedup.Deduper(snap, keep=5, prune=True)
+        text = oom_dedup.read_crash_stdout(
+            self._write(b"[OOM] noise\n" * 200000 + FATAL_0022.encode() + b"\n")
+        )
+        keep, label = d.decide(text)
+        self.assertEqual(label, "OOM-0022")
+
+
 if __name__ == "__main__":
     unittest.main()
