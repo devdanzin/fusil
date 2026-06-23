@@ -1,95 +1,66 @@
-Fusil is back, sorta
-====================
+Fusil (revived: the Python fuzzer)
+==================================
 
-This is a republishing of Victor Stinner's fusil project. It's probable
-that much of the code doesn't work, as only the Python fuzzing code is
-being tested and worked on. While some development is planned for
-fuzzing Python, many other aspects of the library and other fuzzers
-are currently out of scope for this repository.
+This is a revival of Victor Stinner's `fusil` fuzzing framework. **Only the Python
+fuzzing path is actively developed and tested** — the ``fusil-python-threaded`` fuzzer and
+the ``fusil.python`` / ``fusil.python.jit`` subsystems. Its focus is finding crashes in
+CPython itself, C-extension modules, the CPython Tier-2 JIT, and out-of-memory
+(allocation-failure) error paths.
 
+The other historical fuzzers (firefox, php, mplayer, …) and non-Python subsystems
+(network, file/process mangling, X11, …) are **legacy and out of scope**: they live under
+``fuzzers/notworking/`` and ``fusil/notworking/``, may not work as-is, and are kept only so
+they remain recoverable. Many links in the old reST docs are stale (some are retrievable via
+the WayBack Machine).
 
-However, code contributions to any parts of fusil will be accepted. Just
-don't expect that new features will be worked on absent corresponding
-code.
+Fusil is built on a small multi-agent system: agents communicate by asynchronous messages,
+and a per-session score drives the fuzzer's adaptive *aggressivity*. Each session generates a
+standalone test script, runs it under the target interpreter as a sandboxed child process
+(memory/cpu/process limits, dropped privileges, redirected output), and watches the child for
+crash signals (exit signal/code, and stdout/stderr patterns like ``segmentation fault`` /
+``Fatal Python error`` / ``AddressSanitizer``).
 
-Many links in the docs don't work, but some can be retrieved using the
-WayBack Machine. We'll probably update them sometime.
-
-------------------------------------------------------------
-
-Fusil is a Python library used to write fuzzing programs. It helps to start
-process with a prepared environment (limit memory, environment variables,
-redirect stdout, etc.), start network client or server, and create mangled
-files. Fusil has many probes to detect program crash: watch process exit code,
-watch process stdout and syslog for text patterns (eg. "segmentation fault"),
-watch session duration, watch cpu usage (process and system load), etc.
-
-Fusil is based on a multi-agent system architecture. It computes a session
-score used to guess fuzzing parameters like number of injected errors to input
-files.
-
-Available fuzzing projects: ClamAV, Firefox (contains an HTTP server),
-gettext, gstreamer, identify, libc_env, libc_printf, libexif, linux_syscall,
-mplayer, php, poppler, vim, xterm.
-
-Website: http://bitbucket.org/haypo/fusil/wiki/Home
+Website: https://github.com/devdanzin/fusil
 
 
-Usage
-=====
+Quick start
+===========
 
-Fusil is a library and a set of fuzzers called "fusil-...". To run a fuzzer,
-call it by its name. Example: ::
+Fusil requires **Python 3.13+** and ``python-ptrace``. Install it (editable, with the
+optional numpy/h5py argument-generator support) and run the Python fuzzer::
 
-    $ fusil-gettext
-    Fusil version 0.9.1 -- GNU GPL v2
-    http://bitbucket.org/haypo/fusil/wiki/Home
-    (...)
-    [0][session 13] Start session
-    [0][session 13] ------------------------------------------------------------
-    [0][session 13] PID: 16989
-    [0][session 13] Signal: SIGSEGV
-    [0][session 13] Invalid read from 0x0c1086e0
-    [0][session 13] - instruction: CMP EDX, [EAX]
-    [0][session 13] - mapping: 0x0c1086e0 is not mapped in memory
-    [0][session 13] - register eax=0x0c1086e0
-    [0][session 13] - register edx=0x00000019
-    [0][session 13] ------------------------------------------------------------
-    [0][session 13] End of session: score=100.0%, duration=3.806 second
-    (...)
-    Success 1/1!
-    Project done: 13 sessions in 5.4 seconds (414.5 ms per session), total 5.9 seconds, aggresssivity: 19.0%
-    Total: 1 success
-    Keep non-empty directory: /home/haypo/prog/SVN/fusil/trunk/run-3
+    $ pip install -e '.[numpy,h5py]'
+    # or from a checkout, without installing:
+    $ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe --modules json --sessions 5
 
+``--unsafe`` runs the fuzzed child processes as the current user. Without it, fusil expects a
+dedicated unprivileged ``fusil`` user/group to drop to (the safe default for real runs).
+**Never** point ``--filenames`` at files you care about — fuzzed calls may overwrite them.
 
-Features
-========
-
-Why using Fusil instead your own hand made C script?
-
- * Fusil limits child process environment: limit memory, use timeout, make
-   sure that process is killed on session end
- * Fusil waits until system load is load before starting a fuzzing session
- * Fusil creates a session directory used as the process current working
-   directory and Fusil only creates files in this directory (and not in /tmp)
- * Fusil stores all actions in fusil.log but also session.log for all
-   actions related of a session
- * Fusil has multiple available probes to compute session score: guess if
-   a sessions is a succes or not
- * Fusil redirects process output to a file and searchs bug text patterns
-   in the stdout/stderr (Fusil contains many text patterns to detect crashes
-   and problems)
-
-
-Installation
-============
-
-Read INSTALL documentation file.
+See ``fusil/python/__init__.py`` (``createFuzzerOptions``) for the full option list; common
+ones include ``--only-c``, ``--jit-fuzz``, ``--oom-fuzz`` / ``--oom-seq``, ``--deep-dive``,
+and ``--no-memory-limit``.
 
 
 Documentation
 =============
 
-Read doc/index.rst: documentation index.
+- **doc/python-fuzzer.md** — how the Python fuzzer works (start here).
+- **README_JIT.md** — the JIT fuzzing subsystem design.
+- **doc/oom-fuzzing.md**, **doc/oom-sequences.md**, **doc/oom-dedup-plan.md** — OOM injection
+  and in-loop crash dedup.
+- **CLAUDE.md** — repository/contributor orientation.
+- **doc/index.rst** — the original (largely legacy) reST documentation index.
 
+
+Development
+===========
+
+Tests use ``unittest`` (not pytest)::
+
+    $ python -m unittest discover -s tests
+    $ ruff check fusil/        # lint
+    $ ruff format fusil/       # format
+
+Contributions to any part of fusil are welcome, but active development and CI focus on the
+Python fuzzer.
