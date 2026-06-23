@@ -1,0 +1,5 @@
+# Bulk reformatting commits to skip in git blame.
+# Configure once: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Phase 4: ruff format the live tree
+d08adba62039285655527fe69093f95a91bba9c0
