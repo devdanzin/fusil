@@ -603,9 +603,14 @@ class Fuzzer(Application):
         try:
             with open(os.path.join(session_dir, "stdout"), errors="replace") as fh:
                 text = fh.read()
-        except OSError:
+            return self._deduper.decide(text, source_path=os.path.join(session_dir, "source.py"))
+        except Exception as err:
+            # Never let a dedupe failure abort the session's keep/rename (deinit): keep the
+            # crash dir unlabelled rather than lose it. (decide() resolves segvs via gdb, whose
+            # captured output can be binary -- a past UnicodeDecodeError here left crash dirs
+            # stuck as session-NNNN instead of renamed.)
+            self.error("OOM keep-policy failed (%s); keeping crash dir unlabelled" % err)
             return True, None
-        return self._deduper.decide(text, source_path=os.path.join(session_dir, "source.py"))
 
     def exit(self, keep_log: bool = True) -> None:
         """Clean up and exit the fuzzer, printing runtime statistics."""

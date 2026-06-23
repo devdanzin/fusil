@@ -36,7 +36,12 @@ class TestKeepPolicy(unittest.TestCase):
         with os.fdopen(fd, "w") as fh:
             fh.write(SNAPSHOT)
         self.addCleanup(os.unlink, path)
-        return SimpleNamespace(_deduper=Deduper(path, keep=keep, prune=prune))
+        # `error` mirrors the Application logger the real Fuzzer has; the keep-policy uses it
+        # to report a dedupe failure before falling back to (True, None).
+        return SimpleNamespace(
+            _deduper=Deduper(path, keep=keep, prune=prune),
+            error=lambda *a, **k: None,
+        )
 
     def _session(self, text):
         d = tempfile.mkdtemp()
