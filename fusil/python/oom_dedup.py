@@ -124,10 +124,16 @@ def match(c, snap):
         if hit:
             return hit, "assert"
     if c.get("fatal_msg"):
+        # Match when the cataloged key is a prefix of the crash message (a key may be a short
+        # signature, e.g. "_Py_CheckFunctionResult:") OR the (truncation-shortened) crash
+        # message is a prefix of the key. The second clause must use the FULL crash message,
+        # not a fixed [:30] slice -- a short slice stops before the discriminating content
+        # (e.g. "_Py_Dealloc: Deallocator of type '<TYPE>'") and conflates type-specific keys
+        # (OOM-0007 'Context' vs OOM-0023 '_StoreAction'), mislabelling any new type.
         hit = set(
             o
             for k, o in snap["msg"]
-            if c["fatal_msg"].startswith(k) or k.startswith(c["fatal_msg"][:30])
+            if c["fatal_msg"].startswith(k) or k.startswith(c["fatal_msg"])
         )
         if hit:
             return hit, "msg"

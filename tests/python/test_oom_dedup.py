@@ -89,6 +89,30 @@ class TestMatch(unittest.TestCase):
         ids, _ = self._match(FATAL_0022)
         self.assertEqual(ids, {"OOM-0022"})
 
+    def test_msg_match_distinguishes_by_type(self):
+        # Two type-specific "Deallocator of type 'X'" msg keys must not be conflated by their
+        # shared prefix: each known type maps to its own bug, and a NEW type matches neither
+        # (a too-short prefix slice used to ignore the type and collide the whole family).
+        snap = oom_dedup.load_snapshot(
+            [
+                "OOM-0007\tfatal\tmsg\t"
+                "_Py_Dealloc: Deallocator of type 'Context' cleared the curre",
+                "OOM-0023\tfatal\tmsg\t"
+                "_Py_Dealloc: Deallocator of type '_StoreAction' cleared the ",
+            ]
+        )
+
+        def decide_type(t):
+            text = (
+                "Fatal Python error: _Py_Dealloc: Deallocator of type '%s' "
+                "cleared the current exception" % t
+            )
+            return oom_dedup.match(oom_dedup.classify(text), snap)[0]
+
+        self.assertEqual(decide_type("Context"), {"OOM-0007"})
+        self.assertEqual(decide_type("_StoreAction"), {"OOM-0023"})
+        self.assertEqual(decide_type("collections.deque"), set())  # new type -> no match
+
     def test_near_line(self):
         ids, how = self._match(ABORT_NEAR)
         self.assertEqual(ids, {"OOM-0004"})
