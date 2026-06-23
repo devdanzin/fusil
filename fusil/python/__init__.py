@@ -547,8 +547,6 @@ class Fuzzer(Application):
         # avoid false positive on "# assert did not crash"
         stdout.ignoreRegex(r"^And now for something completely different:")
 
-        # import_all()
-
         # In-loop OOM crash dedupe: install a keep-policy that SessionDirectory
         # consults for each crashing session (label dirs, optionally prune known dups).
         self._deduper = None
