@@ -1,7 +1,6 @@
 import unittest
 import sys
 import os
-import numpy
 
 # --- Test Setup: Path Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -9,12 +8,16 @@ PROJECT_ROOT = os.path.join(SCRIPT_DIR, '..', '..', '..')
 sys.path.insert(0, PROJECT_ROOT)
 
 try:
+    # numpy is optional; when absent the whole suite skips (see skipIf below) rather
+    # than erroring on import.
+    import numpy
     # --- Import all the objects to be tested ---
     from fusil.python.samples import tricky_numpy
 
     NUMPY_AVAILABLE = True
 except (ImportError, TypeError) as e:
     print(f"Could not import tricky_numpy module, skipping tests: {e}", file=sys.stderr)
+    numpy = None
     tricky_numpy = None
     NUMPY_AVAILABLE = False
 
