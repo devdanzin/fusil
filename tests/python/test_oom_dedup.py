@@ -328,6 +328,16 @@ class TestSegvResolution(unittest.TestCase):
         d = self._deduper(lambda sp: None)
         self.assertEqual(d.decide(SEGV, source_path="s"), (True, "oomSEGV"))
 
+    def test_resolver_exception_does_not_break_decide(self):
+        # A resolver that raises (e.g. gdb's captured output is binary -> UnicodeDecodeError)
+        # must not propagate out of decide(): segv resolution is best-effort, and a raise here
+        # previously aborted the session's keep/rename in deinit, leaving dirs as session-NNNN.
+        def boom(sp):
+            raise UnicodeDecodeError("utf-8", b"\x8b", 0, 1, "invalid start byte")
+
+        d = self._deduper(boom)
+        self.assertEqual(d.decide(SEGV, source_path="s"), (True, "oomSEGV"))
+
     def test_resolved_known_segv_prunes_over_cap(self):
         d = self._deduper(
             lambda sp: "dictiter_dealloc@Objects/dictobject.c:5532", keep=1, prune=True

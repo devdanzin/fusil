@@ -277,12 +277,17 @@ def gdb_crash_site(python_bin, source_path, timeout=120, drop_uid=None, drop_gid
             ],
             capture_output=True,
             text=True,
+            # The re-run prints the fuzzed program's own stdout into gdb's captured output,
+            # which is frequently binary (e.g. a gzip/zlib vehicle emits 0x1f 0x8b ...). Decode
+            # tolerantly so it never raises UnicodeDecodeError -- otherwise the exception would
+            # escape decide() and abort the session's keep/rename in deinit.
+            errors="replace",
             timeout=timeout,
             cwd=cwd,
             env={**os.environ, "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0"},
             **drop,
         ).stdout
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return []
     return extract_sites_from_bt(out)
 
@@ -336,22 +341,29 @@ class Deduper:
         self.kept = collections.Counter()  # bug -> directories kept
 
     def _resolve(self, source_path):
-        """Return a list of 'func@file:line' chain frames (normalising the resolver)."""
-        r = (
-            self._resolver(source_path)
-            if self._resolver is not None
-            else (
-                gdb_crash_site(
-                    self.python_bin,
-                    source_path,
-                    self.gdb_timeout,
-                    drop_uid=self.drop_uid,
-                    drop_gid=self.drop_gid,
+        """Return a list of 'func@file:line' chain frames (normalising the resolver).
+
+        Any failure in the resolver is swallowed (-> no chain): segv resolution is a
+        best-effort enrichment, and decide() must never raise into the caller's keep/rename.
+        """
+        try:
+            r = (
+                self._resolver(source_path)
+                if self._resolver is not None
+                else (
+                    gdb_crash_site(
+                        self.python_bin,
+                        source_path,
+                        self.gdb_timeout,
+                        drop_uid=self.drop_uid,
+                        drop_gid=self.drop_gid,
+                    )
+                    if (self.python_bin and source_path)
+                    else None
                 )
-                if (self.python_bin and source_path)
-                else None
             )
-        )
+        except Exception:
+            return []
         if not r:
             return []
         return [r] if isinstance(r, str) else list(r)
