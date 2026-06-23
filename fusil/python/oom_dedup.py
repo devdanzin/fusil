@@ -155,9 +155,14 @@ _BT_FRAME = re.compile(
 #   "    #5 0x.. in _excinfo_clear_type /abs/path/Python/crossinterp.c:1319:15"
 # The CPython source dir is matched anywhere in the absolute path; leading libc/pthread
 # frames carry no such path and are skipped, as is fatal/dump plumbing (via _BT_SKIP).
+# The source path may be absolute (Clang builds: /home/.../Objects/foo.c:12:3) or relative
+# (GCC builds: Objects/foo.c:12, also no column). Make the absolute prefix and the column
+# optional so GCC-built crashes are parsed too -- otherwise extract_native_sites finds nothing
+# in the ASan trace and the dedup falls back to faulthandler's sparser (GCC-inlined) C-stack,
+# mislabelling known bugs as new (e.g. a whole OOM-0004 batch keyed on _Py_MergeZeroLocalRefcount).
 _ASAN_FRAME = re.compile(
-    r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+\S*?"
-    r"/((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)"
+    r"#\d+\s+0x[0-9a-fA-F]+\s+in\s+(\w+)\s+(?:\S*?/)?"
+    r"((?:Objects|Python|Modules|Include|Parser)/[\w./+-]+\.(?:c|h)):(\d+)"
 )
 # fatal/assert/dump plumbing -- skip so a recorded frame is the real crash/assert site.
 # The debug allocator's free-time checks (_PyMem_DebugCheckAddress / _PyMem_DebugRawFree /
@@ -173,6 +178,14 @@ _BT_SKIP = re.compile(
     r"|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*"
     r"|_Py_DumpExtensionModules"
     r"|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree"
+    # The _testcapi set_nomemory injection hooks and the PyMem_/PyObject_ free/realloc
+    # wrappers are pass-through allocator plumbing: when one is the innermost frame the real
+    # defect is the CALLER doing the bad free (e.g. free_list_items = OOM-0004), so skip them
+    # too. Without this, a double-free caught in the free hook resolves to hook_ffree/PyMem_Free
+    # (not a catalog site) and the crash is mislabelled oomNEW -- notably on GCC builds, whose
+    # ASan trace exposes these frames where Clang inlines them away.
+    r"|hook_fmalloc|hook_fcalloc|hook_frealloc|hook_ffree"
+    r"|PyMem_Free|PyMem_RawFree|PyObject_Free|PyMem_Realloc|PyMem_RawRealloc|PyObject_Realloc"
     r"|tracemalloc_(raw_)?(alloc|calloc|realloc|free))$"
 )
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame

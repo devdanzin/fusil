@@ -272,6 +272,22 @@ class TestNativeBacktrace(unittest.TestCase):
         # and it matches the catalog bug keyed on that .c line, not labelled oomNEW.
         self.assertEqual(self._deduper().decide(bt, source_path=None), (True, "OOM-0003"))
 
+    def test_gcc_relative_path_frames_parsed(self):
+        # GCC-built ASan traces use a RELATIVE source path and no column (Objects/foo.c:68),
+        # vs Clang's absolute path + column (/abs/Objects/foo.c:68:9). Both must parse, else
+        # GCC crashes fall back to faulthandler's inlined C-stack and known bugs (here the
+        # OOM-0003 site) get mislabelled oomNEW.
+        bt = "\n".join(
+            [
+                "==1==ERROR: AddressSanitizer: SEGV on unknown address",
+                "    #5 0x5e in Py_DECREF Include/refcount.h:359",
+                "    #6 0x5e in code_dealloc Objects/codeobject.c:2440",
+            ]
+        )
+        sites = oom_dedup.extract_native_sites(bt)
+        self.assertEqual(sites[0], "code_dealloc@Objects/codeobject.c:2440")
+        self.assertEqual(self._deduper().decide(bt, source_path=None), (True, "OOM-0003"))
+
 
 class TestExtractSite(unittest.TestCase):
     def test_skips_plumbing_returns_real_site(self):
