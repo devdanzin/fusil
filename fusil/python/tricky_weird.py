@@ -7,13 +7,16 @@ circular references, and other pathological objects that can expose crashes and 
 undesirable behavior in Python code and C extensions.
 """
 
+import logging
 import pathlib
 from fusil.python.samples import weird_classes, tricky_typing, tricky_objects
+
+logger = logging.getLogger(__name__)
 
 try:
     from fusil.python.samples import tricky_numpy
 except ImportError:
-    print("Could not import tricky_numpy.")
+    logger.info("Could not import tricky_numpy (numpy not available).")
     tricky_numpy = None
 
 weird_instance_names = list(weird_classes.weird_instances.keys())

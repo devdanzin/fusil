@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import inspect
+import logging
 import time
 from random import choice, randint, random
 from textwrap import dedent, indent
@@ -22,34 +23,39 @@ from fusil.write_code import WriteCode
 if TYPE_CHECKING:
     from fusil.python.python_source import PythonSource
 
+# Module logger for the optional-feature detection below. These run at import time (before
+# the ApplicationLogger configures the root logger), so they no longer print unconditionally
+# to stdout (which the crash detector scrapes); they surface in fusil.log / under -v instead.
+logger = logging.getLogger(__name__)
+
 try:
     from fusil.python.template_strings import TEMPLATES
 
-    print("Template strings available.")
+    logger.info("Template strings available.")
     _ARG_GEN_USE_TEMPLATES = True
 except ImportError:
-    print("Template strings not available.")
+    logger.info("Template strings not available.")
     _ARG_GEN_USE_TEMPLATES = False
 
 try:
     import numpy  # type: ignore
 
-    print(f"Numpy {numpy.__version__} is available, using it to build tricky arrays.")
+    logger.info("Numpy %s is available, using it to build tricky arrays.", numpy.__version__)
     _ARG_GEN_USE_NUMPY = True
 except ImportError:
-    print("Numpy is not available.")
+    logger.info("Numpy is not available.")
     _ARG_GEN_USE_NUMPY = False
 
 _ARG_GEN_USE_H5PY = False
 if _ARG_GEN_USE_NUMPY:
     try:
         import h5py
-        print(f"h5py is available.")
+        logger.info("h5py is available.")
         _ARG_GEN_USE_H5PY = True
         from fusil.python.h5py.write_h5py_code import WriteH5PyCode
         import fusil.python.h5py.h5py_tricky_weird
     except ImportError:
-        print("h5py is not available.")
+        logger.info("h5py is not available.")
         _ARG_GEN_USE_H5PY = False
 
 time_start = time.time()

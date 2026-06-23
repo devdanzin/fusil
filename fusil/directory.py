@@ -1,12 +1,14 @@
 import grp
+import logging
 import pwd
-import resource
 from os import chmod, chown, mkdir, scandir, umask
 from os.path import basename
 from os.path import exists as path_exists
 from os.path import join as path_join
 from shutil import rmtree
 from sys import getfilesystemencoding
+
+logger = logging.getLogger(__name__)
 
 
 class Directory:
@@ -30,7 +32,7 @@ class Directory:
                 gid = grp.getgrnam("fusil").gr_gid
                 chown(self.directory, uid, gid)
             except Exception as e:
-                print(e)
+                logger.warning("Could not chown %s to fusil: %s", self.directory, e)
         umask(old_umask)
 
     def isEmpty(self, ignore_generated=False):
@@ -45,8 +47,7 @@ class Directory:
                 return False
             return True
         except OSError as e:
-            print(e)
-            print(resource.getrusage(resource.RUSAGE_SELF))
+            logger.warning("Could not scan directory %s: %s", self.directory, e)
             return False
 
     def rmtree(self):
