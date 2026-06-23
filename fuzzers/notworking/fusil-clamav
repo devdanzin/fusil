@@ -17,9 +17,9 @@ from fusil.application import Application
 from optparse import OptionGroup
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
-from fusil.process.attach import AttachProcess
+from fusil.notworking.process.attach import AttachProcess
 from fusil.process.stdout import WatchStdout
-from fusil.auto_mangle import AutoMangle
+from fusil.notworking.auto_mangle import AutoMangle
 from fusil.file_watch import FileWatch
 
 class Fuzzer(Application):

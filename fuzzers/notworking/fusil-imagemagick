@@ -11,14 +11,14 @@ INCR_MANGLE = False
 
 from fusil.application import Application
 from optparse import OptionGroup
-from fusil.process.mangle import MangleProcess
+from fusil.notworking.process.mangle import MangleProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
 if INCR_MANGLE:
-    from fusil.incr_mangle import IncrMangle as BaseMangle
+    from fusil.notworking.incr_mangle import IncrMangle as BaseMangle
 else:
-    from fusil.auto_mangle import AutoMangle as BaseMangle
-from fusil.fixpng import fixPNG
+    from fusil.notworking.auto_mangle import AutoMangle as BaseMangle
+from fusil.notworking.fixpng import fixPNG
 
 class Fuzzer(Application):
     NAME = "imagemagick"

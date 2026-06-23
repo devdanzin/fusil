@@ -37,7 +37,7 @@ FORMAT_TO_SIZE = {
 from fusil.application import Application
 from optparse import OptionGroup
 from random import choice, randint
-from fusil.c_tools import encodeUTF32, quoteString, CodeC, CompilerError
+from fusil.notworking.c_tools import encodeUTF32, quoteString, CodeC, CompilerError
 from fusil.process.create import CreateProcess
 from fusil.process.watch import WatchProcess
 from fusil.project_agent import ProjectAgent

@@ -1,6 +1,6 @@
 from socket import AF_INET, SOCK_STREAM
 
-from fusil.network.client import NetworkClient
+from fusil.notworking.network.client import NetworkClient
 
 
 class TcpClient(NetworkClient):

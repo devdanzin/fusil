@@ -8,16 +8,16 @@ USE_TIME = False
 USE_STDOUT = True
 
 from fusil.application import Application
-from fusil.process.time_watch import ProcessTimeWatch
-from fusil.process.mangle import MangleProcess
+from fusil.notworking.process.time_watch import ProcessTimeWatch
+from fusil.notworking.process.mangle import MangleProcess
 from fusil.process.watch import WatchProcess
 from fusil.process.stdout import WatchStdout
 if MANGLE == "auto":
-    from fusil.auto_mangle import AutoMangle as MangleFile
+    from fusil.notworking.auto_mangle import AutoMangle as MangleFile
 elif MANGLE == "incr":
-    from fusil.incr_mangle import IncrMangle as MangleFile
+    from fusil.notworking.incr_mangle import IncrMangle as MangleFile
 else:
-    from fusil.mangle import MangleFile
+    from fusil.notworking.mangle import MangleFile
 import re
 
 class Fuzzer(Application):

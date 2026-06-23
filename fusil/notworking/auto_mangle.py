@@ -1,4 +1,4 @@
-from fusil.mangle import MangleFile
+from fusil.notworking.mangle import MangleFile
 from fusil.tools import minmax
 
 

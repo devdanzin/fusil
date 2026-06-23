@@ -1,7 +1,7 @@
 from array import array
 from random import choice, randint
 
-from fusil.mangle_op import MAX_INCR, SPECIAL_VALUES
+from fusil.notworking.mangle_op import MAX_INCR, SPECIAL_VALUES
 from fusil.tools import minmax
 
 

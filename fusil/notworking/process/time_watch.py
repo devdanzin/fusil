@@ -1,6 +1,6 @@
 from time import time
 
-from fusil.time_watch import TimeWatch
+from fusil.notworking.time_watch import TimeWatch
 
 
 class ProcessTimeWatch(TimeWatch):
