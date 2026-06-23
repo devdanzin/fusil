@@ -17,6 +17,7 @@ sys.path.insert(0, PROJECT_ROOT)
 # --- Imports of Code to be Tested ---
 from fusil.python.write_python_code import WritePythonCode, PythonFuzzerError
 from fusil.config import FusilConfig
+from python._test_options import make_test_options
 # The following are imported to create realistic mocks or for type checks
 import fusil.python.tricky_weird
 
@@ -88,16 +89,18 @@ class TestWritePythonCode(unittest.TestCase):
         # This simulates the environment in which WritePythonCode operates.
         self.mock_python_source = MagicMock()
 
-        # We use a real FusilConfig object to hold realistic options.
-        options = FusilConfig(read=False)
-        options.functions_number = 5
-        options.methods_number = 3
-        options.classes_number = 2
-        options.objects_number = 2
-        options.fuzz_exceptions = False
-        options.test_private = False
-        options.no_numpy = True  # Disable numpy-dependent features by default for simpler tests
-        options.no_tstrings = True  # Disable template strings by default
+        # All real fuzzer-option defaults (harvested from the option parser so the suite
+        # doesn't rot when new options are added), with test-specific overrides.
+        options = make_test_options(
+            functions_number=5,
+            methods_number=3,
+            classes_number=2,
+            objects_number=2,
+            fuzz_exceptions=False,
+            test_private=False,
+            no_numpy=True,  # Disable numpy-dependent features by default for simpler tests
+            no_tstrings=True,  # Disable template strings by default
+        )
         self.mock_python_source.options = options
         self.mock_python_source.filenames = ["/tmp/test_file1.txt", "/tmp/test_file2.log"]
         self.mock_python_source.warning = MagicMock()  # Mock the logger to avoid printing during tests
@@ -223,11 +226,13 @@ class TestWritePythonCode(unittest.TestCase):
 
     def test_write_arguments_for_call_lines_formatting(self):
         """Logic Test: Ensures _write_arguments_for_call_lines places commas and newlines correctly."""
+        # _write_arguments_for_call_lines appends a trailing comma after every argument
+        # (valid Python in a multi-line call; long-standing behavior).
         test_cases = {
             "zero_args": (0, [], ""),
-            "one_arg": (1, [["'arg1'"]], "'arg1'"),
-            "two_args": (2, [["'arg1'"], ["'arg2'"]], "'arg1',\n 'arg2'"),
-            "one_multiline_arg": (1, [["'line1'", "'line2'"]], "'line1' 'line2'")
+            "one_arg": (1, [["'arg1'"]], "'arg1',"),
+            "two_args": (2, [["'arg1'"], ["'arg2'"]], "'arg1',\n 'arg2',"),
+            "one_multiline_arg": (1, [["'line1'", "'line2'"]], "'line1' 'line2',")
         }
         for name, (num_args, arg_gen_return, expected_output) in test_cases.items():
             with self.subTest(name=name):

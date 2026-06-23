@@ -10,7 +10,14 @@ from fusil.python.jit.write_jit_code import WriteJITCode
 from fusil.python.write_python_code import WritePythonCode
 from fusil.python.argument_generator import ArgumentGenerator
 from fusil.python.jit.bug_patterns import BUG_PATTERNS
-from fusil.python.jit.ast_mutator import OperatorSwapper
+
+# The AST mutator was extracted into the lafleur project; fusil imports it from there
+# (write_jit_code.py degrades gracefully when lafleur is absent). The test below that
+# exercises OperatorSwapper directly is skipped when lafleur is not installed.
+try:
+    from lafleur.mutator import OperatorSwapper
+except ImportError:
+    OperatorSwapper = None
 
 
 class TestWriteJITCode(unittest.TestCase):
@@ -335,6 +342,8 @@ class TestWriteJITCode(unittest.TestCase):
         self.assertTrue(found_if, "ASTPatternGenerator failed to generate an 'if' statement after 100 attempts.")
         self.assertTrue(found_for, "ASTPatternGenerator failed to generate a 'for' statement after 100 attempts.")
 
+    @unittest.skipUnless(OperatorSwapper is not None,
+                         "lafleur (ASTMutator/OperatorSwapper) is not installed")
     def test_ast_mutator_operator_swapper(self):
         """
         Logic Test: Unit tests the OperatorSwapper transformer to ensure it
