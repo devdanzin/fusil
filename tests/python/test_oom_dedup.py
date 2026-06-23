@@ -491,5 +491,87 @@ class TestReadCrashStdout(unittest.TestCase):
         self.assertEqual(label, "OOM-0022")
 
 
+class TestFaulthandlerMatch(unittest.TestCase):
+    """fh_match: SEGVs with only a faulthandler symbol-stack (no ASan file:line frames)
+    resolve by innermost catalog-keyed func name instead of falling to oomSEGV."""
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".tsv")
+        os.write(fd, SNAPSHOT.encode())
+        os.close(fd)
+        self.addCleanup(os.remove, self.path)
+        self.snap = oom_dedup.load_snapshot_file(self.path)
+
+    def _segv(self, *funcs):
+        frames = "\n".join(f'  Binary file "python", at {f}+0x10 [0x55]' for f in funcs)
+        return (
+            "Fatal Python error: Segmentation fault\n"
+            "Current thread's C stack trace (most recent call first):\n" + frames + "\n"
+        )
+
+    def test_innermost_keyed_func_wins(self):
+        # detector/eval frames skipped -> code_dealloc (OOM-0003) is the innermost keyed func
+        oids, fn = oom_dedup.fh_match(
+            self._segv("_Py_DumpStack", "_Py_Dealloc", "code_dealloc", "_PyEval_EvalFrameDefault"),
+            self.snap,
+        )
+        self.assertEqual((oids, fn), ({"OOM-0003"}, "code_dealloc"))
+
+    def test_plumbing_and_eval_never_match(self):
+        # _PyEval_EvalFrameDefault IS keyed (OOM-0027) but is generic plumbing -> skipped
+        oids, _ = oom_dedup.fh_match(
+            self._segv("_Py_Dealloc", "Py_DECREF", "_PyEval_EvalFrameDefault", "PyEval_EvalCode"),
+            self.snap,
+        )
+        self.assertEqual(oids, set())
+
+    def test_decide_uses_fh_fallback(self):
+        d = oom_dedup.Deduper(self.path, keep=5)
+        keep, label = d.decide(self._segv("_Py_Dealloc", "dictiter_dealloc"))
+        self.assertEqual(label, "OOM-0006")
+
+    def test_decide_unkeyed_symbol_segv_stays_oomSEGV(self):
+        d = oom_dedup.Deduper(self.path, keep=5)
+        keep, label = d.decide(self._segv("_Py_Dealloc", "some_unkeyed_helper"))
+        self.assertEqual(label, "oomSEGV")
+
+
+class TestMsgFamily(unittest.TestCase):
+    """msgfam catch-all: a new/fuzzer clears-exc type dedups to the family (OOM-0023) while
+    type-specific keys still win (Context->0007, deque->0039), and other invariant variants
+    ('raised'/'overrode') are NOT absorbed."""
+
+    SNAP = "\n".join(
+        [
+            "# oom_id\tkind\tkeytype\tkey",
+            "OOM-0007\tfatal\tmsg\t_Py_Dealloc: Deallocator of type 'Context' cleared the curre",
+            "OOM-0039\tfatal\tmsg\t_Py_Dealloc: Deallocator of type 'collections.deque' cleared",
+            "OOM-0023\tfatal\tmsg\t_Py_Dealloc: Deallocator of type '_StoreAction' cleared the ",
+            "OOM-0023\tfatal\tmsgfam\tcleared the current exception",
+        ]
+    )
+
+    def setUp(self):
+        self.snap = oom_dedup.load_snapshot(self.SNAP.splitlines())
+
+    def _m(self, typ, verb="cleared the current exception"):
+        msg = f"_Py_Dealloc: Deallocator of type '{typ}' {verb}"
+        return oom_dedup.match(dict(fatal_msg=msg), self.snap)[0]
+
+    def test_type_specific_keys_win_over_family(self):
+        self.assertEqual(self._m("Context"), {"OOM-0007"})
+        self.assertEqual(self._m("collections.deque"), {"OOM-0039"})
+        self.assertEqual(self._m("_StoreAction"), {"OOM-0023"})
+
+    def test_new_and_fuzzer_types_fall_back_to_family(self):
+        self.assertEqual(self._m("Evil"), {"OOM-0023"})
+        self.assertEqual(self._m("weird_deque"), {"OOM-0023"})
+        self.assertEqual(self._m("UnknownHandler"), {"OOM-0023"})
+
+    def test_other_invariant_variants_not_absorbed(self):
+        self.assertEqual(self._m("Foo", "raised an exception"), set())
+        self.assertEqual(self._m("Bar", "overrode the current exception"), set())
+
+
 if __name__ == "__main__":
     unittest.main()
