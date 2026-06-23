@@ -128,6 +128,14 @@ cheaper and more targeted, and it's the right first lever — fold it into Idea 
 injection primitive (`--oom-window`, default 1), optionally randomizing `k` per sequence
 for extra spread. Frame it as coverage, not noise.
 
+> **Implemented (`--oom-seq-randomize`).** This per-sequence randomization now exists: with
+> the flag set, each emitted sequence draws its window uniformly from `[1, --oom-window]` and
+> its length from `[1, --oom-seq-len]` independently (the configured values become upper
+> bounds; the window is passed per call as `oom_run(..., window=k)`). One instance thus covers
+> a range of sequence shapes instead of a single static config — strictly more general (a
+> fixed config is just the `min == max` case). Default off; generated output is unchanged
+> without it.
+
 **Cost to be honest about:** auto-resume means the crash can occur *far* from the
 injection point (causal distance grows with `k` and sequence length), which weakens the
 "which allocation caused it" link and makes minimization harder. `k = 1` keeps it tight;

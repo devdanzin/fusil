@@ -69,7 +69,8 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --jit-mode synthesize|variational|legacy|all   (see JIT section)
 #   --oom-fuzz               OOM (allocation-failure) injection mode (see OOM section)
 #   --oom-seq                stateful call SEQUENCES (Phase 4): several calls per scan under
-#                            one failure window (found OOM-0036); --oom-seq-len/--oom-window
+#                            one failure window (found OOM-0036); --oom-seq-len/--oom-window;
+#                            --oom-seq-randomize varies len/window per sequence (those = maxes)
 #   --oom-dedup-catalog F    in-loop crash dedupe/labeling vs known_sites.tsv; add
 #                            --oom-dedup-prune to drop dups, --oom-dedup-resolve-segv
 #                            to resolve segvs via gdb so they dedupe too
@@ -164,7 +165,11 @@ str-subclass constructor bug).
 **bounded failure window** — `set_nomemory(start, start+k)` fails `k` allocations then
 *resumes* — so an allocation failure in one call can corrupt state a *later* call trips over
 (the cross-call "stale state" class the single-call sweep can't reach). `--oom-seq-len`
-(steps, default 3) / `--oom-window` (`k`, default 1; `0` = legacy fail-forever). Opt-in;
+(steps, default 3) / `--oom-window` (`k`, default 1; `0` = legacy fail-forever). Add
+`--oom-seq-randomize` to randomize each emitted sequence's length (in `[1, --oom-seq-len]`)
+and window (in `[1, --oom-window]`) independently, so one instance covers a range of
+sequence shapes (the configured values become upper bounds; per-sequence window is passed
+to `oom_run(..., window=k)`). Opt-in;
 default output unchanged without it. It found **OOM-0036** — a `list.append()` double-free
 under `MemoryError` in the `_CALL_LIST_APPEND` bytecode, filed as python/cpython#151818.
 Design + the windowed-`set_nomemory` semantics: **`doc/oom-sequences.md`**.
