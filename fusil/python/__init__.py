@@ -26,7 +26,6 @@ with warnings.catch_warnings():
 IGNORE_TIMEOUT = True
 IGNORE_CPU = True
 SHOW_STDOUT = False
-DEBUG = False
 TIMEOUT = 900.0
 PYTHON = sys.executable
 # Empty default => auto-created, expendable fixture files (fusil.python.fixtures).

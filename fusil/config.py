@@ -269,16 +269,6 @@ def optparse_to_configparser(parser, output=None, defaults=False, options=None):
     return output.read()
 
 
-def configparser_to_options(parser):
-    """Convert a configparser to optparse options."""
-    options = optparse.Values()
-
-    for section in parser.sections():
-        for key in parser[section]:
-            setattr(options, key, parser[section][key])
-    return options
-
-
 class OptionGroupWithSections(OptionGroup):
     """
     OptionGroup class with sections:

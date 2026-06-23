@@ -473,7 +473,7 @@ class Application(ApplicationAgent):
         Fatal error: display a message (if message is set) and exit
         the fuzzer.
         """
-        self.exit_code = 1
+        self.exitcode = 1
         if message:
             self.error(message)
         self.exit(keep_log=False)
