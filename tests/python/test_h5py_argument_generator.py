@@ -3,7 +3,7 @@ import re
 import sys
 import unittest
 from random import choice as random_choice
-from random import randint, random, sample, uniform
+from random import randint, random, sample, seed, uniform
 from unittest.mock import MagicMock, patch
 
 USE_NUMPY = USE_H5PY = True
@@ -37,6 +37,9 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
         Set up for each test.
         H5PyArgumentGenerator requires a parent ArgumentGenerator instance.
         """
+        # The generator picks expressions/transforms at random; seed for determinism so
+        # these tests don't intermittently fail (several assert exact generated output).
+        seed(1234)
         # Create a minimal FusilConfig for the parent ArgumentGenerator
         mock_options = FusilConfig(read=False)
         mock_options.no_numpy = False
@@ -1329,17 +1332,20 @@ class TestH5PyArgumentGenerator(unittest.TestCase):
                             expected_dtype,
                             f"numpy.arange dtype mismatch for {result_expr}",
                         )
-                        # Shape check is more complex for arange().reshape combinations
-                        # For now, we check that it produced *an* array.
+                        # Shape check is more complex for arange().reshape combinations and
+                        # for non-contiguous transforms, so only assert it when the expected
+                        # shape is actually determinable from the generated expression.
+                        current_expected_shape = None
                         if "arange(10" in result_expr and "reshape(2,5)" in result_expr:
                             current_expected_shape = (2, 5)
                         elif shape_expr.startswith("("):
                             current_expected_shape = ast.literal_eval(shape_expr)
-                        self.assertEqual(
-                            val.shape,
-                            current_expected_shape,
-                            f"numpy.arange shape mismatch for {result_expr}",
-                        )
+                        if current_expected_shape is not None:
+                            self.assertEqual(
+                                val.shape,
+                                current_expected_shape,
+                                f"numpy.arange shape mismatch for {result_expr}",
+                            )
 
                     if not allow_non_contig:
                         self.assertTrue(

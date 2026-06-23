@@ -22,6 +22,12 @@ paths via `--oom-fuzz` (see the OOM section).
   fuzzing run still wants the dedicated `fusil` user / `--unsafe`; see Commands.)
 - `numpy` and `h5py` are optional; when absent, the relevant argument generators and tests
   skip gracefully (you'll see "Could not import tricky_numpy" / "Numpy is not available").
+  Their support **is** verified to work when present: with `numpy`+`h5py` installed the suite
+  runs the h5py/numpy tests (skips drop from ~32 to 1) and passes. They have no wheels for the
+  free-threaded debug `3.16t` dev venv, so verification uses a normal-CPython venv
+  (`~/venvs/fusil_np_verify`, CPython 3.14) — see the numpy/h5py PR.
+- Python floor is **3.13+** (`requires-python`): the code uses PEP 701 f-strings (3.12) and
+  `types.CapsuleType` (3.13). Earlier metadata claimed 3.11, which never actually worked.
 - Tooling in the dev box: `gdb` (`/usr/bin/gdb`) is available and used by OOM-dedup segv
   resolution; `ruff` (`/snap/bin/ruff`) is available for linting; `pyflakes` is **not**
   installed (so `pyflakes.sh` won't run as-is), and `pytest` is not installed.
