@@ -7,6 +7,19 @@ project, or park it in `notworking/`?
 The coupling is small and well-defined, lafleur is where the AST mutator already lives, and
 you're not currently using fusil to fuzz the JIT.
 
+> **Refinement (2026-06-25) — scope is narrower than "move bug_patterns + ast_pattern_generator."**
+> An empirical trace of what lafleur *actually* runs (see **`jit-seed-generation.md`**) shows
+> lafleur uses fusil **only as a subprocess** for seed generation, and only via the
+> `--jit-target-uop=ALL` path — which **overrides `--jit-mode`**, so `synthesize`/`variational`/
+> `legacy` are never exercised. The MVP "parts lafleur uses" are therefore just:
+> `UOP_RECIPES` + `generate_uop_targeted_pattern` (of `ast_pattern_generator.py`),
+> `_generate_uop_targeted_scenario` (of `write_jit_code.py`), and the **simple** half of
+> `argument_generator.py`. `bug_patterns.py` is **not** used by seeding, and the evil/stateful
+> object generators are **already in `lafleur.mutator`** (fusil imports them back via
+> `HAS_MUTATOR`). So Option B/C should target that slice; the full port of `bug_patterns.py` /
+> the synthesize grammar is a *later, quality* step (better seeds), not the MVP. Full port list
+> in `jit-seed-generation.md` §6.
+
 ---
 
 ## What's actually there
