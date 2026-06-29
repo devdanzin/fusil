@@ -213,11 +213,11 @@ class ListAllModules:
         """
         try:
             __import__(info.name)
-        except (ImportError, Exception) as e:
+        except Exception:
+            # Skip a package we can't import rather than aborting the whole discovery
+            # pass on a non-ImportError (KeyboardInterrupt/SystemExit still propagate).
             if onerror:
                 onerror(info.name)
-            elif not isinstance(e, ImportError):
-                raise
             return
 
         if info.name not in sys.modules:

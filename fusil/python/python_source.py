@@ -156,7 +156,9 @@ class PythonSource(ProjectAgent):
             try:
                 self.loadModule(name)
                 break
-            except BaseException as err:
+            except Exception as err:
+                # Catch Exception, not BaseException: a slow/wedged import must still be
+                # interruptible -- KeyboardInterrupt/SystemExit have to propagate.
                 self.error(
                     "Unable to load module %s: [%s] %s" % (name, err.__class__.__name__, err)
                 )

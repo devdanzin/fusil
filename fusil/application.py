@@ -465,8 +465,11 @@ class Application(ApplicationAgent):
         except PTRACE_ERRORS as error:
             writeError(None, error, "AGENT DEINIT ERROR")
             self.exitcode = 1
-        self.deinitX11()
-        self.config = None
+        finally:
+            # Always release X11 access and drop the config, even if agent cleanup
+            # raised or the interrupt re-raised -- otherwise X access stays granted.
+            self.deinitX11()
+            self.config = None
 
     def fatalError(self, message=None):
         """
@@ -521,8 +524,12 @@ class Application(ApplicationAgent):
             self.executeProject()
             self.unregisterAgent(self.project)
         finally:
-            # Destroy project
-            self.project.destroy()
+            # Destroy project. Guard so a teardown error can't mask an in-flight
+            # exception (a crash/interrupt propagating out of executeProject).
+            try:
+                self.project.destroy()
+            except Exception as err:
+                writeError(None, err, "PROJECT DESTROY ERROR")
             self.project = None
 
     def on_application_interrupt(self):

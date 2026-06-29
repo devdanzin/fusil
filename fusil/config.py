@@ -199,7 +199,7 @@ class FusilConfig:
         except ValueError as err:
             raise ConfigError(
                 "Value %s of section %s is not %s! %s" % (key, section, type_name, err)
-            )
+            ) from err
 
     def getstr(self, section, key, default_value=None):
         return self._gettype(self._parser.get, "a string", section, key, default_value)

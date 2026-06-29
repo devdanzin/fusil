@@ -41,8 +41,10 @@ C extension modules, and out-of-memory (allocation-failure) error paths via `--o
 python -m unittest discover -s tests           # full suite (numpy-dependent tests skip)
 python -m unittest tests.python.test_values    # single module
 python -m unittest tests.python.test_oom_dedup tests.python.test_oom_dedup_wiring  # OOM dedup
+# Surviving module doctests run under unittest too (tests/python/test_doctests.py, via
+# load_tests). The legacy standalone test_doc.py was retired — it also ran stale Py2-era
+# doc/*.rst doctests; only the green module doctests (fusil.tools, fusil.process.tools) are wired in.
 
-python test_doc.py   # doctest-based tests over doc/*.rst and a few modules (not chmod +x)
 # CI runs BOTH of these (ruff 0.15.18, pinned) over fusil/ tests/ fuzzers/fusil-python-threaded
 # -- run both before pushing; `ruff check` passing does NOT imply `ruff format --check` passes.
 ruff check fusil/ tests/ fuzzers/fusil-python-threaded          # lint (pyflakes.sh needs pyflakes, not installed)

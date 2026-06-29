@@ -113,10 +113,10 @@ class CreateProcess(ProjectAgent):
             self.time0 = time()
             self.process = Popen(arguments, **popen_args)
         except ChildError as err:
-            raise ProcessError(err)
+            raise ProcessError(err) from err
         except OSError as err:
             if err.errno == ENOENT:
-                raise ProcessError("Program doesn't exist: %s" % arguments[0])
+                raise ProcessError("Program doesn't exist: %s" % arguments[0]) from err
             else:
                 raise
         pid = self.process.pid
