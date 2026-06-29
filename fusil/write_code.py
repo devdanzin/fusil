@@ -1,5 +1,6 @@
 import re
 import textwrap
+from contextlib import contextmanager
 from os import chmod
 from textwrap import dedent
 
@@ -75,6 +76,22 @@ class WriteCode:
         if level < 0:
             raise ValueError("Negative indentation level in restoreLevel()")
         self.base_level = level
+
+    @contextmanager
+    def indented(self, delta=1):
+        """Scoped indentation: emit lines `delta` levels deeper inside the block, then
+        restore the previous level on exit (including on exception).
+
+        Replaces the manual ``saved = self.addLevel(1); ...; self.restoreLevel(saved)``
+        bookkeeping (and the error-prone ``restoreLevel(self.base_level - 1)`` form) with a
+        block whose nesting matches the generated code's nesting and can't leak a level.
+        Named ``indented`` (not ``indent``) because ``self.indent`` is the indent string.
+        """
+        saved = self.addLevel(delta)
+        try:
+            yield
+        finally:
+            self.restoreLevel(saved)
 
     def indentLine(self, level, text):
         if not isinstance(text, str):
