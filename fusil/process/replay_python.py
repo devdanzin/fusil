@@ -88,9 +88,8 @@ class WriteReplayScript(WriteCode):
 
     def writeFunction(self, name, callback, *args):
         self.write(0, "def %s:" % name)
-        old = self.addLevel(1)
-        callback(*args)
-        self.restoreLevel(old)
+        with self.indented():
+            callback(*args)
         self.emptyLine()
 
     def pythonImports(self):
