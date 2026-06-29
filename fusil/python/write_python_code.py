@@ -409,84 +409,80 @@ class WritePythonCode(WriteCode):
         self.write(0, "import math")
         self.write(0, "import types")
         self.write(0, "def compare_results(a, b):")
-        self.addLevel(1)
+        with self.indented():
+            self.write(
+                0, "if isinstance(a, types.FunctionType) and a.__name__ == '<lambda>' and \\"
+            )
+            self.write(0, "   isinstance(b, types.FunctionType) and b.__name__ == '<lambda>':")
+            self.write(1, "return True # Treat two lambdas as equal for our purposes")
 
-        self.write(0, "if isinstance(a, types.FunctionType) and a.__name__ == '<lambda>' and \\")
-        self.write(0, "   isinstance(b, types.FunctionType) and b.__name__ == '<lambda>':")
-        self.write(1, "return True # Treat two lambdas as equal for our purposes")
+            self.write(0, "if isinstance(a, complex) and isinstance(b, complex):")
+            with self.indented():
+                self.write(0, "a_real_nan = math.isnan(a.real)")
+                self.write(0, "b_real_nan = math.isnan(b.real)")
+                self.write(0, "a_imag_nan = math.isnan(a.imag)")
+                self.write(0, "b_imag_nan = math.isnan(b.imag)")
+                self.write(0, "real_match = (a.real == b.real) or (a_real_nan and b_real_nan)")
+                self.write(0, "imag_match = (a.imag == b.imag) or (a_imag_nan and b_imag_nan)")
+                self.write(0, "return real_match and imag_match")
 
-        self.write(0, "if isinstance(a, complex) and isinstance(b, complex):")
-        self.addLevel(1)
-        self.write(0, "a_real_nan = math.isnan(a.real)")
-        self.write(0, "b_real_nan = math.isnan(b.real)")
-        self.write(0, "a_imag_nan = math.isnan(a.imag)")
-        self.write(0, "b_imag_nan = math.isnan(b.imag)")
-        self.write(0, "real_match = (a.real == b.real) or (a_real_nan and b_real_nan)")
-        self.write(0, "imag_match = (a.imag == b.imag) or (a_imag_nan and b_imag_nan)")
-        self.write(0, "return real_match and imag_match")
-        self.restoreLevel(self.base_level - 1)
+            self.write(
+                0,
+                "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):",
+            )
+            self.write(1, "return True")
 
-        self.write(
-            0,
-            "if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):",
-        )
-        self.write(1, "return True")
+            self.write(0, "if isinstance(a, object) and isinstance(b, object):")
+            self.write(1, "return True")
 
-        self.write(0, "if isinstance(a, object) and isinstance(b, object):")
-        self.write(1, "return True")
+            self.write(0, "if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):")
+            self.write(1, "return all(compare_results(x, y) for x, y in zip(a, b))")
 
-        self.write(0, "if isinstance(a, tuple) and isinstance(b, tuple) and len(a) == len(b):")
-        self.write(1, "return all(compare_results(x, y) for x, y in zip(a, b))")
-
-        self.write(0, "return a == b")
-        self.restoreLevel(self.base_level - 1)
+            self.write(0, "return a == b")
         self.emptyLine()
 
         self.write(0, "SENTINEL_VALUE = object()")
         self.emptyLine()
         self.write(0, "def callMethod(prefix, obj_to_call, method_name, *arguments, verbose=True):")
-        current_level = self.addLevel(1)
-        self.write(
-            0,
-            f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
-        )
-        self.write(0, 'message = f"[{prefix}] {func_display_name}"')
-        self.write(0, "if verbose:")
-        self.write_print_to_stderr(1, "message")
-        self.write(0, "result = SENTINEL_VALUE")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, "func_to_run = getattr(obj_to_call, method_name)")
-        self.write(0, f"for _ in range(int({CALL_REPETITION_COUNT_CONST})):")
-        self.write(1, "result = func_to_run(*arguments)")
-        self.restoreLevel(current_level + 1)
-        self.write(0, "except (Exception, SystemExit, KeyboardInterrupt) as err:")
-        self.addLevel(1)
-        self.write(0, "try:")
-        self.write(1, "errmsg = repr(err)")
-        self.write(0, "except Exception as e_repr:")
-        self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
-        self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
-        self.write(0, "if verbose:")
-        self.write_print_to_stderr(
-            1,
-            'f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}"',
-        )
-        self.write(0, "result = SENTINEL_VALUE")
-        self.restoreLevel(current_level + 1)
-
-        self.write(0, "if verbose:")
-        self.write_print_to_stderr(1, 'f"[{prefix}] -explicit garbage collection-"')
-        self.write(0, "collect()")
-
-        if self.enable_threads:
-            self.write(0, "if result is not SENTINEL_VALUE:")
+        with self.indented():
             self.write(
-                1,
-                "fuzzer_threads_alive.append(Thread(target=func_to_run, args=arguments, name=message))",
+                0,
+                f'func_display_name = f"{self.module_name}.{{method_name}}()" if obj_to_call is {self.module_name} else f"{{obj_to_call.__class__.__name__}}.{{method_name}}()"',
             )
-        self.write(0, "return result")
-        self.restoreLevel(current_level)
+            self.write(0, 'message = f"[{prefix}] {func_display_name}"')
+            self.write(0, "if verbose:")
+            self.write_print_to_stderr(1, "message")
+            self.write(0, "result = SENTINEL_VALUE")
+            self.write(0, "try:")
+            with self.indented():
+                self.write(0, "func_to_run = getattr(obj_to_call, method_name)")
+                self.write(0, f"for _ in range(int({CALL_REPETITION_COUNT_CONST})):")
+                self.write(1, "result = func_to_run(*arguments)")
+            self.write(0, "except (Exception, SystemExit, KeyboardInterrupt) as err:")
+            with self.indented():
+                self.write(0, "try:")
+                self.write(1, "errmsg = repr(err)")
+                self.write(0, "except Exception as e_repr:")
+                self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
+                self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
+                self.write(0, "if verbose:")
+                self.write_print_to_stderr(
+                    1,
+                    'f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}"',
+                )
+                self.write(0, "result = SENTINEL_VALUE")
+
+            self.write(0, "if verbose:")
+            self.write_print_to_stderr(1, 'f"[{prefix}] -explicit garbage collection-"')
+            self.write(0, "collect()")
+
+            if self.enable_threads:
+                self.write(0, "if result is not SENTINEL_VALUE:")
+                self.write(
+                    1,
+                    "fuzzer_threads_alive.append(Thread(target=func_to_run, args=arguments, name=message))",
+                )
+            self.write(0, "return result")
         self.emptyLine()
 
         self.write(0, "def callFunc(prefix, func_name_str, *arguments, verbose=True):")
@@ -874,77 +870,73 @@ class WritePythonCode(WriteCode):
         # 4. Calling `self._generate_and_write_call` for that method.
         # The deep dive part comes if _generate_and_write_call is enhanced.
         self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
-        skiplevel = self.addLevel(1)
-        self.write_print_to_stderr(
-            0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'"
-        )
-        self.restoreLevel(skiplevel)
+        with self.indented():
+            self.write_print_to_stderr(
+                0,
+                f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
+            )
         self.write(0, "else:")
-        elselevel = self.addLevel(1)
-        self.write_print_to_stderr(
-            0,
-            f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'",
-        )
-        # --- Generic Method Fuzzing Logic ---
-        # This is where you'd put your existing loop that gets methods via dir() or _get_object_methods
-        # and calls them randomly using _generate_and_write_call.
-        # For this to work, you need the actual methods of the object.
-        # This requires getting methods at runtime in the generated script or having class_type available
-        # in WritePythonCode if the object's type is known at generation time.
+        with self.indented():
+            self.write_print_to_stderr(
+                0,
+                f"f'Instance {target_obj_expr_str} (type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer, doing generic calls.'",
+            )
+            # --- Generic Method Fuzzing Logic ---
+            # This is where you'd put your existing loop that gets methods via dir() or _get_object_methods
+            # and calls them randomly using _generate_and_write_call.
+            # For this to work, you need the actual methods of the object.
+            # This requires getting methods at runtime in the generated script or having class_type available
+            # in WritePythonCode if the object's type is known at generation time.
 
-        # Example of generic method fuzzing (conceptual, adapt from your existing code):
-        self.write(0, f"{current_prefix}_methods = []")
-        self.write(0, "try:")
-        self.addLevel(1)
-        self.write(0, f"for {current_prefix}_attr_name in dir({target_obj_expr_str}):")
-        self.addLevel(1)
-        self.write(
-            0, f"if {current_prefix}_attr_name.startswith('_'): continue"
-        )  # Skip private/dunder for simplicity
-        self.write(0, "try:")  # Inner try for getattr
-        self.addLevel(1)
-        self.write(
-            0,
-            f"{current_prefix}_attr_val = getattr({target_obj_expr_str}, {current_prefix}_attr_name)",
-        )
-        self.write(
-            0,
-            f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val.__name__ in ('wait', '_rehash'): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
-        )
-        self.restoreLevel(self.base_level - 1)  # Exit inner try
-        self.write(0, "except Exception: pass")
-        self.restoreLevel(self.base_level - 1)  # Exit for loop
-        self.restoreLevel(self.base_level - 1)  # Exit outer try
-        self.write(0, f"except Exception: {current_prefix}_methods = [] # Failed to get methods")
+            # Example of generic method fuzzing (conceptual, adapt from your existing code):
+            self.write(0, f"{current_prefix}_methods = []")
+            self.write(0, "try:")
+            with self.indented():
+                self.write(0, f"for {current_prefix}_attr_name in dir({target_obj_expr_str}):")
+                with self.indented():
+                    self.write(
+                        0, f"if {current_prefix}_attr_name.startswith('_'): continue"
+                    )  # Skip private/dunder for simplicity
+                    self.write(0, "try:")  # Inner try for getattr
+                    with self.indented():
+                        self.write(
+                            0,
+                            f"{current_prefix}_attr_val = getattr({target_obj_expr_str}, {current_prefix}_attr_name)",
+                        )
+                        self.write(
+                            0,
+                            f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val.__name__ in ('wait', '_rehash'): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
+                        )
+                    self.write(0, "except Exception: pass")
+            self.write(
+                0, f"except Exception: {current_prefix}_methods = [] # Failed to get methods"
+            )
 
-        self.write(0, f"if {current_prefix}_methods:")
-        self.addLevel(1)
-        self.write_print_to_stderr(
-            0,
-            f"f'Found {{len({current_prefix}_methods)}} callable methods for generic fuzzing of {target_obj_expr_str}'",
-        )
-        self.write(
-            0,
-            f"for _i_{current_prefix} in range(min(len({current_prefix}_methods), {self.options.methods_number})):",
-        )  # Use configured num calls
-        self.addLevel(1)
-        self.write(
-            0,
-            f"{current_prefix}_method_name_to_call, {current_prefix}_method_obj_to_call = choice({current_prefix}_methods)",
-        )
-        # Now call _generate_and_write_call using {current_prefix}_method_name_to_call (string)
-        # and {current_prefix}_method_obj_to_call (the callable).
-        # _generate_and_write_call needs adaptation if method_obj is a runtime variable.
-        # For simplicity here, let's assume _generate_and_write_call can take the method *name*
-        # and the target object expression.
-        self.write(0, "# Conceptual call to generic method fuzzer")
-        self.write(
-            0,
-            f"if {current_prefix}_method_name_to_call not in ('wait', '_rehash'): callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
-        )  # Example simplified call
-        self.restoreLevel(self.base_level - 1)  # Exit for loop
-        self.restoreLevel(self.base_level - 1)  # Exit if methods
-        self.restoreLevel(elselevel)  # Exit else
+            self.write(0, f"if {current_prefix}_methods:")
+            with self.indented():
+                self.write_print_to_stderr(
+                    0,
+                    f"f'Found {{len({current_prefix}_methods)}} callable methods for generic fuzzing of {target_obj_expr_str}'",
+                )
+                self.write(
+                    0,
+                    f"for _i_{current_prefix} in range(min(len({current_prefix}_methods), {self.options.methods_number})):",
+                )  # Use configured num calls
+                with self.indented():
+                    self.write(
+                        0,
+                        f"{current_prefix}_method_name_to_call, {current_prefix}_method_obj_to_call = choice({current_prefix}_methods)",
+                    )
+                    # Now call _generate_and_write_call using {current_prefix}_method_name_to_call (string)
+                    # and {current_prefix}_method_obj_to_call (the callable).
+                    # _generate_and_write_call needs adaptation if method_obj is a runtime variable.
+                    # For simplicity here, let's assume _generate_and_write_call can take the method *name*
+                    # and the target object expression.
+                    self.write(0, "# Conceptual call to generic method fuzzer")
+                    self.write(
+                        0,
+                        f"if {current_prefix}_method_name_to_call not in ('wait', '_rehash'): callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
+                    )  # Example simplified call
         self.emptyLine()
 
     def _fuzz_methods_on_object_or_specific_types(
@@ -962,11 +954,11 @@ class WritePythonCode(WriteCode):
         )
 
         self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
-        skiplevel = self.addLevel(1)
-        self.write_print_to_stderr(
-            0, f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'"
-        )
-        self.restoreLevel(skiplevel)
+        with self.indented():
+            self.write_print_to_stderr(
+                0,
+                f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
+            )
 
         if self.h5py_writer:
             self.h5py_writer._fuzz_methods_on_h5py_object_or_specific_types(
@@ -1095,25 +1087,24 @@ class WritePythonCode(WriteCode):
         oom_run(label, thunk) call (uses the module-level _OOM_WINDOW).
         """
         self.write(0, f"def {fn_name}():")
-        saved = self.addLevel(1)
-        wrote = False
-        for sublabel, target_expr, num_args in steps:
-            # The verbose marker is INSIDE the try: under a low window the failing
-            # allocation can land in the print itself, and we want that swallowed so the
-            # tail steps still run (it does perturb the allocation count, so verbose is for
-            # coarse pinpointing -- the authoritative locator is faulthandler's traceback).
-            self.write(0, "try:")
-            self.write(1, "if _OOM_VERBOSE:")
-            self.write(2, f'print("[OOM-SEQ]     step {sublabel}", file=stderr)')
-            self.write(1, f"{target_expr}(")
-            self._write_arguments_for_call_lines(num_args, 2)
-            self.write(1, ")")
-            self.write(0, "except BaseException:")
-            self.write(1, "pass")
-            wrote = True
-        if not wrote:
-            self.write(0, "pass")
-        self.restoreLevel(saved)
+        with self.indented():
+            wrote = False
+            for sublabel, target_expr, num_args in steps:
+                # The verbose marker is INSIDE the try: under a low window the failing
+                # allocation can land in the print itself, and we want that swallowed so the
+                # tail steps still run (it does perturb the allocation count, so verbose is for
+                # coarse pinpointing -- the authoritative locator is faulthandler's traceback).
+                self.write(0, "try:")
+                self.write(1, "if _OOM_VERBOSE:")
+                self.write(2, f'print("[OOM-SEQ]     step {sublabel}", file=stderr)')
+                self.write(1, f"{target_expr}(")
+                self._write_arguments_for_call_lines(num_args, 2)
+                self.write(1, ")")
+                self.write(0, "except BaseException:")
+                self.write(1, "pass")
+                wrote = True
+            if not wrote:
+                self.write(0, "pass")
         if window is None:
             self.write(0, f'oom_run("{seq_label}", {fn_name})')
         else:
@@ -1194,45 +1185,44 @@ class WritePythonCode(WriteCode):
 
         # 4. Method sweeps on the live instance.
         self.write(0, f"if {inst} is not None and {inst} is not SENTINEL_VALUE:")
-        saved = self.addLevel(1)
-        if self.options.oom_seq:
-            # Phase 4: one sequence of methods on the SAME instance under a single
-            # failure window, so a failure in method A can leave the instance in a state
-            # method B trips over (e.g. OOM-0035: write... then getvalue()).
-            steps = []
-            mnames = []
-            for j in range(self._oom_pick_seq_len()):
-                m_name = choice(method_names)
-                m_obj = methods[m_name]
-                min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
-                num_args = randint(min_arg, max_arg)
-                steps.append(
-                    (
-                        f"m{j + 1}:{m_name}",
-                        f'getattr({inst}, "{m_name}", None)',
-                        num_args,
+        with self.indented():
+            if self.options.oom_seq:
+                # Phase 4: one sequence of methods on the SAME instance under a single
+                # failure window, so a failure in method A can leave the instance in a state
+                # method B trips over (e.g. OOM-0035: write... then getvalue()).
+                steps = []
+                mnames = []
+                for j in range(self._oom_pick_seq_len()):
+                    m_name = choice(method_names)
+                    m_obj = methods[m_name]
+                    min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
+                    num_args = randint(min_arg, max_arg)
+                    steps.append(
+                        (
+                            f"m{j + 1}:{m_name}",
+                            f'getattr({inst}, "{m_name}", None)',
+                            num_args,
+                        )
                     )
+                    mnames.append(m_name)
+                seq_label = f"{prefix}:{self.module_name}.{class_name}[" + ">".join(mnames) + "]"
+                self.write(0, f"# OOM sequence on {class_name}: {' > '.join(mnames)}")
+                self._write_oom_sequence(
+                    f"_oom_seq_{prefix}", seq_label, steps, window=self._oom_pick_window()
                 )
-                mnames.append(m_name)
-            seq_label = f"{prefix}:{self.module_name}.{class_name}[" + ">".join(mnames) + "]"
-            self.write(0, f"# OOM sequence on {class_name}: {' > '.join(mnames)}")
-            self._write_oom_sequence(
-                f"_oom_seq_{prefix}", seq_label, steps, window=self._oom_pick_window()
-            )
-        else:
-            for j in range(self.options.oom_methods):
-                m_name = choice(method_names)
-                m_obj = methods[m_name]
-                min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
-                num_args = randint(min_arg, max_arg)
-                m_label = f"{prefix}m{j + 1}:{self.module_name}.{class_name}.{m_name}"
-                self.write(0, f"# OOM sweep: {class_name}.{m_name}()")
-                self.write(0, f'oom_call("{m_label}", getattr({inst}, "{m_name}", None),')
-                self._write_arguments_for_call_lines(num_args, 1)
-                self.write(0, ")")
-        self.write(0, f"del {inst}")
-        self.write(0, "collect()")
-        self.restoreLevel(saved)
+            else:
+                for j in range(self.options.oom_methods):
+                    m_name = choice(method_names)
+                    m_obj = methods[m_name]
+                    min_arg, max_arg = get_arg_number(m_obj, m_name, 0)
+                    num_args = randint(min_arg, max_arg)
+                    m_label = f"{prefix}m{j + 1}:{self.module_name}.{class_name}.{m_name}"
+                    self.write(0, f"# OOM sweep: {class_name}.{m_name}()")
+                    self.write(0, f'oom_call("{m_label}", getattr({inst}, "{m_name}", None),')
+                    self._write_arguments_for_call_lines(num_args, 1)
+                    self.write(0, ")")
+            self.write(0, f"del {inst}")
+            self.write(0, "collect()")
         self.emptyLine()
 
     def _generate_and_write_call(
@@ -1291,31 +1281,26 @@ class WritePythonCode(WriteCode):
                 0,
                 f"if 'res_{prefix}' in locals() and res_{prefix} is not None and res_{prefix} is not SENTINEL_VALUE:",
             )
-            L_deep_dive_res = self.addLevel(1)
-            try:
+            with self.indented():
                 self.write(0, f"{prefix}_res_type_name = type(res_{prefix}).__name__")
                 self.write(0, "try:")
-                L_before_repr = self.addLevel(1)
-                self.write_print_to_stderr(
-                    0,
-                    f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
-                )
-                self.restoreLevel(L_before_repr)
+                with self.indented():
+                    self.write_print_to_stderr(
+                        0,
+                        f"f'CALL_RESULT ({prefix}): Method {callable_name} returned {{res_{prefix}!r}} of type {{{prefix}_res_type_name}}. Attempting deep dive.'",
+                    )
                 self.write(0, "except Exception as e:")
-                L_after_repr = self.addLevel(1)
-                self.write_print_to_stderr(
-                    0,
-                    "f'EXCEPTION printing CALL_RESULT: { e }'",
-                )
-                self.restoreLevel(L_after_repr)
+                with self.indented():
+                    self.write_print_to_stderr(
+                        0,
+                        "f'EXCEPTION printing CALL_RESULT: { e }'",
+                    )
                 self._dispatch_fuzz_on_instance(
                     current_prefix=f"{prefix}_res_dive",
                     target_obj_expr_str=f"res_{prefix}",  # The variable holding the result
                     class_name_hint=f"{prefix}_res_type_name",  # Runtime type name
                     generation_depth=generation_depth + 1,  # Incremented depth
                 )
-            finally:
-                self.restoreLevel(L_deep_dive_res)
 
         if self.enable_threads or self.enable_async:
             self.write(0, "target_func = None")
@@ -1331,58 +1316,53 @@ class WritePythonCode(WriteCode):
 
         if self.enable_threads:
             self.write(0, "if target_func is not None:")
-            self.addLevel(1)
-            self.write(0, "try:")
-            self.addLevel(1)
-            arg_expr_list = []
-            for _ in range(num_args):
-                arg_lines = self.arg_generator.create_simple_argument()
-                arg_expr_list.append(" ".join(arg_lines))
+            with self.indented():
+                self.write(0, "try:")
+                with self.indented():
+                    arg_expr_list = []
+                    for _ in range(num_args):
+                        arg_lines = self.arg_generator.create_simple_argument()
+                        arg_expr_list.append(" ".join(arg_lines))
 
-            args_tuple_str = f"({', '.join(arg_expr_list)}{',' if len(arg_expr_list) == 1 and num_args == 1 else ''})"
+                    args_tuple_str = f"({', '.join(arg_expr_list)}{',' if len(arg_expr_list) == 1 and num_args == 1 else ''})"
 
-            self.write(
-                0,
-                f"thread_obj = Thread(target=target_func, args={args_tuple_str}, name='{prefix}_{callable_name}')",
-            )
-            self.write(0, "fuzzer_threads_alive.append(thread_obj)")
-            self.restoreLevel(self.base_level - 1)
-            self.write(0, "except Exception as e_thread_create:")
-            self.write_print_to_stderr(
-                1,
-                f'f"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
-            )
-            self.addLevel(-1)
+                    self.write(
+                        0,
+                        f"thread_obj = Thread(target=target_func, args={args_tuple_str}, name='{prefix}_{callable_name}')",
+                    )
+                    self.write(0, "fuzzer_threads_alive.append(thread_obj)")
+                self.write(0, "except Exception as e_thread_create:")
+                self.write_print_to_stderr(
+                    1,
+                    f'f"[{prefix}] Failed to create thread for {callable_name}: {{e_thread_create.__class__.__name__}}"',
+                )
             self.emptyLine()
 
         if self.enable_async:
             async_func_name = f"async_call_{prefix}_{callable_name}"
             self.write(0, "if target_func is not None:")
-            self.addLevel(1)
-            self.write(0, f"def {async_func_name}(target_func=target_func):")
-            self.addLevel(1)
-            self.write_print_to_stderr(0, f'"Starting async task: {async_func_name}"')
-            self.write(0, f"time.sleep({random() / 1000:.6f}) # Small delay")
-            self.write(0, "try:")
-            self.addLevel(1)
-            arg_expr_list_async = []
-            for _ in range(num_args):
-                arg_lines = self.arg_generator.create_simple_argument()
-                arg_expr_list_async.append(" ".join(arg_lines))
+            with self.indented():
+                self.write(0, f"def {async_func_name}(target_func=target_func):")
+                with self.indented():
+                    self.write_print_to_stderr(0, f'"Starting async task: {async_func_name}"')
+                    self.write(0, f"time.sleep({random() / 1000:.6f}) # Small delay")
+                    self.write(0, "try:")
+                    with self.indented():
+                        arg_expr_list_async = []
+                        for _ in range(num_args):
+                            arg_lines = self.arg_generator.create_simple_argument()
+                            arg_expr_list_async.append(" ".join(arg_lines))
 
-            args_str_async = ", ".join(arg_expr_list_async)
+                        args_str_async = ", ".join(arg_expr_list_async)
 
-            self.write(0, f"target_func({args_str_async})")
-            self.addLevel(-1)
-            self.write(0, "except Exception as e_async_call:")
-            self.write_print_to_stderr(
-                1,
-                f'f"[{prefix}] Exception in async task {async_func_name}: {{e_async_call.__class__.__name__}} {{e_async_call}}"',
-            )
-            self.write_print_to_stderr(0, f'"Ending async task: {async_func_name}"')
-            self.addLevel(-1)  # Exit def
-            self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
-            self.addLevel(-1)
+                        self.write(0, f"target_func({args_str_async})")
+                    self.write(0, "except Exception as e_async_call:")
+                    self.write_print_to_stderr(
+                        1,
+                        f'f"[{prefix}] Exception in async task {async_func_name}: {{e_async_call.__class__.__name__}} {{e_async_call}}"',
+                    )
+                    self.write_print_to_stderr(0, f'"Ending async task: {async_func_name}"')
+                self.write(0, f"fuzzer_async_tasks.append({async_func_name})")
             self.emptyLine()
 
     def _write_concurrency_finalization(self) -> None:
