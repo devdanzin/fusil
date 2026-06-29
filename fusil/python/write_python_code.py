@@ -809,20 +809,16 @@ class WritePythonCode(WriteCode):
             1,
             f'f"--- (Depth {generation_depth}) Error calling repr() prefix: {current_prefix}) ---"',
         )
-        self.write(0, f"# {self.base_level=}")
         self.write(0, f"if {target_obj_expr_str} is not None:")
-        # ---- BLOCK: Main if target_obj_expr_str not None ----
-        L_main_if_target_not_none = self.addLevel(1)
-        self.write(0, f"# {self.base_level=}")
-        self.write(0, f"# {L_main_if_target_not_none=}")
-        try:
+        with self.indented():
             self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
-            skiplevel = self.addLevel(1)
-            self.write_print_to_stderr(
-                0,
-                f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
-            )
-            self.restoreLevel(skiplevel)
+            with self.indented():
+                self.write_print_to_stderr(
+                    0,
+                    f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
+                )
+            # The h5py writer (when active) opens a trailing `else:` block and returns the
+            # level to restore to; the generic fuzzing below fills it, then we close it.
             if self.h5py_writer:
                 L_else_generic = self.h5py_writer._dispatch_fuzz_on_h5py_instance(
                     class_name_hint, current_prefix, generation_depth, target_obj_expr_str
@@ -848,9 +844,6 @@ class WritePythonCode(WriteCode):
             finally:
                 if self.h5py_writer:
                     self.restoreLevel(L_else_generic)
-        finally:
-            self.restoreLevel(L_main_if_target_not_none)
-        # ---- END BLOCK: Main if target_obj_expr_str not None ----
 
     def _fuzz_generic_object_methods(
         self, current_prefix: str, target_obj_expr_str: str, num_calls: int
