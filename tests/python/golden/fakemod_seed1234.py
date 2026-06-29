@@ -489,10 +489,7 @@ try:
     print(f"--- (Depth 0) Dispatching Fuzz for: { instance_c1_widget!r } (hint: Widget, prefix: c1_widget_ops) ---", file=stderr)
 except Exception as e:
     print(f"--- (Depth 0) Error calling repr() prefix: c1_widget_ops) ---", file=stderr)
-# self.base_level=0
 if instance_c1_widget is not None:
-    # self.base_level=1
-    # L_main_if_target_not_none=0
     if skip_trivial_type(instance_c1_widget):
         print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
     try:
