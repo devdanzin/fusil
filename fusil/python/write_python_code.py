@@ -17,7 +17,6 @@ from fusil.python.blacklists import (
     METHOD_BLACKLIST,
     OBJECT_BLACKLIST,
 )
-from fusil.python.jit.write_jit_code import WriteJITCode
 from fusil.write_code import WriteCode
 
 if TYPE_CHECKING:
@@ -120,10 +119,9 @@ class WritePythonCode(WriteCode):
             _ARG_GEN_USE_NUMPY,
             _ARG_GEN_USE_TEMPLATES,
             _ARG_GEN_USE_H5PY,
-            allow_external_references=self.options.jit_external_references,
+            allow_external_references=self.options.external_references,
             plugin_manager=self.plugin_manager,
         )
-        self.jit_writer = WriteJITCode(self)
 
         self.module_functions: list[str]
         self.module_classes: list[str]
@@ -405,27 +403,6 @@ class WritePythonCode(WriteCode):
 
     def _write_helper_call_functions(self) -> None:
         """Writes helper functions for calling code, comparing results, etc."""
-        self.write(0, "# This function is called only once, so it will not be JIT-compiled.")
-        self.write(0, "def no_jit_harness(func, *args, **kwargs):")
-        self.addLevel(1)
-        self.write(0, "return func(*args, **kwargs)")
-        self.restoreLevel(self.base_level - 1)
-        self.emptyLine()
-
-        self.write(0, "# This function calls its target in a loop to make it 'hot' for the JIT.")
-        self.write(0, "def jit_harness(func, iterations, *args, **kwargs):")
-        self.addLevel(1)
-        self.write_print_to_stderr(
-            0, 'f"[+] Warming up {func.__name__} for {iterations} iterations..."'
-        )
-        self.write(0, "for _ in range(iterations):")
-        self.addLevel(1)
-        self.write(0, "func(*args, **kwargs)")
-        self.restoreLevel(self.base_level - 1)
-        self.write_print_to_stderr(0, '"[+] Warm-up complete."')
-        self.restoreLevel(self.base_level - 1)
-        self.emptyLine()
-
         self.write(
             0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers."
         )
@@ -656,8 +633,6 @@ class WritePythonCode(WriteCode):
                     except AttributeError:
                         continue
                     self._generate_oom_function_call(prefix, func_name, func_obj)
-                elif self.options.jit_fuzz:
-                    self.jit_writer.generate_scenario(prefix)
                 else:
                     # Standard (non-JIT) function call fuzzing
                     func_name = choice(self.module_functions)
@@ -779,17 +754,12 @@ class WritePythonCode(WriteCode):
         self.restoreLevel(self.base_level - 1)  # Exit except's indentation
         self.emptyLine()
 
-        if self.options.jit_fuzz:
-            self.jit_writer.generate_stateful_object_scenario(
-                prefix, instance_var_name, class_name_str, class_type
-            )
-        else:
-            self._dispatch_fuzz_on_instance(
-                current_prefix=f"{prefix}_{class_name_str.lower()}_ops",
-                target_obj_expr_str=instance_var_name,
-                class_name_hint=class_name_str,
-                generation_depth=0,
-            )
+        self._dispatch_fuzz_on_instance(
+            current_prefix=f"{prefix}_{class_name_str.lower()}_ops",
+            target_obj_expr_str=instance_var_name,
+            class_name_hint=class_name_str,
+            generation_depth=0,
+        )
 
         # If instance_var_name was successfully created, fuzz its methods.
         self.write(
@@ -1276,7 +1246,6 @@ class WritePythonCode(WriteCode):
         target_obj_expr: str,  # e.g., "fuzz_target_module" or "instance_var"
         is_method_call: bool,
         generation_depth: int,
-        in_jit_loop: bool = False,
         verbose: bool = True,
     ) -> None:
         """Generates code for a single function or method call, including async/thread wrappers."""
@@ -1314,15 +1283,6 @@ class WritePythonCode(WriteCode):
         self._write_arguments_for_call_lines(num_args, 1)
         self.write(0, f"verbose={verbose})")
         self.emptyLine()
-        if self.options.jit_fuzz and is_method_call and in_jit_loop:
-            self.write(0, f"if res_{prefix} is SENTINEL_VALUE:")
-            self.write_print_to_stderr(
-                1,
-                f"f'Method {callable_name} raised an exception, breaking JIT loop.'",
-            )
-            self.write(1, "break")
-            self.emptyLine()
-            return
 
         # Deep dive on the result: recursively fuzz the method's return value. This is
         # opt-in (--deep-dive, default off) -- it is multiplicative (every returning call

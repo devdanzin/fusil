@@ -113,12 +113,13 @@ optionally prunes the ~96%-duplicate crashes as they happen.
 Full details: [`oom-fuzzing.md`](oom-fuzzing.md), [`oom-sequences.md`](oom-sequences.md),
 [`oom-dedup-plan.md`](oom-dedup-plan.md).
 
-## JIT fuzzing — `--jit-fuzz`
+## JIT fuzzing — moved to lafleur
 
-`WriteJITCode` (`jit/write_jit_code.py`) generates code designed to stress the Tier-2 JIT,
-dispatching on `--jit-mode` (`synthesize` / `variational` / `legacy` / `all`). The authoritative
-design doc is `README_JIT.md` (repo root); the keep/move/spin-off decision is in
-[`jit-decision-memo.md`](jit-decision-memo.md).
+fusil no longer fuzzes the Tier-2 JIT. The `fusil/python/jit/` subsystem and the `--jit-*`
+options were removed (fusil #139) once **lafleur** — the corpus/coverage-guided JIT fuzzer spun
+off from this repo — took JIT fuzzing over and re-implemented the reusable core natively. Use
+lafleur for JIT fuzzing. The analysis and decision are in
+[`jit-seed-generation.md`](jit-seed-generation.md) and [`jit-decision-memo.md`](jit-decision-memo.md).
 
 ## Plugins (`fusil/plugin_manager.py`)
 
@@ -151,7 +152,6 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --sessions N             stop after N sessions
 #   --only-generate          write source.py without executing it
 #   --deep-dive              recursively fuzz method return values (off by default)
-#   --jit-fuzz               enable JIT-stressing code generation
 #   --oom-fuzz / --oom-seq   OOM (allocation-failure) injection
 #   --oom-dedup-catalog F    in-loop crash dedup/labeling vs a known-sites snapshot
 #   --no-memory-limit        don't apply RLIMIT_AS (implied for ASan targets)
