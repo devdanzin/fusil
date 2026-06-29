@@ -312,6 +312,36 @@ class TestNativeBacktrace(unittest.TestCase):
         self.assertEqual(sites[0], "code_dealloc@Objects/codeobject.c:2440")
         self.assertEqual(self._deduper().decide(bt, source_path=None), (True, "OOM-0003"))
 
+    def test_overdecref_detector_frames_skipped(self):
+        # The eval-loop operand-stack teardown (PyStackRef_XCLOSE / _PyFrame_ClearLocals /
+        # clear_thread_frame) and the generic _Py_Dealloc dispatch CATCH an already-corrupted
+        # object; they must never be the resolved site (kept in lockstep with the catalog's
+        # GENERIC_DETECTOR_FUNCS).
+        # (a) When they are the only CPython frames, no spurious site is extracted -- the crash
+        # surfaces for rr-triage instead of being mislabelled to whatever bug shares the frame.
+        detectors_only = "\n".join(
+            [
+                "==1==ERROR: AddressSanitizer: SEGV on unknown address",
+                "    #3 0x0 in PyStackRef_XCLOSE /p/./Include/internal/pycore_stackref.h:726:10",
+                "    #4 0x0 in _PyFrame_ClearLocals /p/Python/frame.c:101:9",
+                "    #5 0x0 in _Py_Dealloc /p/Objects/object.c:3319:5",
+            ]
+        )
+        self.assertEqual(oom_dedup.extract_native_sites(detectors_only), [])
+        # (b) When a real dealloc lies beneath the detectors, resolution skips past them to it.
+        with_real = "\n".join(
+            [
+                "==1==ERROR: AddressSanitizer: SEGV on unknown address",
+                "    #3 0x0 in PyStackRef_XCLOSE /p/./Include/internal/pycore_stackref.h:726:10",
+                "    #4 0x0 in clear_thread_frame /p/Python/pystate.c:3030:9",
+                "    #5 0x0 in dictiter_dealloc /p/Objects/dictobject.c:5532:9",
+            ]
+        )
+        self.assertEqual(
+            oom_dedup.extract_native_sites(with_real)[0],
+            "dictiter_dealloc@Objects/dictobject.c:5532",
+        )
+
 
 class TestExtractSite(unittest.TestCase):
     def test_skips_plumbing_returns_real_site(self):

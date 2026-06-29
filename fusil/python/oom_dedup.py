@@ -243,6 +243,12 @@ _BT_SKIP = re.compile(
     r"^(fatal_error(_exit)?|_Py_FatalError\w*|_PyObject_AssertFailed"
     r"|_Py_NegativeRefcount|_Py_DumpStack|faulthandler\w*"
     r"|_Py_DumpExtensionModules"
+    # Eval-loop operand-stack teardown + the generic dealloc dispatch: these frames CATCH
+    # an already-corrupted object (over-decref / double-free / UAF) and are never the defect,
+    # so resolve PAST them to the real caller (very often _CALL_LIST_APPEND = OOM-0036). Kept
+    # in lockstep with the catalog's gen_known_sites.GENERIC_DETECTOR_FUNCS.
+    r"|_Py_Dealloc|PyStackRef_XCLOSE|_PyFrame_ClearLocals|_PyFrame_ClearExceptCode"
+    r"|clear_thread_frame"
     r"|_PyMem_DebugCheckAddress|_PyMem_DebugRawFree|_PyMem_DebugFree"
     # The _testcapi set_nomemory injection hooks and the PyMem_/PyObject_ free/realloc
     # wrappers are pass-through allocator plumbing: when one is the innermost frame the real

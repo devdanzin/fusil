@@ -53,7 +53,7 @@ class SessionDirectory(SessionAgent, Directory):
             )
             if help:
                 message += " (%s)" % help
-            raise FusilError(message)
+            raise FusilError(message) from err
 
     def checkKeepDirectory(self):
         session = self.session()

@@ -17,7 +17,10 @@ from __future__ import annotations
 from random import choice, randint, random, sample
 from typing import Callable
 
-import fusil.python
+# Import the submodule directly (not the `fusil.python` package hub): it is the only
+# thing accessed here (fusil.python.tricky_weird.*), and importing the hub created a
+# fragile runtime import cycle python/__init__ -> ... -> argument_generator -> fusil.python.
+import fusil.python.tricky_weird
 from fusil.bytes_generator import BytesGenerator
 from fusil.config import FusilConfig
 from fusil.python.unicode import escapeUnicode

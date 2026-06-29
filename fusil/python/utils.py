@@ -11,19 +11,28 @@ import time
 
 
 def remove_logging_pycache() -> None:
-    """Remove stale logging __pycache__ that causes logging errors."""
+    """Best-effort removal of stale logging ``__pycache__`` that can cause logging errors.
 
+    Runs at startup against the *installed* stdlib, so it must never abort startup: a
+    missing ``__pycache__`` (the common case -- e.g. ``PYTHONDONTWRITEBYTECODE``) or any
+    unlink/rmdir failure is reported and ignored. (The ``reload(logging)`` is a workaround
+    of unverified necessity -- kept conservatively, but wrapped so it can't crash startup.)
+    """
     pycache = pathlib.Path(logging.__file__).parent / "__pycache__"
-    for entry in pycache.iterdir():
+    if pycache.is_dir():
+        for entry in pycache.iterdir():
+            try:
+                entry.unlink()
+            except OSError as e:
+                print(f"Error deleting file {entry.name}: {e}")
         try:
-            entry.unlink()
-        except Exception as e:
-            print(f"Error deleting file {entry.name}: {e}")
+            pycache.rmdir()
+        except OSError as e:
+            print(f"Error removing directory {pycache.name}: {e}")
     try:
-        pycache.rmdir()
+        importlib.reload(logging)
     except Exception as e:
-        print(f"Error removing directory {pycache.name}: {e}")
-    importlib.reload(logging)
+        print(f"Error reloading logging: {e}")
 
 
 def print_running_time(time_start: float) -> str:

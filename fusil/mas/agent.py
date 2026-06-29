@@ -44,8 +44,17 @@ class Agent(object):
                 self.mailbox.unregister()
             self.destroy()
         except KeyboardInterrupt:
-            self.error("Agent destruction interrupted!")
-            self.send("application_interrupt")
+            # Best-effort only: by this point the agent is usually already deactivated, and
+            # send() raises AgentError on an inactive agent -- which would mask the very
+            # KeyboardInterrupt we are handling. Notify the bus only if we still can, and
+            # never let an error escape __del__ (Python would just print and ignore it).
+            try:
+                if getattr(self, "is_active", False):
+                    self.send("application_interrupt")
+                else:
+                    print(self, "KeyboardInterrupt during agent destruction", file=stderr)
+            except Exception:
+                pass
         except Exception as error:
             print(self, error, "Agent destruction error", file=stderr)
 
