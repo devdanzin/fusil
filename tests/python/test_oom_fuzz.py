@@ -58,18 +58,9 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.oom_seq_len = 3
     o.oom_window = 1
     o.oom_seq_randomize = False
-    # JIT options (WriteJITCode is constructed unconditionally); OOM mode never
-    # dispatches to it, so legacy defaults are fine.
-    o.jit_fuzz = False
-    o.jit_external_references = True
-    o.jit_mode = "legacy"
-    o.jit_correctness_testing = False
-    o.jit_loop_iterations = 100
-    o.jit_hostile_prob = 0.1
-    o.jit_fuzz_classes = False
-    o.jit_fuzz_ast_mutation = False
-    o.jit_wrap_statements = False
-    o.jit_pattern_name = "ALL"
+    # General arg-gen knob (formerly --no-jit-external-references); still read by
+    # WritePythonCode when constructing the ArgumentGenerator.
+    o.external_references = True
     return o
 
 

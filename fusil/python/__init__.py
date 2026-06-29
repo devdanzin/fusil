@@ -211,134 +211,27 @@ class Fuzzer(Application):
             type="str",
             default=FILENAMES,
         )
-        jit_options = OptionGroupWithSections(parser, "JIT Fuzzing")
-        jit_options.add_option(
-            "--jit-fuzz",
-            help="Enable JIT-stressing code generation patterns (default: False)",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
-            "--jit-mode",
-            help="Main JIT fuzzing strategy: "
-            "'synthesize' (default: create new patterns with AST), "
-            "'variational' (mutate existing patterns from the library), "
-            "'legacy' (run old hardcoded scenarios for regression testing), or "
-            "'all' (randomly pick a strategy and modifiers for each test case, for maximum coverage).",
-            choices=("synthesize", "variational", "legacy", "all"),
-            default="synthesize",
-        )
-
-        # --- Variational Mode Modifiers ---
-        jit_options.add_option(
-            "--jit-pattern-name",
-            help="[variational mode] Specifies which pattern(s) to use, e.g., 'decref_escapes' or 'ALL'.",
-            type="str",
-            default="ALL",
-        )
-        jit_options.add_option(
-            "--jit-fuzz-ast-mutation",
-            action="store_true",
-            default=False,
-            help="[variational mode] Enable the AST-based structural mutator on library patterns.",
-        )
-        jit_options.add_option(
-            "--jit-fuzz-systematic-values",
-            action="store_true",
-            default=False,
-            help="[variational mode] Systematically iterate through all known boundary values as the corruption payload.",
-        )
-        jit_options.add_option(
-            "--jit-fuzz-type-aware",
-            action="store_true",
-            default=False,
-            help="[variational mode] Systematically iterate through a set of contrasting types for the corruption payload.",
-        )
-
-        # --- Synthesizer Mode Modifier ---
-        jit_options.add_option(
-            "--jit-wrap-statements",
-            action="store_true",
-            default=False,
-            help="[synthesize mode] Wrap each generated statement in a try/except block to increase resilience against benign errors.",
-        )
-
-        # --- Legacy Mode Modifier ---
-        jit_options.add_option(
-            "--jit-hostile-prob",
-            type="float",
-            default=0.1,
-            help="[legacy mode] Probability (0.0-1.0) of generating a hostile scenario instead of a friendly one.",
-        )
-
-        # --- General Behavior Modifiers (Apply to most modes) ---
-        jit_options.add_option(
-            "--jit-correctness-testing",
-            action="store_true",
-            default=False,
-            help="Enable 'Twin Execution' for supported patterns to find silent correctness bugs instead of just crashes.",
-        )
-        jit_options.add_option(
-            "--jit-correctness-prob",
-            type="float",
-            default=0.2,
-            help="Probability (0.0-1.0) of running a correctness test when correctness testing is enabled.",
-        )
-        jit_options.add_option(
-            "--jit-loop-iterations",
-            type="int",
-            default=500,
-            help="Number of iterations for JIT-warming hot loops.",
-        )
-
-        # --- Special-purpose legacy flag ---
-        jit_options.add_option(
-            "--rediscover-decref-crash",
-            action="store_true",
-            default=False,
-            help="[legacy mode] Run the specific, hard-coded scenario to reproduce the GH-124483 decref bug.",
-        )
-
-        # --- New Strategy-Enabling Flag ---
-        jit_options.add_option(
-            "--jit-fuzz-classes",
-            action="store_true",
-            default=False,
-            help="Enable the JIT class method fuzzer. This will occasionally generate scenarios that instantiate classes and call their methods in a hot loop.",
-        )
-
-        jit_options.add_option(
-            "--jit-target-uop",
-            help="Target a specific JIT micro-op (uop) for fuzzing. Provide the name "
-            "of the uop (e.g., '_STORE_ATTR'). This will generate patterns "
-            "specifically designed to stress that uop.",
-            type="str",
-            default=None,
-        )
-
-        jit_options.add_option(
-            "--jit-feedback-driven-mode",
-            help="Enable feedback-driven mode, mutating from the corpus.",
-            action="store_true",
-            default=False,
-        )
-        jit_options.add_option(
+        # NOTE: the JIT-fuzzing subsystem (the "JIT Fuzzing" option group + fusil/python/jit/)
+        # was removed once lafleur took over JIT fuzzing natively (see doc/jit-decision-memo.md).
+        # These three options outlived it -- they are general output / argument-generation knobs
+        # that were historically grouped under it -- so they move to the general Fuzzing group.
+        fuzzing_options.add_option(
             "--source-output-path",
             help="Specify an exact output path for the generated source file.",
             type="str",
             default=None,
         )
-        jit_options.add_option(
+        fuzzing_options.add_option(
             "--stdout-path",
             help="Specify an exact output path for the process stdout/stderr.",
             type="str",
             default=None,
         )
-        jit_options.add_option(
-            "--no-jit-external-references",
+        fuzzing_options.add_option(
+            "--no-external-references",
             help="Prevent argument generators from creating references to boilerplate-defined names. Use for minimized corpus generation. (Default: allows references)",
             action="store_false",
-            dest="jit_external_references",
+            dest="external_references",
             default=True,
         )
 
@@ -480,7 +373,6 @@ class Fuzzer(Application):
             input_options,
             running_options,
             fuzzing_options,
-            jit_options,
             oom_options,
             config_options,
         )

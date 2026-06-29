@@ -6,12 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Fusil is a fuzzing framework originally by Victor Stinner, revived here. **Only the Python
 fuzzing path is actively developed and tested** — `fuzzers/fusil-python-threaded` and the
-`fusil.python` / `fusil.python.jit` subsystems. The other fuzzers (`fusil-firefox`,
+`fusil.python` subsystem. The other fuzzers (`fusil-firefox`,
 `fusil-php`, `fusil-mplayer`, etc.) and non-Python subsystems (`fusil.network`,
 `fusil.linux`, file/process mangling) are legacy: they may not work and are out of scope
 unless explicitly being worked on. The current focus is finding crashes in CPython itself,
-C extension modules, the CPython Tier 2 JIT, and out-of-memory (allocation-failure) error
-paths via `--oom-fuzz` (see the OOM section).
+C extension modules, and out-of-memory (allocation-failure) error paths via `--oom-fuzz`
+(see the OOM section). **JIT fuzzing has moved out of fusil entirely** — the
+`fusil/python/jit/` subsystem was removed once the `lafleur` project took it over natively
+(see *JIT fuzzing → moved to lafleur* below).
 
 ## Environment & dependencies
 
@@ -36,9 +38,7 @@ paths via `--oom-fuzz` (see the OOM section).
 
 ```bash
 # Tests use unittest, NOT pytest (pytest is not installed).
-python -m unittest discover -s tests           # full suite (numpy-dependent tests skip;
-                                               # tests.python.test_write_jit_code ERRORS on
-                                               # import — see the JIT section)
+python -m unittest discover -s tests           # full suite (numpy-dependent tests skip)
 python -m unittest tests.python.test_values    # single module
 python -m unittest tests.python.test_oom_dedup tests.python.test_oom_dedup_wiring  # OOM dedup
 
@@ -68,8 +68,6 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --only-c                 only C-extension modules
 #   --sessions N             stop after N sessions
 #   --only-generate          write source.py without executing it
-#   --jit-fuzz               enable JIT-stressing code generation
-#   --jit-mode synthesize|variational|legacy|all   (see JIT section)
 #   --oom-fuzz               OOM (allocation-failure) injection mode (see OOM section)
 #   --oom-seq                stateful call SEQUENCES (Phase 4): several calls per scan under
 #                            one failure window (found OOM-0036); --oom-seq-len/--oom-window;
@@ -198,26 +196,18 @@ via an injectable `segv_resolver`).
 how the maintainer and Claude work together. Read them before any outward-facing
 (issue / gist / PR) step.
 
-### JIT fuzzing subsystem — `fusil/python/jit/`
+### JIT fuzzing — moved to lafleur (removed from fusil)
 
-Activated with `--jit-fuzz`. **`README_JIT.md` (at the repo root) is the authoritative
-design doc** — read it before working here. Summary:
-
-- **`WriteJITCode`** (`write_jit_code.py`) is the orchestrator, owned by `WritePythonCode`.
-  It dispatches on `--jit-mode`:
-  - `synthesize` (default): `ASTPatternGenerator` builds brand-new scenarios by constructing
-    a Python AST from scratch.
-  - `variational`: takes a template from `bug_patterns.py` (the `BUG_PATTERNS` knowledge base)
-    and mutates it, optionally via an AST mutator.
-  - `legacy`: original hard-coded friendly/hostile scenarios (regression baseline).
-  - `all`: randomly picks a mode + modifiers per test case.
-- Note: the `ASTMutator` used by variational mode now lives in the **`lafleur`** project, not
-  in fusil. `write_jit_code.py` imports it as `from lafleur.mutator import ASTMutator` and, when
-  lafleur is not installed, prints `ASTMutator not available ... Install lafleur for mutations`
-  and degrades to a no-op (mutation is skipped). The legacy `tests/python/test_write_jit_code.py`
-  still imports the removed `fusil.python.jit.ast_mutator`, so that test errors on import.
-- `--jit-feedback-driven-mode` ties into `lafleur`, a corpus/coverage-guided JIT fuzzer that
-  was spun off from this repo.
+fusil no longer does JIT fuzzing. The `fusil/python/jit/` subsystem (`WriteJITCode`,
+`ASTPatternGenerator`/`UOP_RECIPES`, `BUG_PATTERNS`), the `--jit-*` options, `README_JIT.md`,
+and the broken `test_write_jit_code.py` were **removed** (fusil #139) once **`lafleur`** — the
+corpus/coverage-guided JIT fuzzer spun off from this repo — took JIT fuzzing over end-to-end.
+lafleur re-implemented the reusable core natively (`lafleur/jit_seeds.py` +
+`lafleur/jit_bug_patterns.py`: the uop-recipe seed table, the curated bug patterns, and a
+synthesize grammar) and no longer shells out to fusil for seeds. The analysis and decision are
+recorded in **`doc/jit-seed-generation.md`** and **`doc/jit-decision-memo.md`**. To fuzz the
+CPython Tier 2 JIT, use lafleur. (`jit_config.py` here is unrelated — it's a standalone build
+helper that lowers JIT thresholds in a CPython checkout, still used to build lafleur's target.)
 
 ### Plugin system — `fusil/plugin_manager.py`
 
