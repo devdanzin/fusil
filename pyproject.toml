@@ -60,8 +60,15 @@ namespaces = false
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-# Legacy / parked code is not maintained to the lint/format standard.
-extend-exclude = ["fusil/notworking", "fuzzers/notworking", "tools/notworking"]
+# Legacy / parked code is not maintained to the lint/format standard; the golden/
+# directory holds generated fuzzer output (snapshots) that must stay byte-for-byte as
+# emitted -- linting/formatting it is meaningless and would break the snapshots.
+extend-exclude = [
+    "fusil/notworking",
+    "fuzzers/notworking",
+    "tools/notworking",
+    "tests/python/golden",
+]
 
 [tool.ruff.lint]
 # Default rule set (pyflakes F + a subset of pycodestyle E) plus import sorting (I).

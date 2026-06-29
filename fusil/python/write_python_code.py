@@ -733,25 +733,24 @@ class WritePythonCode(WriteCode):
 
         num_constructor_args = class_arg_number(class_name_str, class_type)
         self.write(0, f"{instance_var_name} = None # Initialize instance variable")
+        # PoC of the indentation context manager: `with self.indented():` replaces the
+        # addLevel(1)/restoreLevel(self.base_level - 1) bookkeeping -- the block's nesting now
+        # mirrors the generated code's nesting and the level can't leak. Output is unchanged
+        # (guarded by tests/python/test_golden_output.py).
         self.write(0, "try:")
-        self.addLevel(1)
-        self.write(
-            0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
-        )  # prefix was from original _fuzz_one_class
-        self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
-        self.write(0, "  )")  # Close callFunc
-        self.restoreLevel(self.base_level - 1)  # Exit try's indentation (level 1)
+        with self.indented():
+            self.write(0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',")
+            self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
+            self.write(0, "  )")  # Close callFunc
         self.write(0, "except Exception as e_instantiate:")
-        self.addLevel(1)  # Indent for except block contents
-        self.write(0, f"{instance_var_name} = None")
-        self.write_print_to_stderr(
-            0,  # This 0 is relative to current base_level (which is parent's level + 1)
-            f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
-        )
-        # instance_var_name remains None if already set, or if callFunc returned None
-        # If callFunc might not set instance_var_name on error, set it explicitly:
-        self.write(0, f"{instance_var_name} = None")
-        self.restoreLevel(self.base_level - 1)  # Exit except's indentation
+        with self.indented():
+            self.write(0, f"{instance_var_name} = None")
+            self.write_print_to_stderr(
+                0,
+                f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
+            )
+            # callFunc may not set instance_var_name on error, so set it explicitly.
+            self.write(0, f"{instance_var_name} = None")
         self.emptyLine()
 
         self._dispatch_fuzz_on_instance(
@@ -765,21 +764,20 @@ class WritePythonCode(WriteCode):
         self.write(
             0, f"if {instance_var_name} is not None and {instance_var_name} is not SENTINEL_VALUE:"
         )
-        current_level = self.addLevel(1)
-        # class_type is the type object of the class that was "instantiated"
-        self._fuzz_methods_on_object_or_specific_types(
-            current_prefix=f"{prefix}m",  # prefix from _fuzz_one_class context, e.g., "o1m", "c1m"
-            target_obj_expr_str=instance_var_name,
-            target_obj_class_name=class_name_str,  # Original class name string
-            target_obj_actual_type_obj=class_type,  # The actual type object
-            num_method_calls_to_make=self.options.methods_number,
-        )
-        self.write(0, f"del {instance_var_name} # Cleanup instance")
-        self.write_print_to_stderr(
-            0, f'"[{prefix}] -explicit garbage collection for class instance-"'
-        )
-        self.write(0, "collect()")
-        self.restoreLevel(current_level)
+        with self.indented():
+            # class_type is the type object of the class that was "instantiated"
+            self._fuzz_methods_on_object_or_specific_types(
+                current_prefix=f"{prefix}m",  # e.g. "o1m", "c1m"
+                target_obj_expr_str=instance_var_name,
+                target_obj_class_name=class_name_str,  # Original class name string
+                target_obj_actual_type_obj=class_type,  # The actual type object
+                num_method_calls_to_make=self.options.methods_number,
+            )
+            self.write(0, f"del {instance_var_name} # Cleanup instance")
+            self.write_print_to_stderr(
+                0, f'"[{prefix}] -explicit garbage collection for class instance-"'
+            )
+            self.write(0, "collect()")
         self.emptyLine()
 
     MAX_FUZZ_GENERATION_DEPTH = 2  # Adjust as needed; 3-5 is usually a good start
