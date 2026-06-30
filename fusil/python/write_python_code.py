@@ -403,15 +403,13 @@ class WritePythonCode(WriteCode):
 
     def _write_helper_call_functions(self) -> None:
         """Writes helper functions for calling code, comparing results, etc."""
-        self.write(
-            0, "# Helper for correctness testing that handles NaN, lambdas, and complex numbers."
-        )
-        self.write(0, "import math")
-        self.write(0, "import types")
         # Fixed-shape helper: emit it as one block rather than line-by-line self.write calls.
         self.write_block(
             0,
             """
+            # Helper for correctness testing that handles NaN, lambdas, and complex numbers.
+            import math
+            import types
             def compare_results(a, b):
                 if isinstance(a, types.FunctionType) and a.__name__ == '<lambda>' and \\
                    isinstance(b, types.FunctionType) and b.__name__ == '<lambda>':

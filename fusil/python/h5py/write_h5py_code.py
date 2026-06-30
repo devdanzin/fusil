@@ -1682,8 +1682,6 @@ class WriteH5PyCode:
         locking_expr_list = self.parent.arg_generator.h5py_argument_generator.genH5PyLocking()
         locking_expr = "".join(locking_expr_list) if locking_expr_list else "None"
 
-        fs_kwargs_expr = ""
-
         all_kwargs_parts = []  # Store parts like "driver='core'"
         if actual_driver:
             all_kwargs_parts.append(f"driver={driver_expr}")
@@ -1710,7 +1708,6 @@ class WriteH5PyCode:
                     all_kwargs_parts.append(fs_kwargs_expr_temp[2:])
                 elif fs_kwargs_expr_temp:  # If it's just "kw=val"
                     all_kwargs_parts.append(fs_kwargs_expr_temp)
-                fs_kwargs_expr = fs_kwargs_expr_temp  # For logging
 
         # Construct the final kwargs string for the File() call
         # Filter out any genuinely empty strings that might have resulted from non-chosen optional args
