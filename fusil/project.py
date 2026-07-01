@@ -1,12 +1,12 @@
 from shutil import copyfile
 from time import time
 
-from fusil.aggressivity import AggressivityAgent
 from fusil.mas.agent_list import AgentList
 from fusil.project_agent import ProjectAgent
 from fusil.project_directory import ProjectDirectory
 from fusil.session import Session
 from fusil.system_calm import SystemCalm
+from fusil.tools import minmax
 
 
 class Project(ProjectAgent):
@@ -60,13 +60,13 @@ class Project(ProjectAgent):
             self.registerAgent(agent)
         self.registerAgent(self)
 
-        # Create aggressivity agent
-        self.aggressivity = AggressivityAgent(self)
-
-        # Initial aggresssivity value
+        # Aggressivity: a static scalar in [0.01, 1.00] (the configured --aggressivity as a
+        # fraction). Nothing in the fuzzer reads it to scale behaviour -- it is only reported in
+        # logs -- so the former adaptive-feedback AggressivityAgent (+ its aggressivity.dat graph)
+        # was collapsed to this constant. See doc/mas-architecture.md.
+        self.aggressivity = minmax(0.01, round((options.aggressivity or 0.0) / 100, 2), 1.00)
         if options.aggressivity is not None:
-            self.aggressivity.setValue(options.aggressivity / 100)
-            self.error("Initial aggressivity: %s" % self.aggressivity)
+            self.error("Initial aggressivity: %.1f%%" % (self.aggressivity * 100))
 
         # Create the working directory
         self.directory = ProjectDirectory(self)
@@ -118,8 +118,6 @@ class Project(ProjectAgent):
         self._destroyed = True
 
         # Destroy all project agents
-        self.aggressivity.destroy()
-        self.aggressivity = None
         for agent in self.application().agents:
             self.agents.remove(agent, False)
         self.agents.clear()
@@ -274,7 +272,7 @@ class Project(ProjectAgent):
             )
         duration = time() - self.project_start
         info.append("total %.1f seconds" % duration)
-        info.append("aggresssivity: %s" % self.aggressivity)
+        info.append("aggresssivity: %.1f%%" % (self.aggressivity * 100))
         self.error("Project done: %s" % ", ".join(info))
         self.error("Total: %s success" % self.nb_success)
 
