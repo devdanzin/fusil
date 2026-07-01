@@ -350,12 +350,16 @@ class ArgumentGenerator:
         return [tricky_name]
 
     def genBombObject(self) -> list[str]:
-        """Generate a freshly-constructed exception-bomb object (see samples/bomb_objects.py).
+        """Generate an exception-bomb argument (see samples/bomb_objects.py).
 
-        A new instance per call (bombs are stateful and self-randomise their delay/exception),
-        so each fuzzed argument gets an independently-armed landmine."""
-        bomb_class = choice(fusil.python.tricky_weird.bomb_object_names)
-        return [f"{bomb_class}()"]
+        Instance bombs are freshly constructed per call (``Name()``) -- they are stateful and
+        self-randomise their delay/exception, so each argument is an independently-armed
+        landmine. Type bombs are passed as the class object itself (``Name``), where a
+        metaclass makes attribute/hash access on the class the landmine."""
+        instance_names = fusil.python.tricky_weird.bomb_object_names
+        type_names = fusil.python.tricky_weird.bomb_type_names
+        name = choice(instance_names + type_names)
+        return [name if name in type_names else f"{name}()"]
 
     def genTrickyNumpy(self) -> list[str]:
         """Generate a name of a 'tricky' predefined NumPy object from tricky_weird."""
