@@ -119,7 +119,8 @@ class Application(ApplicationAgent):
         )
         fuzzer.add_option(
             "--keep-generated-files",
-            help="Keep a session directory if it contains generated files",
+            help="Keep a session directory if the fuzzed program left files in it "
+            "(files other than Fusil's own generated source/logs)",
             action="store_true",
             default=False,
         )

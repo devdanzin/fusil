@@ -85,7 +85,9 @@ class SessionDirectory(SessionAgent, Directory):
                 return True
 
         if application.options.keep_generated_files and not self.isEmpty(True):
-            # Project generated some extra files: keep the directory
+            # The fuzzed program left files behind (isEmpty(ignore_generated=True) ignores
+            # Fusil's own registered source/logs, so a False here means a *non*-Fusil file
+            # exists). Those are interesting artifacts, so keep the directory.
             self.warning("Keep the non-empty directory %s" % self.directory)
             return True
 

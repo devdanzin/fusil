@@ -168,12 +168,15 @@ class Agent(object):
         self._log("error", message)
 
     def __repr__(self):
+        # Defensive: __del__'s error handler stringifies self and is documented never to
+        # let an error escape, so these must not raise on a partially-constructed agent
+        # (missing agent_id/name/is_active, e.g. if __init__ failed part-way).
         return "<%s id=%s, name=%r is_active=%s>" % (
             self.__class__.__name__,
-            self.agent_id,
-            self.name,
-            self.is_active,
+            getattr(self, "agent_id", "?"),
+            getattr(self, "name", "?"),
+            getattr(self, "is_active", "?"),
         )
 
     def __str__(self):
-        return "<%s %r>" % (self.__class__.__name__, self.name)
+        return "<%s %r>" % (self.__class__.__name__, getattr(self, "name", "?"))
