@@ -1,6 +1,5 @@
-import pathlib
 from grp import getgrgid, getgrnam
-from io import StringIO
+from optparse import OptionGroup, OptionParser
 from os import getgid, getuid
 from pwd import getpwnam, getpwuid
 from sys import exit, stderr, stdout
@@ -8,13 +7,7 @@ from sys import exit, stderr, stdout
 from ptrace.error import PTRACE_ERRORS, writeError
 
 from fusil.application_logger import ApplicationLogger
-from fusil.config import (
-    ConfigError,
-    FusilConfig,
-    OptionGroupWithSections,
-    OptionParserWithSections,
-    optparse_to_configparser,
-)
+from fusil.config import ConfigError, FusilConfig
 from fusil.file_tools import relativePath
 from fusil.mas.agent_list import AgentList
 from fusil.mas.application_agent import ApplicationAgent
@@ -86,11 +79,11 @@ class Application(ApplicationAgent):
         Create command line options specific to a fuzzer
         """
 
-    def createOptionParser(self, output=None):
+    def createOptionParser(self):
         """
         Create all command line options, including Fusil options.
         """
-        parser = OptionParserWithSections(usage=self.USAGE)
+        parser = OptionParser(usage=self.USAGE)
         parser.add_option(
             "--version",
             help="Display Fusil version (%s) and exit" % VERSION,
@@ -98,8 +91,7 @@ class Application(ApplicationAgent):
         )
 
         self.createFuzzerOptions(parser)
-        config_options = StringIO()
-        fuzzer = OptionGroupWithSections(parser, "Fuzzer")
+        fuzzer = OptionGroup(parser, "Fuzzer")
         fuzzer.add_option(
             "--success",
             help="Maximum number of success sessions (default: %s)"
@@ -157,7 +149,7 @@ class Application(ApplicationAgent):
         )
         parser.add_option_group(fuzzer)
 
-        log = OptionGroupWithSections(parser, "Logging")
+        log = OptionGroup(parser, "Logging")
         log.add_option(
             "-v",
             "--verbose",
@@ -173,7 +165,7 @@ class Application(ApplicationAgent):
         )
         parser.add_option_group(log)
 
-        debug = OptionGroupWithSections(parser, "Development")
+        debug = OptionGroup(parser, "Development")
         debug.add_option(
             "--debug",
             help="Enable debug mode (set log level to DEBUG)",
@@ -188,33 +180,13 @@ class Application(ApplicationAgent):
         )
         parser.add_option_group(debug)
 
-        if output:
-            optparse_to_configparser(parser, config_options, defaults=True)
-            output.write(config_options.getvalue())
-
         return parser
 
-    def parseOptions(self, with_options=False):
+    def parseOptions(self):
         """Create command line options and parse them."""
-        default_config = FusilConfig(read=False)
-        config_output = default_config.write_sample_config(write_file=False)
-        parser = self.createOptionParser(config_output)
+        parser = self.createOptionParser()
 
         self.options, self.arguments = parser.parse_args()
-        filename = configdir = None
-        if self.options.use_config:
-            file_path = pathlib.Path(self.options.config_file)
-            filename = file_path.name
-            configdir = file_path.parent
-
-        if with_options:
-            self.options = FusilConfig(
-                self.options,
-                filename=filename,
-                configdir=configdir,
-                read=self.options.use_config,
-                write=self.options.write_config,
-            )
 
         # Just want to know the version?
         if self.options.version:
@@ -231,22 +203,15 @@ class Application(ApplicationAgent):
             self.options.verbose = True
         if self.options.verbose:
             print("\nReceived options:")
-            default_configs = self.options.write_sample_config(False)
-            received_options = optparse_to_configparser(
-                parser, default_configs, defaults=False, options=self.options
-            )
-            print("\n")
-            print(received_options, "\n\n")
+            for name, value in sorted(vars(self.options).items()):
+                print(f"  {name} = {value}")
+            print("")
 
         # --force-unsafe enables --unsafe
         if self.options.force_unsafe:
             self.options.unsafe = True
 
         self.processOptions(parser, self.options, self.arguments)
-
-        # Just want to write a config file?
-        if self.options.write_config:
-            exit(0)
 
     def processOptions(self, parser, options, arguments):
         """Check the number of arguments."""
@@ -284,7 +249,7 @@ class Application(ApplicationAgent):
             self.fatalError("Configuration error: %s" % err)
 
         # Read command line options
-        self.parseOptions(with_options=True)
+        self.parseOptions()
 
         # Setup the logger and display Fusil version, license and website
         self.logger.applyOptions(self.options)

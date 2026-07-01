@@ -2,76 +2,25 @@
 Fusil configuration
 +++++++++++++++++++
 
-You can configure Fusil using a fusil.conf file in your configuration directory
-($XDG_CONFIG_HOME environment variable or ~/.config/). Template file: ::
+Fusil is configured entirely through **command-line options**. Run a fuzzer with
+``--help`` to see every option and its default::
 
-    ###############################################################
-    # General Fusil options
-    ###############################################################
-    [fusil]
+    fusil-python-threaded --help
 
-    # Maximum number of session (0=unlimited)
-    session = 0
+Options are grouped (Input, Running, Fuzzing, OOM Fuzzing, Logging, ...). See
+``doc/python-fuzzer.md`` for a narrative reference of the Python fuzzer's options.
 
-    # Maximum number of success before exit (0=unlimited)
-    success = 1
+.. note::
 
-    # Minimum score for a successful session
-    success_score = 0.50
+    Older versions of Fusil also read a ``fusil.conf`` file (``--use-config`` /
+    ``--write-config``). That round-trip was removed: it duplicated the option defaults
+    and the file it read never actually reached the running configuration. Command-line
+    options are now the single source of truth.
 
-    # Maximum score for a session error
-    error_score = -0.50
+Non-command-line defaults
+=========================
 
-    # Maximum memory in bytes (0=unlimited)
-    max_memory = 0
-
-    # (Normal) Maximum system load
-    normal_calm_load = 0.50
-
-    # (Normal) Seconds to sleep until system load is low
-    normal_calm_sleep = 0.5
-
-    # (Slow) Maximum system load
-    slow_calm_load = 0.30
-
-    # (Slow) Seconds to sleep until system load is low
-    slow_calm_sleep = 3.0
-
-    # xhost program path (change X11 permissions)
-    xhost_program = xhost
-
-    ###############################################################
-    # Debugger used to trace child processes
-    ###############################################################
-    [debugger]
-
-    # Use the debugger?
-    use_debugger = True
-
-    # Enable trace forks option
-    trace_forks = True
-
-
-    ###############################################################
-    # Child processes options
-    ###############################################################
-    [process]
-
-    # Dump core on crash
-    core_dump = True
-
-    # Maximum user process (RLIMIT_NPROC)
-    max_user_process = 10
-
-    # Default maximum memory in bytes (O=unlimited)
-    max_memory = 104857600
-
-    # Change the user (setuid)
-    user = fusil
-
-    # Change the group (setgid)
-    group = fusil
-
-    # Use a probe to watch CPU activity
-    use_cpu_probe = True
-
+A small number of settings have no command-line flag -- session scoring thresholds, the
+memory limit, and the dedicated-``fusil``-user subprocess sandbox (user/group). These live
+as constants in ``fusil/config.py`` (:class:`fusil.config.FusilConfig`) and are rarely
+changed. Edit that class if you need to adjust them.
