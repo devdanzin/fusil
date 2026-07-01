@@ -79,6 +79,14 @@ the template the best new techniques below follow.
 
 ### A. The "exception-bomb object" family — biggest ROI, lowest effort
 
+> **STATUS: IMPLEMENTED.** `fusil/python/samples/bomb_objects.py` — the targeted family
+> (`HashBomb`, `EqBomb`, `IndexBomb`, `LenBomb`, `LyingLen`, `ReprBomb`, `FailingIterator`)
+> plus a metaclass-driven **`SuperBomb`** (every protocol slot raises a *random* exception on
+> first use or after a *random* delay — spray-and-pray). Delays and (for SuperBomb) exception
+> types are randomised per instance to walk a wide slice of program state. Wired into all three
+> argument pools via `ArgumentGenerator.genBombObject` (weight `BOMB_WEIGHT`); tested in
+> `tests/python/test_bomb_objects.py`.
+
 This is the direct analogue of the OOM success at the *protocol* level. `set_nomemory` makes
 **allocations** fail deterministically; an exception-bomb object makes a **dunder callback**
 fail deterministically — exercising the huge class of C code that calls a Python protocol slot
