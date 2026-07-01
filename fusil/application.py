@@ -20,10 +20,9 @@ from fusil.mas.agent_list import AgentList
 from fusil.mas.application_agent import ApplicationAgent
 from fusil.mas.mta import MTA
 from fusil.mas.univers import Univers
-from fusil.process.tools import beNice, runCommand
+from fusil.process.tools import beNice
 from fusil.project import Project
 from fusil.version import LICENSE, VERSION, WEBSITE
-from fusil.xhost import xhostCommand
 
 
 def formatLimit(limit):
@@ -273,7 +272,6 @@ class Application(ApplicationAgent):
         self.exitcode = 0
         self.interrupted = False
         self.project: Project | None = None
-        self._setup_x11 = False
         self.options = None
 
         # Create the logger
@@ -466,9 +464,7 @@ class Application(ApplicationAgent):
             writeError(None, error, "AGENT DEINIT ERROR")
             self.exitcode = 1
         finally:
-            # Always release X11 access and drop the config, even if agent cleanup
-            # raised or the interrupt re-raised -- otherwise X access stays granted.
-            self.deinitX11()
+            # Drop the config even if agent cleanup raised or the interrupt re-raised.
             self.config = None
 
     def fatalError(self, message=None):
@@ -556,29 +552,3 @@ class Application(ApplicationAgent):
         if exit_at_end:
             self.exit()
             exit(self.exitcode)
-
-    def initX11(self):
-        """
-        X11 initialization: allow the fusil user to use X11 using
-        xhost program.
-        """
-        if self._setup_x11:
-            return
-        self._xhost(self.config, True)
-        self._setup_x11 = True
-
-    def deinitX11(self):
-        """
-        X11 deinitialization: disallow the fusil user to use X11 using
-        xhost program.
-        """
-        if not self._setup_x11:
-            return
-        self._setup_x11 = False
-        self._xhost(self.config, False)
-
-    def _xhost(self, config, allow):
-        if config.process_uid is None:
-            return
-        command = xhostCommand(config.fusil_xhost_program, config.process_uid, allow)
-        runCommand(self, command, stdout=None)

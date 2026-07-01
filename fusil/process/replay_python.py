@@ -4,7 +4,6 @@ from sys import executable, getfilesystemencoding
 from sys import path as sys_path
 
 from fusil.write_code import WriteCode
-from fusil.xhost import xhostCommand
 
 
 def formatValue(value):
@@ -180,8 +179,6 @@ class WriteReplayScript(WriteCode):
 
     def changeUserGroup(self, process, config):
         imports = ["setgid", "setuid", "getuid", "getgid"]
-        if process.use_x11:
-            imports.append("system")
         self.write(0, "from os import %s" % ", ".join(imports))
         self.emptyLine()
 
@@ -196,13 +193,6 @@ class WriteReplayScript(WriteCode):
         self.write(1, "else:")
         self.write(2, "child_gid = gid")
         self.write(1, "safetyConfirmation(child_uid, child_gid)")
-
-        # xhost command
-        if process.use_x11:
-            command = xhostCommand(config.fusil_xhost_program, "%s")
-            self.debug(0, "allow user %s to use the X11 server", "uid")
-            self.write(0, 'system("%s" %% uid)' % " ".join(command))
-            self.emptyLine()
 
         # setgid()
         self.write(0, "if gid is not None:")
