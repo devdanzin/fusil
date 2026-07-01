@@ -7,11 +7,13 @@ subclasses stand in for real agents.
 
 import gc
 import unittest
+from types import SimpleNamespace
 
 from fusil.mas.agent import Agent, AgentError
 from fusil.mas.agent_id import AgentID
 from fusil.mas.message import Message
 from fusil.mas.mta import MTA
+from fusil.mas.univers import Univers
 
 
 class _StubLogger:
@@ -149,6 +151,136 @@ class TestDelivery(unittest.TestCase):
         sender.send("ping")
         mta.live()  # encounters the dead weakref and prunes it
         self.assertEqual(len(mta.mailing_list["ping"]), 1)
+
+
+class Lifecycle(Agent):
+    """Records init/deinit so activate/deactivate transitions can be asserted."""
+
+    def __init__(self, name, mta):
+        super().__init__(name, mta)
+        self.events = []
+
+    def init(self):
+        self.events.append("init")
+
+    def deinit(self):
+        self.events.append("deinit")
+
+
+class TestAgentLifecycle(unittest.TestCase):
+    def test_activate_calls_init_and_sets_active(self):
+        mta, _app = _make_mta()
+        a = Lifecycle("a", mta)
+        self.assertFalse(a.is_active)
+        a.activate()
+        self.assertTrue(a.is_active)
+        self.assertEqual(a.events, ["init"])
+
+    def test_double_activate_raises(self):
+        mta, _app = _make_mta()
+        a = Lifecycle("a", mta)
+        a.activate()
+        with self.assertRaises(AgentError):
+            a.activate()
+
+    def test_deactivate_calls_deinit_and_clears_active(self):
+        mta, _app = _make_mta()
+        a = Lifecycle("a", mta)
+        a.activate()
+        a.events.clear()
+        a.deactivate()
+        self.assertFalse(a.is_active)
+        self.assertEqual(a.events, ["deinit"])
+
+    def test_deactivate_when_inactive_is_noop(self):
+        mta, _app = _make_mta()
+        a = Lifecycle("a", mta)
+        a.deactivate()  # never activated
+        self.assertEqual(a.events, [])
+
+
+class StepAgent(Agent):
+    """Records the order of readMailbox/live calls a univers step makes."""
+
+    def __init__(self, name, mta):
+        super().__init__(name, mta)
+        self.steps = []
+
+    def readMailbox(self):
+        self.steps.append("read")
+        return 0
+
+    def live(self):
+        self.steps.append("live")
+
+
+class TestUnivers(unittest.TestCase):
+    def test_execute_agent_skips_inactive(self):
+        mta, app = _make_mta()
+        u = Univers(app, mta, 0)
+        a = StepAgent("a", mta)  # not activated
+        u.executeAgent(a)
+        self.assertEqual(a.steps, [])
+
+    def test_execute_agent_reads_then_lives(self):
+        mta, app = _make_mta()
+        u = Univers(app, mta, 0)
+        a = StepAgent("a", mta)
+        a.activate()
+        u.executeAgent(a)
+        self.assertEqual(a.steps, ["read", "live"])
+
+    def test_execute_stops_when_is_done(self):
+        # A step loop that never sets is_done would hang; Stopper.live sets it on the
+        # first pass, so execute() must run one step and return.
+        mta, app = _make_mta()
+        u = Univers(app, mta, 0)
+
+        class Stopper(Agent):
+            def live(self):
+                u.is_done = True
+
+        s = Stopper("s", mta)
+        s.activate()
+        project = SimpleNamespace(agents=[s])
+        u.execute(project)  # must return, not hang
+        self.assertTrue(u.is_done)
+
+
+class TestEventTrace(unittest.TestCase):
+    """The opt-in MTA.trace instrumentation (refactor-safety aid): records the full
+    (event, args) sequence flowing through the bus, in send order."""
+
+    def test_trace_is_off_by_default(self):
+        mta, _app = _make_mta()
+        self.assertIsNone(mta.trace)
+        sender = Recorder("s", mta)
+        sender.activate()
+        sender.send("ping", 1)  # must not raise / must not record
+        self.assertIsNone(mta.trace)
+
+    def test_trace_records_events_in_send_order(self):
+        mta, _app = _make_mta()
+        mta.trace = []
+        sender = Recorder("s", mta)
+        sender.activate()
+        sender.send("ping", 1)
+        sender.send("ping", 2, 3)
+        sender.send("pong")
+        self.assertEqual(
+            mta.trace,
+            [("ping", (1,)), ("ping", (2, 3)), ("pong", ())],
+        )
+
+    def test_trace_records_even_without_subscribers(self):
+        # deliver() is the choke point: an event with no subscriber is still recorded
+        # (it is queued and then dropped by live()), so the trace reflects intent to send.
+        mta, _app = _make_mta()
+        mta.trace = []
+        sender = Recorder("s", mta)
+        sender.activate()
+        sender.send("no_subscriber_event", 42)
+        self.assertEqual(mta.trace, [("no_subscriber_event", (42,))])
 
 
 if __name__ == "__main__":
