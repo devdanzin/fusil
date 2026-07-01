@@ -379,11 +379,15 @@ class TestArgumentGenerator(unittest.TestCase):
         self._setup_arg_gen(
             use_numpy=False, use_h5py_arg_gen=True, no_numpy_opt=False
         )  # use_numpy init flag is False
+        # NumPy generators are off when the use_numpy init flag is False...
         self.assertFalse(
             self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
         )
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
+        # ...but h5py support is now INDEPENDENT of numpy (it used to be wrongly gated on the
+        # numpy flag): genH5PyObject is present iff h5py is actually available.
+        self.assertEqual(
+            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators"),
+            self.arg_gen.h5py_argument_generator is not None,
         )
 
     def test_complex_generators_composition_with_templates(self):

@@ -185,12 +185,21 @@ class ArgumentGenerator:
                 self.genTrickyObjects,
             )
 
-        # Handle NumPy, h5py, and t-strings conditionally
-        if not self.options.no_numpy and use_numpy and H5PyArgumentGenerator:
-            if allow_external_references:
-                self.simple_argument_generators += (self.genTrickyNumpy,) * 50
-                self.complex_argument_generators += (self.genTrickyNumpy,) * 50
-            assert isinstance(self.h5py_argument_generator, H5PyArgumentGenerator)
+        # NumPy tricky arrays -- gated on numpy alone, NOT on h5py. (Previously this whole
+        # block required H5PyArgumentGenerator, so numpy support silently did nothing unless
+        # h5py was also installed.)
+        if (
+            not self.options.no_numpy
+            and use_numpy
+            and numpy is not None
+            and allow_external_references
+        ):
+            self.simple_argument_generators += (self.genTrickyNumpy,) * 50
+            self.complex_argument_generators += (self.genTrickyNumpy,) * 50
+
+        # h5py objects -- self.h5py_argument_generator is set only when use_h5py and h5py
+        # imported; h5py pulls in numpy, so keep the --no-numpy guard here.
+        if not self.options.no_numpy and self.h5py_argument_generator is not None:
             self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
 
         if (
