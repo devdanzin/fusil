@@ -62,8 +62,6 @@ class Session(SessionAgent):
             if score is None:
                 continue
             score = normalizeScore(score)
-            score *= agent.score_weight
-            score = normalizeScore(score)
             if verbose and score:
                 self.info("- %s score: %.1f%%" % (agent, score * 100))
             session_score += score
@@ -112,8 +110,6 @@ class Session(SessionAgent):
             return
         self.stopped = True
         score = self.computeScore(True)
-        if self.project().success_score <= score:
-            self.send("session_success")
         self.send("session_done", score)
 
     def createFilename(self, filename, count=None):

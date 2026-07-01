@@ -43,9 +43,6 @@ class AggressivityAgent(ProjectAgent):
         value = minmax(self.aggressivity_min, value, self.aggressivity_max)
         self.aggressivity = value
 
-    def on_session_start(self):
-        self.send("aggressivity_value", self.aggressivity)
-
     def destroy(self):
         if not self.graph_data:
             return

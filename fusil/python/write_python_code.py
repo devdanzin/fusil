@@ -645,7 +645,7 @@ class WritePythonCode(WriteCode):
             self._generate_oom_function_call(prefix, func_name, func_obj)
             return
 
-        # Standard (non-JIT) function call fuzzing
+        # Standard function call fuzzing
         func_name = choice(self.module_functions)
         try:
             func_obj = getattr(self.module, func_name)
