@@ -176,6 +176,14 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
+            "--gc-aggressive",
+            help="Emit gc.set_threshold(1, 1, 1) at the top of the generated script, forcing a "
+            "gen-0 collection on ~every allocation (surfaces GC-during-partial-init crashes); "
+            "off by default",
+            action="store_true",
+            default=False,
+        )
+        fuzzing_options.add_option(
             "--no-async",
             help="Don't run code asynchronously (default: False)",
             action="store_true",

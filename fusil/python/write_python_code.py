@@ -327,6 +327,20 @@ class WritePythonCode(WriteCode):
             )
             self.emptyLine()
 
+        if self.options.gc_aggressive:
+            # gc.set_threshold(1, 1, 1) forces a gen-0 collection on ~every tracked allocation,
+            # turning rare "GC fires while an object is tracked but half-initialised"
+            # races (tp_traverse reading a NULL field) into deterministic crashes. A cheap
+            # global coercion like the OOM hook; composes with the bombs + class fuzzing.
+            self.write_block(
+                0,
+                """
+                import gc
+                gc.set_threshold(1, 1, 1)
+                """,
+            )
+            self.emptyLine()
+
     def _write_tricky_definitions(self) -> None:
         """Writes definitions for 'tricky' classes and objects."""
         self.write(0, fusil.python.tricky_weird.weird_classes)

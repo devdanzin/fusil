@@ -46,6 +46,7 @@ class _Options:
     objects_number = 0
     methods_number = 2
     deep_dive = False
+    gc_aggressive = False
     fuzz_exceptions = False
     test_private = False
     no_numpy = True
