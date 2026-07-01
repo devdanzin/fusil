@@ -14,4 +14,8 @@ class ApplicationAgent(Agent):
         self.application().registerAgent(self)
 
     def unregister(self, destroy=True):
-        self.application().unregisterAgent(self, destroy)
+        # The application weakref can already be dead at interpreter shutdown (AgentList.__del__
+        # -> clear -> unregister), so guard it like ProjectAgent.unregister does for project().
+        application = self.application()
+        if application is not None:
+            application.unregisterAgent(self, destroy)
