@@ -34,6 +34,7 @@ tricky_numpy_names = (
 )
 
 bomb_object_names = list(bomb_objects.BOMB_CLASS_NAMES)
+bomb_type_names = list(bomb_objects.BOMB_TYPE_NAMES)
 
 weird_classes = pathlib.Path(weird_classes.__file__).read_text()
 tricky_typing = pathlib.Path(tricky_typing.__file__).read_text()

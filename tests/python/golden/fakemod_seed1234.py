@@ -629,6 +629,129 @@ class SuperBomb(metaclass=_SuperBombMeta):
         object.__setattr__(self, "_bomb_delay", random.randint(0, max_delay))
 
 
+# --- File-like bombs (target the common "try fd, else .read()" C pattern) ----------------
+
+
+class ReadBomb(_BombBase):
+    """A file-like whose read()/readline() succeed a random few times, then raise -- the
+    delayed mid-parse failure that surfaces partial-read error handling."""
+
+    def read(self, *args, **kwargs):
+        self._fire()
+        return b""
+
+    def readline(self, *args, **kwargs):
+        self._fire()
+        return b""
+
+    def readlines(self, *args, **kwargs):
+        self._fire()
+        return []
+
+    def __iter__(self):
+        return iter((b"line\n",))
+
+    def seek(self, *args, **kwargs):
+        return 0
+
+    def tell(self):
+        return 0
+
+    def close(self):
+        pass
+
+
+class WrongTypeFile:
+    """read() returns the wrong type (int, not bytes/str) -- targets C code that assumes the
+    return of read() is a buffer."""
+
+    def read(self, *args, **kwargs):
+        return 123456
+
+    def readline(self, *args, **kwargs):
+        return 123456
+
+    def close(self):
+        pass
+
+
+class FilenoBomb:
+    """fileno() raises (looks like a bad/again fd) while read() keeps working -- targets the
+    'try obj.fileno(), fall back to obj.read()' branch and its error handling."""
+
+    def fileno(self):
+        raise _bomb_exc()("fusil fileno bomb")
+
+    def read(self, *args, **kwargs):
+        return b""
+
+    def readable(self):
+        return True
+
+    def close(self):
+        pass
+
+
+# --- Metaclass / descriptor bombs (target attribute-access C paths) ----------------------
+
+
+class _HiddenNameMeta(type):
+    """Metaclass whose attribute access raises for the identity names C code reads unchecked
+    (``Py_TYPE(obj)->tp_name`` analogues via ``PyObject_GetAttrString(cls, "__name__")``)."""
+
+    def __getattribute__(cls, name):
+        if name in ("__name__", "__qualname__", "__module__"):
+            raise _bomb_exc()("fusil hidden name: %s" % name)
+        return super().__getattribute__(name)
+
+
+class HiddenNameType(metaclass=_HiddenNameMeta):
+    """A *class* (pass it, don't instantiate) whose __name__/__qualname__/__module__ raise."""
+
+
+class _RaisingGet:
+    """A data descriptor whose __get__/__set__ raise -- hits unguarded PyErr_Clear in getattr
+    fallbacks when installed on a commonly-probed attribute name."""
+
+    def __get__(self, obj, objtype=None):
+        raise _bomb_exc()("fusil descriptor get")
+
+    def __set__(self, obj, value):
+        raise _bomb_exc()("fusil descriptor set")
+
+
+class DescriptorBomb:
+    """An instance whose class carries raising data-descriptors on attribute names C code
+    commonly probes."""
+
+    value = _RaisingGet()
+    name = _RaisingGet()
+    read = _RaisingGet()
+    __wrapped__ = _RaisingGet()
+
+
+class _StatefulHashMeta(type):
+    """Metaclass hash that succeeds at first (registration) then raises after a random delay --
+    targets type-keyed registries (``PyDict_GetItem`` on a class key that changes hashability)."""
+
+    def __new__(mcls, name, bases, namespace):
+        cls = super().__new__(mcls, name, bases, namespace)
+        # list cell so __hash__ can mutate without triggering __setattr__ machinery
+        cls._bomb_hash_state = [0, random.randint(0, 3)]
+        return cls
+
+    def __hash__(cls):
+        state = super().__getattribute__("_bomb_hash_state")
+        state[0] += 1
+        if state[0] > state[1]:
+            raise _bomb_exc()("fusil stateful hash")
+        return 0
+
+
+class StatefulHashType(metaclass=_StatefulHashMeta):
+    """A *class* (pass it, don't instantiate) whose hash works, then arms and starts raising."""
+
+
 # Names the argument generator instantiates (as ``Name()``); every class constructs with no
 # required arguments and self-randomises its delay/exception.
 BOMB_CLASS_NAMES = [
@@ -640,6 +763,17 @@ BOMB_CLASS_NAMES = [
     "ReprBomb",
     "FailingIterator",
     "SuperBomb",
+    "ReadBomb",
+    "WrongTypeFile",
+    "FilenoBomb",
+    "DescriptorBomb",
+]
+
+# Names the argument generator passes *as the class object itself* (not instantiated) -- the
+# bomb is the type: a metaclass turns attribute/hash access on the class into a landmine.
+BOMB_TYPE_NAMES = [
+    "HiddenNameType",
+    "StatefulHashType",
 ]
 
 

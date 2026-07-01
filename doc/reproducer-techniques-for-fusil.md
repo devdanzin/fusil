@@ -180,6 +180,10 @@ harness). Pairs especially well with class-instantiation fuzzing and the bomb ob
 
 ### C. Mischievous file-like objects (Techniques 5b / 21)
 
+> **STATUS: IMPLEMENTED.** `ReadBomb` (read/readline succeed a random few times then raise),
+> `WrongTypeFile` (read returns an int), `FilenoBomb` (fileno raises, read works) in
+> `bomb_objects.py`, injected via `genBombObject`.
+
 A small set of file-like bombs — `read()` returning the wrong type, `read()` succeeding once
 then raising (delayed failure, the most productive), `fileno()` raising while the object stays
 callable — targets the very common "try fd, fall back to `.read()`" C pattern and mid-parse
@@ -190,6 +194,12 @@ target functions take file-like args; pairs with a heuristic that prefers it for
 `file`/`fp`/`path`/`fileobj`). **Risk: LOW.**
 
 ### D. Metaclass / descriptor attribute bombs (Techniques 1, 4, 19)
+
+> **STATUS: IMPLEMENTED.** `HiddenNameType` (T1, metaclass hides `__name__`/`__qualname__`/
+> `__module__`), `DescriptorBomb` (T4, raising data-descriptors on commonly-probed attrs),
+> `StatefulHashType` (T19, metaclass hash arms after a random delay) in `bomb_objects.py`.
+> The type bombs (`HiddenNameType`, `StatefulHashType`) are passed as the class object itself
+> via `genBombObject` / `BOMB_TYPE_NAMES`.
 
 - **Attribute-hiding metaclass** (T1): a class whose metaclass `__getattribute__` raises on
   `__name__`/`__module__`/`__qualname__` — targets unchecked `PyObject_GetAttrString(Py_TYPE

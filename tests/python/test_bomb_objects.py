@@ -90,10 +90,55 @@ class TestSuperBomb(unittest.TestCase):
             sb.__hash__()  # call 3 > delay 2
 
 
+class TestFileBombs(unittest.TestCase):
+    def test_read_bomb_delays_then_raises(self):
+        rb = B.ReadBomb()
+        rb._delay, rb._calls = 1, 0
+        self.assertEqual(rb.read(), b"")  # call 1
+        with self.assertRaises(MemoryError):
+            rb.read()  # call 2 > delay 1
+
+    def test_wrong_type_file_returns_non_buffer(self):
+        self.assertNotIsInstance(B.WrongTypeFile().read(), (bytes, str))
+
+    def test_fileno_bomb_raises_but_read_works(self):
+        fb = B.FilenoBomb()
+        self.assertEqual(fb.read(), b"")
+        with self.assertRaises(BaseException):
+            fb.fileno()
+
+
+class TestMetaclassBombs(unittest.TestCase):
+    def test_hidden_name_type_hides_identity_attrs(self):
+        self.assertIsInstance(B.HiddenNameType, type)  # it is a class, passed as-is
+        for attr in ("__name__", "__qualname__", "__module__"):
+            with self.assertRaises(BaseException, msg=attr):
+                getattr(B.HiddenNameType, attr)
+
+    def test_descriptor_bomb_get_raises(self):
+        db = B.DescriptorBomb()
+        for attr in ("value", "name", "read", "__wrapped__"):
+            with self.assertRaises(BaseException, msg=attr):
+                getattr(db, attr)
+
+    def test_stateful_hash_type_arms_after_use(self):
+        # A fresh subclass so its hash state is independent of other tests / the shared class.
+        T = B._StatefulHashMeta("T", (), {})
+        T._bomb_hash_state = [0, 2]  # succeed twice, then raise
+        self.assertEqual(hash(T), 0)
+        self.assertEqual(hash(T), 0)
+        with self.assertRaises(BaseException):
+            hash(T)
+
+
 class TestGeneratorWiring(unittest.TestCase):
     def test_all_class_names_construct_with_no_args(self):
         for name in B.BOMB_CLASS_NAMES:
             getattr(B, name)()  # must construct; generator emits `Name()`
+
+    def test_type_bombs_are_types(self):
+        for name in B.BOMB_TYPE_NAMES:
+            self.assertIsInstance(getattr(B, name), type)
 
     def test_tricky_weird_exposes_names_and_source(self):
         self.assertEqual(tricky_weird.bomb_object_names, B.BOMB_CLASS_NAMES)
@@ -107,17 +152,23 @@ class TestGeneratorWiring(unittest.TestCase):
         for marker in ("oom_call", "set_nomemory", "_OOM_AVAILABLE", "remove_mem_hooks"):
             self.assertNotIn(marker, tricky_weird.bomb_objects)
 
-    def test_gen_bomb_object_emits_valid_constructor(self):
+    def test_gen_bomb_object_emits_instances_and_types(self):
         from python._test_options import make_test_options
 
         from fusil.python.argument_generator import ArgumentGenerator
 
         arg_gen = ArgumentGenerator(make_test_options(no_numpy=True, no_tstrings=True), [""])
-        for _ in range(30):
+        saw_instance = saw_type = False
+        for _ in range(200):
             (expr,) = arg_gen.genBombObject()
-            self.assertTrue(expr.endswith("()"))
-            self.assertIn(expr[:-2], B.BOMB_CLASS_NAMES)
             ast.parse(expr)  # valid Python expression
+            if expr.endswith("()"):
+                self.assertIn(expr[:-2], B.BOMB_CLASS_NAMES)  # instance bomb: Name()
+                saw_instance = True
+            else:
+                self.assertIn(expr, B.BOMB_TYPE_NAMES)  # type bomb: bare Name
+                saw_type = True
+        self.assertTrue(saw_instance and saw_type)
 
 
 if __name__ == "__main__":
