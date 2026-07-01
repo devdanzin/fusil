@@ -16,6 +16,13 @@ class MTA(ApplicationAgent):
         self.setupMTA(self, application.logger)
         self.mailing_list = {}
         self.queue = []
+        # Optional event trace: refactor-safety instrumentation. When set to a list,
+        # every delivered message is recorded as (event, arguments) in send order. This
+        # is the single choke point all Agent.send() calls flow through, so it captures
+        # the full event sequence -- letting a test (or a before/after comparison of a
+        # MAS -> direct-pipeline rewrite) assert the control flow is preserved. `None`
+        # (the default) disables recording with a single is-not-None check per deliver.
+        self.trace = None
 
     def hasMessage(self):
         return bool(self.queue)
@@ -38,6 +45,8 @@ class MTA(ApplicationAgent):
         self.mailing_list[event].remove(mailbox)
 
     def deliver(self, message):
+        if self.trace is not None:
+            self.trace.append((message.event, message.arguments))
         self.queue.append(message)
 
     def live(self):

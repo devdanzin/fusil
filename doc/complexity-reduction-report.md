@@ -253,11 +253,26 @@ two fixes, which *restore* intended behavior).
 7. Collapse `AggressivityAgent` to a scalar (§3.2) and resolve the `SystemCalm` path (§3.3).
 
 **Phase 3 — only if maintenance pain justifies it (high risk):**
-8. Config round-trip removal (§3.5), single-source-of-truth defaults.
+8. Config round-trip removal (§3.5), single-source-of-truth defaults. **DONE (PR #158).**
 9. MAS → direct-pipeline rewrite (§3.1) — document the event graph first; treat as its own
    project with new tests for the keep/drop crash-dir logic before touching it.
 
+**Pre-refactor safety net for item 9 — now in place** (so the MAS→pipeline rewrite has a
+behavioural spec to preserve):
+- `tests/test_session_directory.py::TestCheckKeepDirectory` — every branch of the keep/drop
+  crash-dir decision (empty-drop-even-on-success, success/policy keep+relabel+prune, fusil-error,
+  keep_sessions, keep_generated_files).
+- `tests/test_session_lifecycle.py` — score aggregation (`computeScore`/`isSuccess`), the
+  stop-trigger threshold (`Session.live`/`on_session_stop`), and the per-session loop control
+  (`Project.on_session_done`/`on_project_session_destroy`/stop path). Its module docstring holds
+  the one-page event graph the refactor must reproduce.
+- `tests/test_mas.py` — Agent lifecycle (`activate`/`deactivate`), the `Univers` step loop
+  (`executeAgent`/`execute`), and the new **`MTA.trace`** instrumentation.
+- **`MTA.trace`** (fusil/mas/mta.py): set it to a list to record the full `(event, args)`
+  sequence flowing through the bus, in send order (the single `deliver()` choke point). Use it to
+  capture the event trace of a real run before the rewrite and assert the new pipeline reproduces
+  it. `None` by default (zero cost when off).
+
 The golden-output test (`tests/python/test_golden_output.py`) and the OOM/feat/h5py
 before-after harnesses guard the *generation* path; none of the above touches generation
-except the h5py plugin move (which the h5py harness covers). The MAS/lifecycle work would need
-new tests around session keep/drop *before* starting — that coverage gap is itself a finding.
+except the h5py plugin move (which the h5py harness covers).
