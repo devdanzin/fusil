@@ -532,11 +532,6 @@ class Application(ApplicationAgent):
         self.error("User interrupt!")
         self.send("univers_stop")
 
-    def on_application_error(self, message):
-        self.error(message)
-        self.exitcode = 1
-        self.send("univers_stop")
-
     def main(self, exit_at_end=True):
         """
         Main function of a fuzzer using Fusil: call runProject(), catch errors,

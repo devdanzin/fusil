@@ -32,7 +32,7 @@ class Project(ProjectAgent):
                 self.config.fusil_normal_calm_sleep,
             )
         else:
-            self.warning("SystemCalm class is not available")
+            # --slow (the default): system-load throttling is intentionally off.
             self.system_calm = None
 
         # Configuration
@@ -158,9 +158,7 @@ class Project(ProjectAgent):
         # Create session
         self.session = Session(self)
 
-        # Send 'project_start' and 'session_start' message
-        if self.session_index == 1:
-            self.send("project_start")
+        # Send 'session_start' message
         self.send("session_start")
         text = "Start session"
         if self.max_session:

@@ -120,7 +120,6 @@ class CreateProcess(ProjectAgent):
         self.info("Process identifier: %s" % pid)
         self.closeStreams()
         self.send("process_create", self)
-        self.send("process_pid", self, pid)
 
     def writeReplayScripts(self, arguments, popen_args):
         if self.wrote_replay:

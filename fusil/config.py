@@ -16,9 +16,6 @@ DEFAULTS = {
     "fusil_session": 0,
     "fusil_normal_calm_load": 0.50,
     "fusil_normal_calm_sleep": 0.5,
-    "fusil_slow_calm_load": 0.30,
-    "fusil_slow_calm_sleep": 3.0,
-    "process_use_cpu_probe": True,
     "process_max_memory": 2000 * 1024 * 1024,
     "process_core_dump": True,
     "process_max_user_process": 5000,
@@ -72,17 +69,8 @@ class FusilConfig:
         self.fusil_normal_calm_sleep = self.getfloat(
             "fusil", "normal_calm_sleep", DEFAULTS["fusil_normal_calm_sleep"]
         )
-        self.fusil_slow_calm_load = self.getfloat(
-            "fusil", "slow_calm_load", DEFAULTS["fusil_slow_calm_load"]
-        )
-        self.fusil_slow_calm_sleep = self.getfloat(
-            "fusil", "slow_calm_sleep", DEFAULTS["fusil_slow_calm_sleep"]
-        )
 
         # Process options
-        self.process_use_cpu_probe = self.getbool(
-            "process", "process_use_cpu_probe", DEFAULTS["process_use_cpu_probe"]
-        )
         self.process_max_memory = self.getint(
             "process", "max_memory", DEFAULTS["process_max_memory"]
         )

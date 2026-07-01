@@ -14,7 +14,6 @@ class ProjectAgent(Agent):
             application = project.application()
         self.application = weakref_ref(application)
         if project is not self:
-            self.score_weight = 1.0
             self.register()
 
     def session(self):
