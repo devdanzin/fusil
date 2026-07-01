@@ -192,7 +192,10 @@ class WritePythonCode(WriteCode):
                 )
                 continue
 
+            pm = self.plugin_manager
             if isinstance(attr, (FunctionType, BuiltinFunctionType)):
+                if pm and pm.is_blacklisted("function", name):
+                    continue
                 functions.append(name)
             elif isinstance(attr, type) or inspect.isclass(attr):
                 if (
@@ -202,6 +205,8 @@ class WritePythonCode(WriteCode):
                     # and attr.__name__ in _EXCEPTION_NAMES
                 ):
                     continue
+                if pm and pm.is_blacklisted("class", name):
+                    continue
                 classes.append(name)
             else:
                 if isinstance(attr, ModuleType) or type(attr) in TRIVIAL_TYPES:
@@ -210,6 +215,8 @@ class WritePythonCode(WriteCode):
                     not self.options.fuzz_exceptions and isinstance(attr, BaseException)
                     # and attr.__class__.__name__ in _EXCEPTION_NAMES
                 ):
+                    continue
+                if pm and pm.is_blacklisted("object", name):
                     continue
                 objects.append(name)
         return functions, classes, objects
@@ -234,11 +241,17 @@ class WritePythonCode(WriteCode):
             and issubclass(obj_instance_or_class, BaseException)
         ) or isinstance(obj_instance_or_class, BaseException)
 
+        pm = self.plugin_manager
         for name in dir(obj_instance_or_class):
             if name in blacklist:
                 continue
+            if pm and pm.is_blacklisted("method", name):
+                continue
             if (
-                (not self.options.test_private) and name.startswith("_")
+                (not self.options.test_private)
+                and name.startswith("_")
+                # a plugin may whitelist a normally-skipped method (e.g. '__del__')
+                and not (pm and pm.is_whitelisted("method", name))
                 # and not name.endswith("__")
             ):
                 continue
@@ -742,24 +755,35 @@ class WritePythonCode(WriteCode):
 
         num_constructor_args = class_arg_number(class_name_str, class_type)
         self.write(0, f"{instance_var_name} = None # Initialize instance variable")
-        # PoC of the indentation context manager: `with self.indented():` replaces the
-        # addLevel(1)/restoreLevel(self.base_level - 1) bookkeeping -- the block's nesting now
-        # mirrors the generated code's nesting and the level can't leak. Output is unchanged
-        # (guarded by tests/python/test_golden_output.py).
-        self.write(0, "try:")
-        with self.indented():
-            self.write(0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',")
-            self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
-            self.write(0, "  )")  # Close callFunc
-        self.write(0, "except Exception as e_instantiate:")
-        with self.indented():
-            self.write(0, f"{instance_var_name} = None")
-            self.write_print_to_stderr(
-                0,
-                f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
-            )
-            # callFunc may not set instance_var_name on error, so set it explicitly.
-            self.write(0, f"{instance_var_name} = None")
+
+        # Plugin class handlers get first chance to emit specialized instantiation (e.g. an
+        # h5py.File needs a backing file, not a generic callFunc). A handler returns True to
+        # claim the class; otherwise we fall through to the standard callFunc instantiation.
+        # With no handlers registered this is byte-identical to the pre-plugin behaviour.
+        handled = False
+        if self.plugin_manager:
+            for handler in self.plugin_manager.get_class_handlers():
+                if handler(self, class_name_str, class_type, instance_var_name, prefix):
+                    handled = True
+                    break
+
+        if not handled:
+            self.write(0, "try:")
+            with self.indented():
+                self.write(
+                    0, f"{instance_var_name} = callFunc('{prefix}_init', '{class_name_str}',"
+                )
+                self._write_arguments_for_call_lines(num_constructor_args, 1)  # Indent args by 1
+                self.write(0, "  )")  # Close callFunc
+            self.write(0, "except Exception as e_instantiate:")
+            with self.indented():
+                self.write(0, f"{instance_var_name} = None")
+                self.write_print_to_stderr(
+                    0,
+                    f'"[{prefix}] Failed to instantiate {class_name_str}: {{e_instantiate.__class__.__name__}} {{e_instantiate}}"',
+                )
+                # callFunc may not set instance_var_name on error, so set it explicitly.
+                self.write(0, f"{instance_var_name} = None")
         self.emptyLine()
 
         self._dispatch_fuzz_on_instance(
@@ -830,12 +854,24 @@ class WritePythonCode(WriteCode):
                     0,
                     f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
                 )
-            # The h5py writer (when active) opens a trailing `else:` block and returns the
-            # level to restore to; the generic fuzzing below fills it, then we close it.
-            if self.h5py_writer:
-                L_else_generic = self.h5py_writer._dispatch_fuzz_on_h5py_instance(
-                    class_name_hint, current_prefix, generation_depth, target_obj_expr_str
-                )
+            # Plugin instance dispatchers emit specialized `elif isinstance(target, T):`
+            # branches here (after skip-trivial, before the generic fallback). A dispatcher
+            # may open a trailing `else:` and return the level to restore to, so the generic
+            # fallback below runs only when no specialized branch matched; None (the default,
+            # e.g. no plugins) leaves the fallback unconditional -- byte-identical to the
+            # pre-plugin behaviour.
+            L_else_generic = None
+            if self.plugin_manager:
+                for dispatcher in self.plugin_manager.get_instance_dispatchers():
+                    level = dispatcher(
+                        self,
+                        current_prefix,
+                        target_obj_expr_str,
+                        class_name_hint,
+                        generation_depth,
+                    )
+                    if level is not None:
+                        L_else_generic = level
             try:
                 self.write(0, "try:")
                 self.write_print_to_stderr(
@@ -855,7 +891,7 @@ class WritePythonCode(WriteCode):
                     self.options.methods_number,  # Generic number of calls
                 )
             finally:
-                if self.h5py_writer:
+                if L_else_generic is not None:
                     self.restoreLevel(L_else_generic)
 
     def _fuzz_generic_object_methods(

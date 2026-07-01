@@ -347,35 +347,38 @@ class TestWritePythonCode(unittest.TestCase):
                     mock_write_args.assert_called_with(expected_num_args, 1)
 
     @unittest.skipIf(not H5PY_AVAILABLE, "h5py not installed")
-    def test_dispatch_fuzz_on_instance_dispatches_correctly(self):
-        """Logic Test: Validates _dispatch_fuzz_on_instance generates code for the correct fuzzer."""
-        # This test checks the generated code string to ensure the correct `isinstance`
-        # branch is created.
+    def test_dispatch_fuzz_on_instance_invokes_plugin_dispatchers(self):
+        """_dispatch_fuzz_on_instance calls plugin instance-dispatchers, then the generic fallback.
 
-        # Test 1: Generate code for a known h5py type hint ('Dataset')
+        Specialized per-type dispatch (e.g. the h5py Dataset/Group branches) now lives in a
+        plugin registered via add_instance_dispatcher, not hard-coded in core.
+        """
+        from fusil.plugin_manager import PluginManager
+
+        # With a registered dispatcher: it is invoked with the dispatch context, and the
+        # generic fallback still runs.
+        pm = PluginManager()
+        calls = []
+
+        def dispatcher(writer, current_prefix, target_expr, class_hint, depth):
+            writer.write(0, f"# plugin dispatch for {class_hint}")
+            calls.append((current_prefix, target_expr, class_hint, depth))
+            return None
+
+        pm.add_instance_dispatcher(dispatcher)
+        self.writer.plugin_manager = pm
         self.writer.output = StringIO()
-        self.writer._dispatch_fuzz_on_instance("h5_dispatch", "my_dataset_var", "Dataset", 0)
-        generated_code_h5py = self.writer.output.getvalue()
+        self.writer._dispatch_fuzz_on_instance("disp", "my_var", "Dataset", 0)
+        out = self.writer.output.getvalue()
+        self.assertEqual(calls, [("disp", "my_var", "Dataset", 0)])
+        self.assertIn("# plugin dispatch for Dataset", out)
+        self.assertIn("doing generic calls", out)
 
-        # It should generate the specific 'elif' for h5py.Dataset
-        self.assertIn("elif isinstance(my_dataset_var, h5py.Dataset):", generated_code_h5py)
-        # It should contain code specific to dataset fuzzing
-        self.assertIn("--- Fuzzing Dataset Instance:", generated_code_h5py)
-        # It should NOT fall back to the generic fuzzer if we want specialized fuzzing
-        # to avoid generic fuzzing. So far, we don't.
-        # self.assertNotIn("doing generic calls", generated_code_h5py)
-
-        # Test 2: Generate code for a generic type hint
+        # With no plugin manager: only the generic fallback is emitted.
+        self.writer.plugin_manager = None
         self.writer.output = StringIO()
-        self.writer._dispatch_fuzz_on_instance(
-            "generic_dispatch", "my_generic_var", "SomeGenericClass", 0
-        )
-        generated_code_generic = self.writer.output.getvalue()
-
-        # It should NOT contain specific h5py checks
-        # self.assertNotIn("elif isinstance(my_generic_var, h5py.Dataset):", generated_code_generic)
-        # It should fall back to the generic case
-        self.assertIn("doing generic calls", generated_code_generic)
+        self.writer._dispatch_fuzz_on_instance("generic", "my_generic_var", "SomeGenericClass", 0)
+        self.assertIn("doing generic calls", self.writer.output.getvalue())
 
     @patch("fusil.python.write_python_code.class_arg_number", return_value=2)
     def test_fuzz_one_class_orchestration(self, mock_arg_num):

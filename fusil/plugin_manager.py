@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from importlib.metadata import entry_points
 from typing import Any, Callable
 
@@ -49,6 +50,54 @@ class FuzzingMode:
 
 
 @dataclass
+class InstanceDispatcher:
+    """A per-instance dispatch provider.
+
+    Called from ``WritePythonCode._dispatch_fuzz_on_instance`` (after the
+    skip-trivial check, before the generic fallback). It emits specialized
+    ``elif isinstance(target, SomeType):`` fuzzing branches into the generated
+    script. To wrap the generic fallback in a trailing ``else:`` it may open an
+    indentation level and return the level to restore to (an int); returning
+    ``None`` means "no branches opened, run the generic fallback unconditionally".
+    """
+
+    provider_func: (
+        Callable  # (writer, current_prefix, target_expr, class_name_hint, depth) -> int | None
+    )
+
+
+@dataclass
+class ClassHandler:
+    """A class-instantiation handler.
+
+    Called from ``WritePythonCode._fuzz_one_class`` before the generic
+    ``callFunc`` instantiation. It may claim a class (e.g. an h5py.File) and emit
+    specialized instantiation code, returning ``True`` if it handled the class
+    (suppressing the generic instantiation) or ``False`` to fall through.
+    """
+
+    provider_func: Callable  # (writer, class_name, class_type, instance_var, prefix) -> bool
+
+
+@dataclass
+class NameFilterEntry:
+    """A blacklist/whitelist entry for discovered names.
+
+    ``kind`` is one of 'module', 'class', 'function', 'object', 'method'.
+    ``pattern_type`` is 'exact' (default) or 'glob' (fnmatch, e.g. '*Test').
+    """
+
+    kind: str
+    pattern: str
+    pattern_type: str = "exact"
+
+    def matches(self, name: str) -> bool:
+        if self.pattern_type == "glob":
+            return fnmatch(name, self.pattern)
+        return name == self.pattern
+
+
+@dataclass
 class PluginMetadata:
     """Metadata about a loaded plugin."""
 
@@ -72,6 +121,10 @@ class PluginManager:
         self.definitions_providers: list[DefinitionsProvider] = []
         self.scenario_providers: list[ScenarioProvider] = []
         self.fuzzing_modes: dict[str, FuzzingMode] = {}
+        self.instance_dispatchers: list[InstanceDispatcher] = []
+        self.class_handlers: list[ClassHandler] = []
+        self.blacklist_entries: list[NameFilterEntry] = []
+        self.whitelist_entries: list[NameFilterEntry] = []
         self.hooks: dict[str, list[Callable]] = {
             "startup": [],
             "shutdown": [],
@@ -201,6 +254,46 @@ class PluginManager:
         mode = FuzzingMode(name=name, activation_check=activation_check, setup_script=setup_script)
         self.fuzzing_modes[name] = mode
 
+    def add_instance_dispatcher(self, provider_func: Callable) -> None:
+        """Register a per-instance dispatch provider (see InstanceDispatcher).
+
+        Args:
+            provider_func: (writer, current_prefix, target_expr, class_name_hint, depth)
+                -> int | None. Emits specialized ``elif isinstance(...)`` branches and
+                optionally opens a trailing ``else:`` level (returned int) that the core
+                fills with the generic fallback; return None to leave the fallback
+                unconditional.
+        """
+        self.instance_dispatchers.append(InstanceDispatcher(provider_func=provider_func))
+
+    def add_class_handler(self, provider_func: Callable) -> None:
+        """Register a class-instantiation handler (see ClassHandler).
+
+        Args:
+            provider_func: (writer, class_name, class_type, instance_var, prefix) -> bool.
+                Emits specialized instantiation and returns True if it claimed the class
+                (suppressing the generic ``callFunc`` instantiation), else False.
+        """
+        self.class_handlers.append(ClassHandler(provider_func=provider_func))
+
+    def add_blacklist_entry(self, kind: str, pattern: str, pattern_type: str = "exact") -> None:
+        """Blacklist a discovered name (module/class/function/object/method).
+
+        Args:
+            kind: 'module', 'class', 'function', 'object', or 'method'.
+            pattern: the name (or glob pattern) to exclude.
+            pattern_type: 'exact' (default) or 'glob' (fnmatch, e.g. '*Test').
+        """
+        self.blacklist_entries.append(NameFilterEntry(kind, pattern, pattern_type))
+
+    def add_whitelist_entry(self, kind: str, pattern: str, pattern_type: str = "exact") -> None:
+        """Whitelist a discovered name so it is kept even when normally skipped.
+
+        Currently honoured for 'method' names: a whitelisted method (e.g. '__del__')
+        is kept even though private/dunder names are skipped by default.
+        """
+        self.whitelist_entries.append(NameFilterEntry(kind, pattern, pattern_type))
+
     def add_hook(self, hook_name: str, hook_func: Callable) -> None:
         """
         Register a lifecycle hook.
@@ -303,6 +396,22 @@ class PluginManager:
             if scenarios:
                 all_scenarios.update(scenarios)
         return all_scenarios
+
+    def get_instance_dispatchers(self) -> list[Callable]:
+        """Return the registered per-instance dispatch provider functions."""
+        return [d.provider_func for d in self.instance_dispatchers]
+
+    def get_class_handlers(self) -> list[Callable]:
+        """Return the registered class-instantiation handler functions."""
+        return [h.provider_func for h in self.class_handlers]
+
+    def is_blacklisted(self, kind: str, name: str) -> bool:
+        """True if a plugin blacklisted `name` for the given `kind`."""
+        return any(e.kind == kind and e.matches(name) for e in self.blacklist_entries)
+
+    def is_whitelisted(self, kind: str, name: str) -> bool:
+        """True if a plugin whitelisted `name` for the given `kind`."""
+        return any(e.kind == kind and e.matches(name) for e in self.whitelist_entries)
 
     def get_active_mode(self, config: Any) -> FuzzingMode | None:
         """
