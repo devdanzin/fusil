@@ -67,6 +67,11 @@ except ImportError:
 
 ERRBACK_NAME_CONST = "errback"
 
+# How many copies of genBombObject to weight into each argument pool. Tunable: higher = more
+# exception bombs sprayed into calls (more protocol-slot error-path coverage) at the cost of
+# other input variety. Kept well below numpy's 50 so bombs are frequent but not dominant.
+BOMB_WEIGHT = 8
+
 try:
     from fusil.python.template_strings import TEMPLATES
 except ImportError:
@@ -135,7 +140,10 @@ class ArgumentGenerator:
 
         safe_simple_generators = safe_hashable_generators + (self.genBufferObject,)
 
-        # These generators produce references to names defined in boilerplate
+        # These generators produce references to names defined in boilerplate. Exception
+        # bombs (BOMB_WEIGHT copies) are the protocol-level analogue of --oom-fuzz: they make
+        # a dunder raise (randomly delayed) to hit unguarded-error-path bugs in C code. Weighted
+        # up so they are sampled regularly across the wide arg space, but well below numpy's 50.
         external_reference_generators = (
             self.genErrback,
             self.genWeirdType,
@@ -145,12 +153,15 @@ class ArgumentGenerator:
             self.genTricky,
             self.genInterestingValues,
             self.genTrickyObjects,
-        )
+        ) + (self.genBombObject,) * BOMB_WEIGHT
 
         self.hashable_argument_generators = safe_hashable_generators
         if allow_external_references:
-            # The 'errback' name is hashable but is an external reference
+            # The 'errback' name is hashable but is an external reference. Bombs are hashable
+            # too (HashBomb/EqBomb/SuperBomb arm __hash__/__eq__) -- as dict keys / set members
+            # they hit the container insert & lookup error paths.
             self.hashable_argument_generators += (self.genErrback,)
+            self.hashable_argument_generators += (self.genBombObject,) * BOMB_WEIGHT
 
         # Build the final lists based on the flag
         self.simple_argument_generators = safe_simple_generators
@@ -168,7 +179,7 @@ class ArgumentGenerator:
                 self.genWeirdType,
                 self.genWeirdUnion,
                 self.genTrickyObjects,
-            )
+            ) + (self.genBombObject,) * BOMB_WEIGHT
 
         # NumPy tricky arrays -- gated on numpy alone, NOT on h5py. (Previously this whole
         # block required H5PyArgumentGenerator, so numpy support silently did nothing unless
@@ -337,6 +348,14 @@ class ArgumentGenerator:
         """Generate a name of a 'tricky' predefined object from tricky_weird."""
         tricky_name = choice(fusil.python.tricky_weird.tricky_objects_names)
         return [tricky_name]
+
+    def genBombObject(self) -> list[str]:
+        """Generate a freshly-constructed exception-bomb object (see samples/bomb_objects.py).
+
+        A new instance per call (bombs are stateful and self-randomise their delay/exception),
+        so each fuzzed argument gets an independently-armed landmine."""
+        bomb_class = choice(fusil.python.tricky_weird.bomb_object_names)
+        return [f"{bomb_class}()"]
 
     def genTrickyNumpy(self) -> list[str]:
         """Generate a name of a 'tricky' predefined NumPy object from tricky_weird."""

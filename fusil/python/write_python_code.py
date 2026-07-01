@@ -335,6 +335,8 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, fusil.python.tricky_weird.tricky_objects)
         self.emptyLine()
+        self.write(0, fusil.python.tricky_weird.bomb_objects)
+        self.emptyLine()
         if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
             self.write(0, "import numpy")
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
