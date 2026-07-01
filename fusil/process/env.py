@@ -201,7 +201,3 @@ class Environment(ProjectAgent):
         # Write result to logs
         self.info("Environment: %r" % env)
         return env
-
-    def copyX11(self):
-        self.copy("HOME")
-        self.copy("DISPLAY")

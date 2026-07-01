@@ -61,7 +61,6 @@ class CreateProcess(ProjectAgent):
         self.max_user_process = config.process_max_user_process
         self.core_dump = config.process_core_dump
         self.stdout = stdout
-        self.use_x11 = False
         self.popen_args = {
             "stderr": STDOUT,
         }
@@ -286,11 +285,6 @@ class CreateProcess(ProjectAgent):
         if self.process:
             self.terminate()
             self.process = None
-
-    def setupX11(self):
-        self.use_x11 = True
-        self.application().initX11()
-        self.env.copyX11()
 
     def getScore(self):
         return self.score

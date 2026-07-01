@@ -18,7 +18,6 @@ DEFAULTS = {
     "fusil_normal_calm_sleep": 0.5,
     "fusil_slow_calm_load": 0.30,
     "fusil_slow_calm_sleep": 3.0,
-    "fusil_xhost_program": "xhost",
     "process_use_cpu_probe": True,
     "process_max_memory": 2000 * 1024 * 1024,
     "process_core_dump": True,
@@ -78,9 +77,6 @@ class FusilConfig:
         )
         self.fusil_slow_calm_sleep = self.getfloat(
             "fusil", "slow_calm_sleep", DEFAULTS["fusil_slow_calm_sleep"]
-        )
-        self.fusil_xhost_program = self.getstr(
-            "fusil", "xhost_program", DEFAULTS["fusil_xhost_program"]
         )
 
         # Process options
