@@ -111,7 +111,9 @@ class Project(ProjectAgent):
             self.summarize()
 
     def destroy(self):
-        if self._destroyed:
+        # getattr guard: destroy() runs from Agent.__del__, which may fire on a Project
+        # whose __init__ did not finish (so _destroyed was never set).
+        if getattr(self, "_destroyed", False):
             return
         self._destroyed = True
 

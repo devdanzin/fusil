@@ -174,11 +174,9 @@ class TestSessionOnStop(unittest.TestCase):
 
 def _project(*, nb_success=0, max_success=0, max_session=0, session_index=1, success_score=0.5):
     p = Project.__new__(Project)
-    # Quiet Agent.__del__/Project.destroy at GC time on this bare stub (they touch name,
-    # is_active and _destroyed; without these, __del__ prints ignored-exception noise).
-    p.name = "test-project"
-    p.is_active = False
-    p.mailbox = None
+    # This bare stub is never fully constructed; mark it already-destroyed so Project.destroy
+    # (called from Agent.__del__ at GC) short-circuits instead of running its full-init body.
+    # Agent.__str__/__repr__ are getattr-robust, so no name/is_active/mailbox are needed.
     p._destroyed = True
     p.success_score = success_score
     p.error_score = -0.5
