@@ -20,19 +20,6 @@ from python._test_options import make_test_options
 # The following are imported to create realistic mocks or for type checks
 from fusil.python.write_python_code import PythonFuzzerError, WritePythonCode
 
-# Conditional import for h5py to match the logic in the tested code
-try:
-    import h5py
-
-    from fusil.python.h5py.write_h5py_code import WriteH5PyCode
-
-    H5PY_AVAILABLE = True
-except ImportError:
-    h5py = None  # Mock h5py if not available
-    WriteH5PyCode = None
-    H5PY_AVAILABLE = False
-
-
 # --- Mock Objects for Realistic Testing ---
 # These mocks simulate a real-world module that WritePythonCode would process.
 
@@ -159,7 +146,6 @@ class TestWritePythonCode(unittest.TestCase):
             module_name="mock_module",
             threads=True,
             _async=True,
-            use_h5py=H5PY_AVAILABLE,
         )
 
     # --- Initialization and Setup Tests ---
@@ -169,10 +155,6 @@ class TestWritePythonCode(unittest.TestCase):
         self.assertEqual(self.writer.module_name, "mock_module")
         self.assertTrue(self.writer.enable_threads)
         self.assertTrue(self.writer.enable_async)
-        if H5PY_AVAILABLE:
-            self.assertIsNotNone(self.writer.h5py_writer)
-        else:
-            self.assertIsNone(self.writer.h5py_writer)
         self.assertIsNotNone(self.writer.arg_generator)
         # Check that the member lists were populated during initialization
         self.assertIn("test_function", self.writer.module_functions)
@@ -346,7 +328,6 @@ class TestWritePythonCode(unittest.TestCase):
                     )
                     mock_write_args.assert_called_with(expected_num_args, 1)
 
-    @unittest.skipIf(not H5PY_AVAILABLE, "h5py not installed")
     def test_dispatch_fuzz_on_instance_invokes_plugin_dispatchers(self):
         """_dispatch_fuzz_on_instance calls plugin instance-dispatchers, then the generic fallback.
 
