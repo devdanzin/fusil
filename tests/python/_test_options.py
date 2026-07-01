@@ -11,9 +11,9 @@ name starts with an underscore).
 """
 
 from functools import lru_cache
+from optparse import OptionParser
 from types import SimpleNamespace
 
-from fusil.config import FusilConfig, OptionParserWithSections
 from fusil.python import Fuzzer
 
 
@@ -24,19 +24,16 @@ def _harvested_defaults():
     createFuzzerOptions only touches the parser plus ``self.plugin_manager.get_cli_options``,
     so a tiny stub is enough to drive it without constructing a full Application.
     """
-    parser = OptionParserWithSections()
+    parser = OptionParser()
     stub = SimpleNamespace(plugin_manager=SimpleNamespace(get_cli_options=lambda: []))
     Fuzzer.createFuzzerOptions(stub, parser)
     return vars(parser.get_default_values())
 
 
 def make_test_options(**overrides):
-    """Return a ``FusilConfig(read=False)`` populated with every real fuzzer-option
-    default, then any ``overrides``. Use this in test ``setUp`` instead of hand-listing
-    options."""
-    options = FusilConfig(read=False)
-    for name, value in _harvested_defaults().items():
-        setattr(options, name, value)
-    for name, value in overrides.items():
-        setattr(options, name, value)
-    return options
+    """Return an options object carrying every real fuzzer-option default, then any
+    ``overrides``. Use this in test ``setUp`` instead of hand-listing options.
+
+    Mirrors what ``application.parseOptions`` produces at runtime -- the parsed optparse
+    ``Values`` -- as a plain ``SimpleNamespace`` that tests can freely read and mutate."""
+    return SimpleNamespace(**{**_harvested_defaults(), **overrides})

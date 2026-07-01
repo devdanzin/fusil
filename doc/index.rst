@@ -7,7 +7,7 @@ User documentation
 
 Start with `Fusil usage guide`_: quick guide to learn how to execute a fuzzer.
 
- * configuration_: Fusil configuration file
+ * configuration_: How to configure Fusil (command-line options)
  * safety_: Protection used in Fusil to avoid denial of service of your computer
 
 .. _`Fusil usage guide`: usage.html

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 import warnings
+from optparse import OptionGroup, OptionParser
 
 # python-ptrace (imported transitively below) emits deprecation warnings on
 # recent Python versions; hide them while importing the fusil runtime stack.
@@ -10,11 +11,6 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import fusil.python.tricky_weird  # noqa: F401  (imported here to suppress its import warnings)
     from fusil.application import Application
-    from fusil.config import (
-        OptionGroupWithSections,
-        OptionParserWithSections,
-        createFilename,
-    )
     from fusil.process.create import CreateProcess
     from fusil.process.stdout import WatchStdout
     from fusil.process.watch import WatchProcess
@@ -44,9 +40,9 @@ class Fuzzer(Application):
 
     NAME = "python"
 
-    def createFuzzerOptions(self, parser: OptionParserWithSections) -> None:
+    def createFuzzerOptions(self, parser: OptionParser) -> None:
         """Create command-line options for the fuzzer configuration."""
-        input_options = OptionGroupWithSections(parser, "Input")
+        input_options = OptionGroup(parser, "Input")
         input_options.add_option(
             "--modules",
             help="Tested Python module names separated by commas (default: test all modules)",
@@ -89,7 +85,7 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
-        running_options = OptionGroupWithSections(parser, "Running")
+        running_options = OptionGroup(parser, "Running")
         running_options.add_option(
             "--timeout",
             help="Timeout in seconds (default: %d)" % TIMEOUT,
@@ -140,7 +136,7 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
-        fuzzing_options = OptionGroupWithSections(parser, "Fuzzing")
+        fuzzing_options = OptionGroup(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
             help="Number of function calls to generate per module (default: %d)" % DEFAULT_NB_CALL,
@@ -235,7 +231,7 @@ class Fuzzer(Application):
             default=True,
         )
 
-        oom_options = OptionGroupWithSections(parser, "OOM Fuzzing")
+        oom_options = OptionGroup(parser, "OOM Fuzzing")
         oom_options.add_option(
             "--oom-fuzz",
             help="Enable OOM (out-of-memory) injection: wrap calls in dense "
@@ -348,33 +344,11 @@ class Fuzzer(Application):
             default=120,
         )
 
-        config_options = OptionGroupWithSections(parser, "Configuration")
-        config_options.add_option(
-            "--write-config",
-            help="Write a sample configuration file if one doesn't exist (default: False)",
-            action="store_true",
-            default=False,
-        )
-        config_options.add_option(
-            "--config-file",
-            help="Name of the configuration file to be read or written (default: %s)"
-            % createFilename(),
-            type="str",
-            default=createFilename(),
-        )
-        config_options.add_option(
-            "--use-config",
-            help="Load settings from configuration file (default: False)",
-            action="store_true",
-            default=False,
-        )
-
         options = (
             input_options,
             running_options,
             fuzzing_options,
             oom_options,
-            config_options,
         )
         for option in options:
             parser.add_option_group(option)
@@ -383,7 +357,7 @@ class Fuzzer(Application):
         plugin_opts = self.plugin_manager.get_cli_options()
 
         if plugin_opts:
-            plugin_options_group = OptionGroupWithSections(parser, "Plugin Options")
+            plugin_options_group = OptionGroup(parser, "Plugin Options")
             for args, kwargs in plugin_opts:
                 plugin_options_group.add_option(*args, **kwargs)
             parser.add_option_group(plugin_options_group)

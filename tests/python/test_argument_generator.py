@@ -10,10 +10,11 @@ from unittest.mock import MagicMock, patch  # MagicMock for placeholders
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
+from python._test_options import make_test_options
+
 import fusil.python.argument_generator
 import fusil.python.tricky_weird
 import fusil.python.values
-from fusil.config import FusilConfig
 
 USE_NUMPY = True
 try:
@@ -31,7 +32,7 @@ class TestArgumentGenerator(unittest.TestCase):
         no_numpy_opt=False,
         no_tstrings_opt=False,
     ):
-        mock_options = FusilConfig(read=False)
+        mock_options = make_test_options()
         mock_options.no_numpy = no_numpy_opt
         mock_options.no_tstrings = no_tstrings_opt
         mock_options.functions_number = getattr(mock_options, "functions_number", 10)
@@ -836,7 +837,7 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         """
         Set up a basic ArgumentGenerator instance for each test.
         """
-        self.config = FusilConfig(read=False)
+        self.config = make_test_options()
         # Mock the parent PythonSource object
         self.mock_python_source = MagicMock()
         self.mock_python_source.options = self.config
