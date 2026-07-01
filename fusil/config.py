@@ -27,8 +27,6 @@ DEFAULTS = {
     "process_uid": None,
     "process_group": "fusil",
     "process_gid": None,
-    "debugger_use_debugger": True,
-    "debugger_trace_forks": False,
 }
 
 
@@ -104,14 +102,6 @@ class FusilConfig:
         # Group used for subprocess
         self.process_group = self.getstr("process", "group", DEFAULTS["process_group"])
         self.process_gid = DEFAULTS["process_gid"]
-
-        # Debugger options
-        self.debugger_use_debugger = self.getbool(
-            "debugger", "debugger_use_debugger", DEFAULTS["debugger_trace_forks"]
-        )
-        self.debugger_trace_forks = self.getbool(
-            "debugger", "trace_forks", DEFAULTS["debugger_trace_forks"]
-        )
 
         # Initialize attributes used in fusil-python-threaded
         self.blacklist = ""

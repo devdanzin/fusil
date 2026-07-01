@@ -19,8 +19,6 @@ def prepareProcess(process):
     config = project.config
     options = process.application().options
 
-    # Trace the new process
-    process.debugger.traceme()
     # Set current working directory
     directory = process.getWorkingDirectory()
     # Hand the working directory to the unprivileged process user -- while still

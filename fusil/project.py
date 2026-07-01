@@ -3,7 +3,6 @@ from time import time
 
 from fusil.aggressivity import AggressivityAgent
 from fusil.mas.agent_list import AgentList
-from fusil.process.debugger import Debugger
 from fusil.project_agent import ProjectAgent
 from fusil.project_directory import ProjectDirectory
 from fusil.session import Session
@@ -69,9 +68,6 @@ class Project(ProjectAgent):
             self.aggressivity.setValue(options.aggressivity / 100)
             self.error("Initial aggressivity: %s" % self.aggressivity)
 
-        # Create the debugger
-        self.debugger = Debugger(self)
-
         # Create the working directory
         self.directory = ProjectDirectory(self)
         self.directory.activate()
@@ -122,7 +118,6 @@ class Project(ProjectAgent):
         # Destroy all project agents
         self.aggressivity.destroy()
         self.aggressivity = None
-        self.debugger = None
         for agent in self.application().agents:
             self.agents.remove(agent, False)
         self.agents.clear()

@@ -61,7 +61,6 @@ class CreateProcess(ProjectAgent):
         self.max_user_process = config.process_max_user_process
         self.core_dump = config.process_core_dump
         self.stdout = stdout
-        self.debugger = project.debugger
         self.use_x11 = False
         self.popen_args = {
             "stderr": STDOUT,
@@ -73,7 +72,6 @@ class CreateProcess(ProjectAgent):
     def init(self):
         self.score = None
         self.process = None
-        self.dbg_process = None
         self.timeout_reached = False
         self.status = None
         self.current_popen_args = None
@@ -122,8 +120,6 @@ class CreateProcess(ProjectAgent):
         pid = self.process.pid
         self.info("Process identifier: %s" % pid)
         self.closeStreams()
-        if self.debugger.enabled:
-            self._attach()
         self.send("process_create", self)
         self.send("process_pid", self, pid)
 
@@ -132,9 +128,6 @@ class CreateProcess(ProjectAgent):
             return
         self.wrote_replay = True
         createReplayPythonScript(self, arguments, popen_args)
-
-    def _attach(self):
-        self.dbg_process = self.debugger.attachPID(self, self.process.pid)
 
     def createPopenArguments(self):
         popen_args = dict(self.popen_args)
@@ -178,12 +171,6 @@ class CreateProcess(ProjectAgent):
     def createArguments(self):
         return self.cmdline.create()
 
-    def detach(self):
-        if not self.dbg_process:
-            return
-        self.debugger.detach(self.dbg_process)
-        self.dbg_process = None
-
     def renameSession(self, status):
         if status < 0:
             signum = -status
@@ -199,15 +186,10 @@ class CreateProcess(ProjectAgent):
     def processExited(self, status):
         if self.show_exit:
             displayProcessStatus(self, status, "Process %s" % self.process.pid)
-            if not self.debugger.enabled:
-                self.renameSession(status)
+            self.renameSession(status)
             self.send("process_exit", self, status)
         self.status = status
-        if self.debugger.enabled:
-            # Inform Popen() object that the process exited
-            self.process.returncode = status
         self.clearProcess()
-        self.detach()
 
     def closeStreams(self):
         if self.stdout_file:
@@ -230,19 +212,9 @@ class CreateProcess(ProjectAgent):
         """
         if not self.process:
             return self.status
-        if self.debugger.enabled:
-            if not self.dbg_process:
-                self._attach()
-            status = self.debugger.pollPID(self.process.pid)
-            if status is None:
-                return None
-            # Message already displayed by the debugger
-            # (and event "process_exit" sent)
-            self.show_exit = False
-        else:
-            status = self.process.poll()
-            if status is None:
-                return None
+        status = self.process.poll()
+        if status is None:
+            return None
         self.processExited(status)
         return status
 
@@ -272,10 +244,7 @@ class CreateProcess(ProjectAgent):
         self.waitExit()
 
     def _terminate(self):
-        if self.debugger.enabled:
-            self.dbg_process.terminate(wait_exit=False)
-        else:
-            terminateProcess(self.process)
+        terminateProcess(self.process)
 
     def waitExit(self):
         # Get the process exit status to avoid creation of a zombi process
@@ -317,7 +286,6 @@ class CreateProcess(ProjectAgent):
         if self.process:
             self.terminate()
             self.process = None
-        self.detach()
 
     def setupX11(self):
         self.use_x11 = True
