@@ -41,6 +41,7 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.oom_verbose = oom_verbose
     # General generation knobs
     o.fuzz_exceptions = False
+    o.gc_aggressive = False
     o.test_private = False
     o.no_numpy = True
     o.no_tstrings = True

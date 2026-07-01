@@ -165,6 +165,10 @@ set, or behind a flag). This is the recommended first implementation.
 
 ### B. Cyclic-GC threshold coercion — a cheap global knob like `set_nomemory` (Technique 26)
 
+> **STATUS: IMPLEMENTED.** `--gc-aggressive` emits `import gc; gc.set_threshold(1, 1, 1)` at
+> the top of the generated script (next to the OOM harness). Off by default; tested in
+> `tests/python/test_gc_aggressive.py`.
+
 `gc.set_threshold(1, 1, 1)` forces a gen-0 collection on essentially every tracked allocation,
 turning rare "GC fires while an object is tracked but half-initialized" races (`tp_traverse`
 reading a NULL field) into deterministic crashes. This is the same *shape* as the OOM win — a
