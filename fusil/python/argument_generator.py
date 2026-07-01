@@ -77,15 +77,6 @@ try:
 except ImportError:
     numpy = None
 
-try:
-    import h5py
-
-    import fusil.python.h5py.h5py_tricky_weird
-    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
-except ImportError:
-    h5py = None
-    H5PyArgumentGenerator = None
-
 
 class ArgumentGenerator:
     """Handles the generation of diverse argument types for fuzzing."""
@@ -96,7 +87,6 @@ class ArgumentGenerator:
         filenames: list[str],
         use_numpy: bool = False,
         use_templates: bool = True,
-        use_h5py: bool = True,
         allow_external_references: bool = True,
         plugin_manager=None,
     ):
@@ -108,16 +98,11 @@ class ArgumentGenerator:
             filenames: A list of existing filenames to use for file arguments.
             use_numpy: Whether to use NumPy arrays.
             use_templates: Whether to use template strings (t-strings).
-            use_h5py: Whether to use H5Py objects.
         """
         self.options = options
         self.filenames = filenames
         self.plugin_manager = plugin_manager
         self.errback_name = ERRBACK_NAME_CONST
-
-        self.h5py_argument_generator = (
-            H5PyArgumentGenerator(self) if use_h5py and H5PyArgumentGenerator else None
-        )
 
         # Initialize generators for various data types
         self.smallint_generator = IntegerRangeGenerator(-19, 19)
@@ -196,11 +181,6 @@ class ArgumentGenerator:
         ):
             self.simple_argument_generators += (self.genTrickyNumpy,) * 50
             self.complex_argument_generators += (self.genTrickyNumpy,) * 50
-
-        # h5py objects -- self.h5py_argument_generator is set only when use_h5py and h5py
-        # imported; h5py pulls in numpy, so keep the --no-numpy guard here.
-        if not self.options.no_numpy and self.h5py_argument_generator is not None:
-            self.simple_argument_generators += (self.h5py_argument_generator.genH5PyObject,) * 50
 
         if (
             not self.options.no_tstrings

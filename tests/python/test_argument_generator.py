@@ -11,27 +11,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
 import fusil.python.argument_generator
-import fusil.python.h5py.h5py_tricky_weird  # For h5py_tricky_names
 import fusil.python.tricky_weird
 import fusil.python.values
 from fusil.config import FusilConfig
 
-USE_NUMPY = USE_H5PY = True
+USE_NUMPY = True
 try:
     import numpy
 except ImportError:
     USE_NUMPY = False
     numpy = None
-
-try:
-    import h5py
-
-    import fusil.python.h5py.h5py_tricky_weird
-    from fusil.python.h5py.h5py_argument_generator import H5PyArgumentGenerator
-except ImportError:
-    USE_H5PY = False
-    h5py = None
-    H5PyArgumentGenerator = None
 
 
 class TestArgumentGenerator(unittest.TestCase):
@@ -39,7 +28,6 @@ class TestArgumentGenerator(unittest.TestCase):
         self,
         use_numpy=True,
         use_templates=True,
-        use_h5py_arg_gen=True,  # Renamed use_h5py for clarity
         no_numpy_opt=False,
         no_tstrings_opt=False,
     ):
@@ -65,14 +53,12 @@ class TestArgumentGenerator(unittest.TestCase):
             else default_filenames,
             use_numpy=use_numpy,
             use_templates=use_templates,
-            use_h5py=use_h5py_arg_gen,  # Pass the renamed flag
         )
 
         # --- Define globals for eval() ---
         self.test_globals = {
             "sys": sys,  # For sys.maxsize, etc.
             "numpy": numpy,  # For numpy.nan, numpy.inf, etc. and direct numpy calls
-            "h5py": h5py,  # For h5py.File, h5py.Empty etc.
             "MagicMock": MagicMock,  # For "MagicMock()" expressions
             "Liar1": MagicMock(name="Liar1_mock"),
             "Liar2": MagicMock(name="Liar2_mock"),
@@ -105,14 +91,6 @@ class TestArgumentGenerator(unittest.TestCase):
             "Interpolation": MagicMock(name="Interpolation_mock"),
         }
 
-        # Placeholder for h5py_tricky_objects.get('name')
-        # The .get() method will be called on this mock.
-        h5py_tricky_objects_mock = MagicMock(name="h5py_tricky_objects_mock")
-        h5py_tricky_objects_mock.get.return_value = (
-            "mocked_h5py_object"  # Default return for any .get()
-        )
-        self.test_globals["h5py_tricky_objects"] = h5py_tricky_objects_mock
-
         # Placeholders for tricky_numpy names
         for name in fusil.python.tricky_weird.tricky_numpy_names:
             self.test_globals[name] = f"numpy_placeholder_for_{name}"
@@ -137,7 +115,6 @@ class TestArgumentGenerator(unittest.TestCase):
         self._setup_arg_gen(
             use_numpy=True,
             use_templates=True,
-            use_h5py_arg_gen=True,
             no_numpy_opt=False,
             no_tstrings_opt=False,
         )
@@ -302,9 +279,7 @@ class TestArgumentGenerator(unittest.TestCase):
         )
 
         # Test with no filenames provided to ArgumentGenerator
-        self._setup_arg_gen(
-            use_numpy=False, use_templates=False, use_h5py_arg_gen=False
-        )  # Re-init with no filenames
+        self._setup_arg_gen(use_numpy=False, use_templates=False)  # Re-init with no filenames
         self.arg_gen.filenames = []  # Explicitly empty it
         result_no_files = self.arg_gen.genExistingFilename()
         self.assertIsListOfStrings(result_no_files, "genExistingFilename (no files)")
@@ -343,51 +318,26 @@ class TestArgumentGenerator(unittest.TestCase):
 
             if hasattr(actual_func, "__name__") and actual_func.__name__ == generator_method_name:
                 return True
-            # For methods of H5PyArgumentGenerator, which are bound methods
-            if (
-                hasattr(actual_func, "__func__")
-                and hasattr(actual_func.__func__, "__name__")
-                and actual_func.__func__.__name__ == generator_method_name
-            ):
-                if actual_func.__self__ == self.arg_gen.h5py_argument_generator:
-                    return True
         return False
 
     @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
-    def test_simple_generators_composition_with_numpy_h5py(self):
-        self._setup_arg_gen(use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=False)
+    def test_simple_generators_composition_with_numpy(self):
+        self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
         self.assertTrue(
             self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
-        self.assertTrue(
-            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
         )
 
     def test_simple_generators_composition_without_numpy_opt(self):
-        self._setup_arg_gen(
-            use_numpy=True, use_h5py_arg_gen=True, no_numpy_opt=True
-        )  # no_numpy option is True
+        self._setup_arg_gen(use_numpy=True, no_numpy_opt=True)  # no_numpy option is True
         self.assertFalse(
             self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
-        # genH5PyObject also depends on numpy not being disabled by options
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators")
         )
 
     def test_simple_generators_composition_without_numpy_init(self):
-        self._setup_arg_gen(
-            use_numpy=False, use_h5py_arg_gen=True, no_numpy_opt=False
-        )  # use_numpy init flag is False
-        # NumPy generators are off when the use_numpy init flag is False...
+        self._setup_arg_gen(use_numpy=False, no_numpy_opt=False)  # use_numpy init flag is False
+        # NumPy generators are off when the use_numpy init flag is False.
         self.assertFalse(
             self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
-        # ...but h5py support is now INDEPENDENT of numpy (it used to be wrongly gated on the
-        # numpy flag): genH5PyObject is present iff h5py is actually available.
-        self.assertEqual(
-            self._check_if_generator_in_tuple("genH5PyObject", "simple_argument_generators"),
-            self.arg_gen.h5py_argument_generator is not None,
         )
 
     def test_complex_generators_composition_with_templates(self):
@@ -424,7 +374,6 @@ class TestArgumentGenerator(unittest.TestCase):
         self._setup_arg_gen(
             use_numpy=True,
             use_templates=True,
-            use_h5py_arg_gen=True,
             no_numpy_opt=False,
             no_tstrings_opt=False,
         )
@@ -449,8 +398,6 @@ class TestArgumentGenerator(unittest.TestCase):
                 seen_types.add("String")
             elif "numpy" in arg_str:
                 seen_types.add("Numpy")
-            elif "h5py_tricky_objects" in arg_str:
-                seen_types.add("H5PyObject")
             elif "weird_instances" in arg_str:
                 seen_types.add("WeirdInstance")
             # Add more checks for other types if needed
@@ -896,20 +843,6 @@ class TestArgumentGeneratorCoverage(unittest.TestCase):
         self.mock_python_source.filenames = ["/tmp/dummy_file.txt"]
         self.arg_gen = fusil.python.argument_generator.ArgumentGenerator(
             self.mock_python_source, [""]
-        )
-
-    @patch.dict(sys.modules, {"h5py": None})
-    def test_init_without_h5py(self):
-        """
-        Covers lines 46-47, 53-55:
-        Tests that H5PyArgumentGenerator is not created if h5py is not installed.
-        """
-        arg_gen_no_h5py = fusil.python.argument_generator.ArgumentGenerator(
-            self.mock_python_source, [""], use_h5py=False
-        )
-        self.assertIsNone(
-            arg_gen_no_h5py.h5py_argument_generator,
-            "h5py_argument_generator should be None when h5py is not available.",
         )
 
     @patch("fusil.python.argument_generator.choice")

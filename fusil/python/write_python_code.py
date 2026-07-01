@@ -45,19 +45,6 @@ except ImportError:
     logger.info("Numpy is not available.")
     _ARG_GEN_USE_NUMPY = False
 
-_ARG_GEN_USE_H5PY = False
-if _ARG_GEN_USE_NUMPY:
-    try:
-        import h5py  # noqa: F401  (availability probe)
-
-        logger.info("h5py is available.")
-        _ARG_GEN_USE_H5PY = True
-        import fusil.python.h5py.h5py_tricky_weird  # noqa: F401  (registers tricky h5py objects)
-        from fusil.python.h5py.write_h5py_code import WriteH5PyCode
-    except ImportError:
-        logger.info("h5py is not available.")
-        _ARG_GEN_USE_H5PY = False
-
 time_start = time.time()
 CALL_REPETITION_COUNT_CONST = 3
 ERRBACK_NAME_CONST = "errback"
@@ -96,7 +83,6 @@ class WritePythonCode(WriteCode):
         module_name: str,
         threads: bool = True,
         _async: bool = True,
-        use_h5py: bool = False,
         plugin_manager=None,
     ):
         """Initialize the Python code writer."""
@@ -111,14 +97,11 @@ class WritePythonCode(WriteCode):
         self.enable_async = _async
         self.generated_filename = filename
 
-        self.h5py_writer = WriteH5PyCode(self) if use_h5py and _ARG_GEN_USE_H5PY else None
-
         self.arg_generator = ArgumentGenerator(
             self.options,
             self.filenames,
             _ARG_GEN_USE_NUMPY,
             _ARG_GEN_USE_TEMPLATES,
-            _ARG_GEN_USE_H5PY,
             allow_external_references=self.options.external_references,
             plugin_manager=self.plugin_manager,
         )
@@ -304,9 +287,6 @@ class WritePythonCode(WriteCode):
         self.write(0, f"import {self.module_name}")
         self.emptyLine()
 
-        if self.h5py_writer:
-            self.h5py_writer._write_h5py_script_header_and_imports()
-
         self.write(
             0,
             dedent(f"""\
@@ -355,14 +335,9 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, fusil.python.tricky_weird.tricky_objects)
         self.emptyLine()
-        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY and _ARG_GEN_USE_H5PY:
+        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
             self.write(0, "import numpy")
             self.write(0, fusil.python.tricky_weird.tricky_numpy)
-            self.emptyLine()
-
-        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY and _ARG_GEN_USE_H5PY:
-            self.write(0, "# Executing HDF5 tricky object generation code")
-            self.write(0, fusil.python.h5py.h5py_tricky_weird.tricky_h5py_code)
             self.emptyLine()
 
         self.write(
@@ -1002,12 +977,7 @@ class WritePythonCode(WriteCode):
                 f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
             )
 
-        if self.h5py_writer:
-            self.h5py_writer._fuzz_methods_on_h5py_object_or_specific_types(
-                current_prefix, target_obj_expr_str
-            )
-
-        # else: # General method fuzzing for other types
+        # General method fuzzing for other types
         self.write(0, f"# General method fuzzing for {target_obj_expr_str}")
         methods_dict = {}
         if target_obj_actual_type_obj:  # If WritePythonCode has the type

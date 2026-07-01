@@ -17,15 +17,6 @@ from python._test_options import make_test_options
 
 from fusil.python.write_python_code import WritePythonCode
 
-# Conditional import for h5py to match the logic in the tested code
-try:
-    import h5py
-
-    H5PY_AVAILABLE = True
-except ImportError:
-    h5py = None
-    H5PY_AVAILABLE = False
-
 
 # --- Mock Objects for Realistic Testing ---
 def mock_global_func(arg1, arg2=True):
@@ -97,7 +88,6 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
             module_name="mock_module",
             threads=True,
             _async=True,
-            use_h5py=H5PY_AVAILABLE,
         )
         self.writer.output = StringIO()
 
