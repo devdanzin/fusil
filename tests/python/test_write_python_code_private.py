@@ -209,6 +209,80 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
                 mock_fuzz_methods.call_args.kwargs["target_obj_expr_str"], "instance_c1_testclass"
             )
 
+    @patch("fusil.python.write_python_code.class_arg_number", return_value=1)
+    def test_fuzz_one_class_uses_plugin_class_handler(self, mock_arg_num):
+        """A plugin class handler that claims a class suppresses the generic callFunc init."""
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        seen = []
+
+        def handler(writer, class_name, class_type, instance_var, prefix):
+            writer.write(0, f"{instance_var} = make_special()  # claimed by plugin")
+            seen.append((class_name, instance_var, prefix))
+            return True
+
+        pm.add_class_handler(handler)
+        self.writer.plugin_manager = pm
+        self.writer.output = StringIO()
+        with (
+            patch.object(self.writer, "_dispatch_fuzz_on_instance"),
+            patch.object(self.writer, "_fuzz_methods_on_object_or_specific_types"),
+        ):
+            self.writer._fuzz_one_class(0, "TestClass", self.mock_module.TestClass)
+        out = self.writer.output.getvalue()
+        self.assertEqual(seen, [("TestClass", "instance_c1_testclass", "c1")])
+        self.assertIn("make_special()  # claimed by plugin", out)
+        # generic callFunc instantiation is suppressed
+        self.assertNotIn("callFunc('c1_init', 'TestClass'", out)
+
+    @patch("fusil.python.write_python_code.class_arg_number", return_value=1)
+    def test_fuzz_one_class_falls_through_when_handler_declines(self, mock_arg_num):
+        """A class handler returning False leaves the generic callFunc instantiation in place."""
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        pm.add_class_handler(lambda *a: False)
+        self.writer.plugin_manager = pm
+        self.writer.output = StringIO()
+        with (
+            patch.object(self.writer, "_dispatch_fuzz_on_instance"),
+            patch.object(self.writer, "_fuzz_methods_on_object_or_specific_types"),
+        ):
+            self.writer._fuzz_one_class(0, "TestClass", self.mock_module.TestClass)
+        self.assertIn("callFunc('c1_init', 'TestClass'", self.writer.output.getvalue())
+
+    def test_get_object_methods_respects_plugin_blacklist_and_whitelist(self):
+        """Plugin method blacklist drops names; whitelist keeps normally-skipped ones (__del__)."""
+        from fusil.plugin_manager import PluginManager
+
+        class Obj:
+            def keep_me(self):
+                pass
+
+            def drop_me(self):
+                pass
+
+            def __del__(self):
+                pass
+
+        # Baseline (no plugin): public methods discovered, __del__ skipped as private.
+        self.writer.plugin_manager = None
+        base = self.writer._get_object_methods(Obj(), "Obj")
+        self.assertIn("keep_me", base)
+        self.assertIn("drop_me", base)
+        self.assertNotIn("__del__", base)
+
+        # With a plugin blacklist + whitelist.
+        pm = PluginManager()
+        pm.add_blacklist_entry("method", "drop_me")
+        pm.add_whitelist_entry("method", "__del__")
+        self.writer.plugin_manager = pm
+        got = self.writer._get_object_methods(Obj(), "Obj")
+        self.assertIn("keep_me", got)
+        self.assertNotIn("drop_me", got)  # blacklisted
+        self.assertIn("__del__", got)  # whitelisted through the private-name skip
+
     def test_fuzz_one_module_object_orchestration(self):
         """Wiring Test: Ensures _fuzz_one_module_object calls the method fuzzer correctly."""
         with patch.object(
@@ -267,25 +341,35 @@ class TestWritePythonCodePrivateMethods(unittest.TestCase):
         self.assertIn("Max fuzz code generation depth", generated_code)
         self.assertNotIn("Dispatching Fuzz for", generated_code)
 
-    @unittest.skipIf(not H5PY_AVAILABLE, "h5py not installed")
     def test_dispatch_fuzz_on_instance_dispatching_logic(self):
-        """Logic Test: Validates _dispatch_fuzz_on_instance generates code for the correct fuzzer."""
-        # Test for h5py.Dataset dispatch
+        """_dispatch_fuzz_on_instance invokes plugin instance-dispatchers, then the generic fallback.
+
+        Specialized per-type dispatch (e.g. h5py Dataset/Group) is registered by a plugin via
+        add_instance_dispatcher rather than hard-coded in core.
+        """
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        seen = []
+
+        def dispatcher(writer, current_prefix, target_expr, class_hint, depth):
+            seen.append((current_prefix, target_expr, class_hint, depth))
+            return None
+
+        pm.add_instance_dispatcher(dispatcher)
+        self.writer.plugin_manager = pm
         self.writer.output = StringIO()
         self.writer._dispatch_fuzz_on_instance("h5_dispatch", "my_dataset_var", "Dataset", 0)
-        generated_code_h5py = self.writer.output.getvalue()
-        self.assertIn("elif isinstance(my_dataset_var, h5py.Dataset):", generated_code_h5py)
-        self.assertIn("--- Fuzzing Dataset Instance:", generated_code_h5py)
-        # self.assertNotIn("doing generic calls", generated_code_h5py)
+        self.assertEqual(seen, [("h5_dispatch", "my_dataset_var", "Dataset", 0)])
+        self.assertIn("doing generic calls", self.writer.output.getvalue())
 
-        # Test for generic object dispatch
+        # No plugin manager -> only the generic fallback.
+        self.writer.plugin_manager = None
         self.writer.output = StringIO()
         self.writer._dispatch_fuzz_on_instance(
             "generic_dispatch", "my_generic_var", "SomeGenericClass", 0
         )
-        generated_code_generic = self.writer.output.getvalue()
-        # self.assertNotIn("elif isinstance(my_generic_var, h5py.Dataset):", generated_code_generic)
-        self.assertIn("doing generic calls", generated_code_generic)
+        self.assertIn("doing generic calls", self.writer.output.getvalue())
 
     def test_write_main_fuzzing_logic_call_counts(self):
         """Wiring Test: Checks the main logic method calls the correct number of fuzzing sub-methods."""
