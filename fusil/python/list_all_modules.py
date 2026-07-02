@@ -128,7 +128,9 @@ class ListAllModules:
 
         try:
             return __import__(fullname)
-        except ImportError as e:
+        except (ImportError, SystemExit) as e:
+            # SystemExit: a __main__ submodule (e.g. venv.__main__) runs its argparse CLI on
+            # import and calls sys.exit(); treat it as unimportable rather than letting it abort.
             if self.verbose:
                 print(f"    Import failed for {fullname}: {e}")
             return None
@@ -213,9 +215,11 @@ class ListAllModules:
         """
         try:
             __import__(info.name)
-        except Exception:
-            # Skip a package we can't import rather than aborting the whole discovery
-            # pass on a non-ImportError (KeyboardInterrupt/SystemExit still propagate).
+        except (Exception, SystemExit):
+            # Skip a package we can't import rather than aborting the whole discovery. Include
+            # SystemExit: importing a __main__ submodule (e.g. venv.__main__) runs its argparse
+            # CLI against fusil's own argv and calls sys.exit() -- that must not abort discovery.
+            # A real KeyboardInterrupt is neither Exception nor SystemExit, so it still propagates.
             if onerror:
                 onerror(info.name)
             return
