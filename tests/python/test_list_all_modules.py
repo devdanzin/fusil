@@ -46,6 +46,7 @@ class TestListAllModules(unittest.TestCase):
         open(os.path.join(main_pkg_path, "__init__.py"), "w").close()
         open(os.path.join(main_pkg_path, "module_a.py"), "w").close()
         open(os.path.join(main_pkg_path, "c_module.so"), "w").close()
+        open(os.path.join(main_pkg_path, "__main__.py"), "w").close()  # CLI entry point
 
         # main_pkg.sub_pkg
         sub_pkg_path = os.path.join(main_pkg_path, "sub_pkg")
@@ -158,6 +159,16 @@ class TestListAllModules(unittest.TestCase):
 
         # Use issubset because other system modules might be found
         self.assertTrue(expected.issubset(found_modules))
+
+    def test_main_submodule_is_excluded(self):
+        """A package's __main__ CLI entry point must not be discovered (importing it runs the
+        CLI + sys.exit), while its normal submodules still are."""
+        lister = ListAllModules(
+            self.mock_logger, only_c=False, site_package=True, blacklist=set(), skip_test=False
+        )
+        found_modules = lister.search_modules()
+        self.assertNotIn("main_pkg.__main__", found_modules)
+        self.assertIn("main_pkg.module_a", found_modules)  # sanity: normal submodules kept
 
     def test_only_c_filter(self):
         """Integration Test: Verifies the 'only_c' filter."""

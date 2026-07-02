@@ -159,6 +159,13 @@ class ListAllModules:
             if name in self.blacklist:
                 continue
 
+            if name == "__main__" or name.endswith(".__main__"):
+                # A package's __main__ is its CLI entry point: importing it *runs* the CLI
+                # (argparse over sys.argv, then sys.exit()) -- e.g. venv.__main__, json.__main__,
+                # zipfile.__main__. It is never a useful fuzz target and its import-time exit
+                # would otherwise churn the fuzzer, so skip the whole family here.
+                continue
+
             if name.endswith("_d"):
                 continue
 
