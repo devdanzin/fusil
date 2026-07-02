@@ -6,6 +6,7 @@ injects malloc failures deterministically (the drop-in set_nomemory semantics) a
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import textwrap
@@ -14,7 +15,7 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
-from fusil.python.foreign_oom import get_shim_path
+from fusil.python.foreign_oom import _cache_dir, get_shim_path
 
 _HAVE_CC = bool(shutil.which("cc") or shutil.which("gcc") or shutil.which("clang"))
 
@@ -26,6 +27,19 @@ class TestForeignOOMShim(unittest.TestCase):
         self.assertTrue(os.path.exists(path))
         self.assertTrue(path.endswith(".so"))
         self.assertEqual(get_shim_path(), path)  # second call hits the cache
+
+    def test_shim_and_cache_dir_are_child_readable(self):
+        # Regression (2026-07-02): the parent builds the shim (often as root), but the fuzzed
+        # child runs as the dropped-privilege `fusil` user and LD_PRELOADs it. When the shim
+        # lived in root's 0700 ~/.cache, ld.so reported "cannot be preloaded". The cache dir
+        # must be world-traversable (+x) and the .so world-readable (+r).
+        path = get_shim_path()
+        so_mode = os.stat(path).st_mode
+        self.assertTrue(so_mode & stat.S_IROTH, f"shim .so not world-readable: {oct(so_mode)}")
+        dir_mode = os.stat(_cache_dir()).st_mode
+        self.assertTrue(
+            dir_mode & stat.S_IXOTH, f"cache dir not world-traversable: {oct(dir_mode)}"
+        )
 
     def test_shim_injects_and_recovers(self):
         shim = get_shim_path()

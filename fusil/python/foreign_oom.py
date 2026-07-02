@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,24 @@ _SHIM_SOURCE = Path(__file__).with_name("fusil_malloc_shim.c")
 
 
 def _cache_dir() -> Path:
-    base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
-    return Path(base) / "fusil"
+    # A world-readable shared dir, NOT ~/.cache: the parent compiles the shim (typically as
+    # root), but the fuzzed child runs as the dropped-privilege ``fusil`` user and must be able
+    # to traverse the dir and open the .so to LD_PRELOAD it. ~/.cache is 0700 (root's home is
+    # untraversable by the child), which made ld.so report "cannot be preloaded".
+    return Path(tempfile.gettempdir()) / "fusil-shim"
+
+
+def _make_child_readable(cache_dir: Path, so_path: Path) -> None:
+    """Best-effort: let the dropped-privilege child traverse the cache dir and read the .so.
+
+    The parent (often root) builds the shim; the child (``fusil`` user) LD_PRELOADs it, so both
+    the directory (needs +x to traverse) and the .so (needs +r) must be world-accessible.
+    """
+    for path, mode in ((cache_dir, 0o755), (so_path, 0o644)):
+        try:
+            os.chmod(path, mode)
+        except OSError:  # pragma: no cover - perms are best-effort (e.g. not owner)
+            pass
 
 
 class ForeignOOMError(Exception):
@@ -47,6 +64,7 @@ def get_shim_path() -> str:
     cache_dir = _cache_dir()
     so_path = cache_dir / ("fusil_malloc_shim_%s.so" % digest)
     if so_path.exists():
+        _make_child_readable(cache_dir, so_path)
         return str(so_path)
 
     compiler = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
@@ -64,4 +82,5 @@ def get_shim_path() -> str:
     except subprocess.CalledProcessError as err:
         raise ForeignOOMError("failed to build malloc shim: %s" % (err.stderr or err)) from err
     os.replace(tmp_so, so_path)  # atomic publish
+    _make_child_readable(cache_dir, so_path)
     return str(so_path)
