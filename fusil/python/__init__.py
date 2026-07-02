@@ -406,6 +406,12 @@ class Fuzzer(Application):
         self.source = PythonSource(
             project, self.options, source_output_path=self.options.source_output_path
         )
+        # Score-neutral observer: fold each finished session into the run dir's
+        # fusil_stats.json sidecar (read back by `fleet report`). Parent-side only; does not
+        # override getScore(), so it never affects scoring or the generated source.
+        from fusil.python.stats_agent import StatsAgent
+
+        StatsAgent(project, self.source)
         process = PythonProcess(
             project,
             self.options,

@@ -6,6 +6,7 @@
 #   sudo ./fleet down        stop + disable all instances
 #   ./fleet status          per-instance state + crash/NEW-find counts
 #   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
+#   ./fleet report [N]      observability report: per-instance + campaign (--watch, --json, --no-systemd)
 #   ./fleet triage          dedupe oomNEW/oomSEGV candidates across instances (needs INGEST); extra args pass to ingest (e.g. --gdb)
 #   ./fleet tail [N]        follow instance N's log (default: 1)
 #   sudo ./fleet restart    restart all instances (e.g. to pick up a new catalog)
@@ -151,6 +152,15 @@ cmd_triage(){
     fi
 }
 
+cmd_report(){
+    # Observability report (per-instance + campaign). Pure-Python reader; put the repo on
+    # PYTHONPATH so RUNNER_PY can import fusil.python.fleet_report even when fusil isn't
+    # pip-installed in that venv. All args (N, --watch, --json, --no-systemd) pass through.
+    local repo; repo="$(dirname "$(dirname "$FUSIL_PY")")"
+    PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" \
+        "$RUNNER_PY" -m fusil.python.fleet_report --fleet-dir "$FLEET_DIR" "$@"
+}
+
 cmd_tail(){
     local i="${1:-1}" dir; dir="$(inst_dir "$i")"
     if [ "${LOG:-file}" = "none" ]; then
@@ -170,6 +180,7 @@ case "${1:-status}" in
     status)   cmd_status ;;
     finds)    cmd_finds ;;
     triage)   shift; cmd_triage "$@" ;;
+    report)   shift; cmd_report "$@" ;;
     tail)     shift; cmd_tail "$@" ;;
-    *)        sed -n '2,13p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
+    *)        sed -n '2,14p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
 esac
