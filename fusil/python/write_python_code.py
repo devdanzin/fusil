@@ -299,6 +299,17 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
+        # Emit the method denylist so the generated script's generic / deep-dive method fuzzing
+        # can skip the same hang-prone / false-positive methods the static generation already
+        # filters (locks' acquire, queues' get, sleep, ...). This runtime path previously
+        # hardcoded only ('wait', '_rehash') -- a tiny subset -- instead of reusing METHOD_BLACKLIST.
+        self.write(
+            0,
+            "_FUSIL_METHOD_BLACKLIST = frozenset({%s})"
+            % ", ".join(repr(name) for name in sorted(METHOD_BLACKLIST)),
+        )
+        self.emptyLine()
+
         if self.options.oom_fuzz and self.options.oom_foreign:
             # Foreign-allocator OOM: arm the LD_PRELOAD malloc shim (via ctypes) instead of
             # _testcapi.set_nomemory. `fusil_malloc_arm(start, stop)` is a drop-in for
@@ -963,7 +974,7 @@ class WritePythonCode(WriteCode):
                         )
                         self.write(
                             0,
-                            f"if callable({current_prefix}_attr_val) and not {current_prefix}_attr_val.__name__ in ('wait', '_rehash'): {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
+                            f"if callable({current_prefix}_attr_val) and {current_prefix}_attr_name not in _FUSIL_METHOD_BLACKLIST: {current_prefix}_methods.append(({current_prefix}_attr_name, {current_prefix}_attr_val))",
                         )
                     self.write(0, "except Exception: pass")
             self.write(
@@ -993,7 +1004,7 @@ class WritePythonCode(WriteCode):
                     self.write(0, "# Conceptual call to generic method fuzzer")
                     self.write(
                         0,
-                        f"if {current_prefix}_method_name_to_call not in ('wait', '_rehash'): callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
+                        f"if {current_prefix}_method_name_to_call not in _FUSIL_METHOD_BLACKLIST: callMethod(f'{current_prefix}_gen{{_i_{current_prefix}}}', {target_obj_expr_str}, {current_prefix}_method_name_to_call)",
                     )  # Example simplified call
         self.emptyLine()
 
