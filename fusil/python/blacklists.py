@@ -38,6 +38,12 @@ MODULE_BLACKLIST = {
     "xxlimited_35",
     "xxsubtype",
     "tkinter",
+    # The REPL's module-name completer imports arbitrary modules (via importlib) to offer
+    # completions; fuzzing it reaches _get_import_completion_action's unguarded
+    # importlib.import_module(), which bypasses the completer's own AUTO_IMPORT_DENYLIST and
+    # imports side-effect modules -- e.g. antigravity (opens a browser to xkcd/353). Like
+    # pydoc, it's an arbitrary-module importer, not a useful fuzz target.
+    "_pyrepl._module_completer",
 }
 CTYPES = {
     "PyObj_FromPtr",
