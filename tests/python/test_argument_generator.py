@@ -370,6 +370,33 @@ class TestArgumentGenerator(unittest.TestCase):
             self._check_if_generator_in_tuple("genTrickyTemplate", "complex_argument_generators")
         )
 
+    def test_bombs_excluded_from_hashable_pool(self):
+        """Regression: bombs must NOT be in the set-member/dict-key (hashable) pool. A bomb there
+        is hashed when the harness builds the container *literal* -- frequently at module scope,
+        outside the per-call try/except -- so a raising __hash__ (SuperBomb, or a HashBomb that
+        drew delay 0) detonates during construction, killing the whole script (exit 1) before any
+        target call. Bombs must stay in the simple/complex pools so they still reach target C."""
+        self.assertFalse(
+            self._check_if_generator_in_tuple("genBombObject", "hashable_argument_generators")
+        )
+        # coverage preserved: bombs still reach the target as ordinary and complex arguments
+        self.assertTrue(
+            self._check_if_generator_in_tuple("genBombObject", "simple_argument_generators")
+        )
+        self.assertTrue(
+            self._check_if_generator_in_tuple("genBombObject", "complex_argument_generators")
+        )
+        # and no bomb ever surfaces through an actual hashable (set/dict-key) draw
+        from fusil.python.samples import bomb_objects as bombs
+
+        bomb_names = set(bombs.BOMB_CLASS_NAMES) | set(bombs.BOMB_TYPE_NAMES)
+        for _ in range(2000):
+            expr = "".join(self.arg_gen.create_hashable_argument())
+            self.assertFalse(
+                any(name in expr for name in bomb_names),
+                f"bomb leaked into a hashable (set/dict-key) position: {expr!r}",
+            )
+
     def test_create_simple_argument_variety(self):
         """Try to detect if create_simple_argument uses different sub-generators."""
         self._setup_arg_gen(

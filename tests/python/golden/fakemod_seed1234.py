@@ -17,7 +17,11 @@ import asyncio
 seed(946466063)
 
 print("Importing target module: fakemod", file=stderr)
-import fakemod
+try:
+    import fakemod
+except ImportError as _fusil_import_error:
+    print("FUSIL: target module fakemod not importable (skipping):", repr(_fusil_import_error), file=stderr)
+    raise SystemExit(0)
 
 TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None),}
 def skip_trivial_type(obj_instance_or_class):
