@@ -158,5 +158,71 @@ class TestAnomaliesAndRender(unittest.TestCase):
             self.assertIn("json", inst)
 
 
+class TestCrashRateAndHtml(unittest.TestCase):
+    def test_crash_rate_modules(self):
+        modules = {
+            "hot": {"hits": 20, "crashes": 20, "timeouts": 0},  # 100%
+            "warm": {"hits": 10, "crashes": 5, "timeouts": 0},  # 50%
+            "quiet": {"hits": 40, "crashes": 0, "timeouts": 0},  # 0%
+            "rare": {"hits": 2, "crashes": 2, "timeouts": 0},  # below min_hits
+        }
+        rows = fr.crash_rate_modules(modules, min_hits=5)
+        names = [r[0] for r in rows]
+        self.assertEqual(
+            names, ["hot", "warm", "quiet"]
+        )  # sorted by rate desc, min_hits drops 'rare'
+        self.assertAlmostEqual(dict((n, rate) for n, rate, _ in rows)["warm"], 50.0)
+
+    def test_campaign_aggregates_modules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for inst, mod in (("inst-01", "json"), ("inst-02", "json")):
+                r = os.path.join(tmp, inst, "python")
+                os.makedirs(r)
+                _sidecar(
+                    os.path.join(r, "fusil_stats.json"),
+                    sessions=10,
+                    modules={mod: {"hits": 10, "crashes": 4, "timeouts": 0}},
+                )
+            agg = fr.build_report(tmp, None, systemd=False, now=2000.0)["campaign"]
+            self.assertEqual(agg["modules"]["json"], {"hits": 20, "crashes": 8, "timeouts": 0})
+
+    def test_render_html_is_self_contained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r1 = os.path.join(tmp, "inst-01", "python")
+            os.makedirs(r1)
+            _sidecar(
+                os.path.join(r1, "fusil_stats.json"),
+                sessions=100,
+                crashes=2,
+                modules={"jsonmod": {"hits": 100, "crashes": 50, "timeouts": 0}},
+            )
+            _crash(r1, "jsonmod-sigsegv-oomNEW")
+            report = fr.build_report(tmp, None, systemd=False, now=2000.0)
+            doc = fr.render_html(report, generated="fixed-time")
+            self.assertTrue(doc.startswith("<!doctype html"))
+            self.assertIn("<style>", doc)  # embedded CSS -> self-contained
+            self.assertIn("<script>", doc)  # embedded JS
+            self.assertNotIn("http://", doc)  # no external assets
+            self.assertNotIn("https://", doc)
+            self.assertIn("jsonmod", doc)
+            self.assertIn("table class=sortable", doc)
+            # HTML is well-formed enough to parse without raising
+            import html.parser
+
+            html.parser.HTMLParser().feed(doc)
+
+    def test_main_writes_html_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r1 = os.path.join(tmp, "inst-01", "python")
+            os.makedirs(r1)
+            _sidecar(os.path.join(r1, "fusil_stats.json"), sessions=5, crashes=1)
+            out = os.path.join(tmp, "dash.html")
+            rc = fr.main(["--fleet-dir", tmp, "--no-systemd", "--html", out])
+            self.assertEqual(rc, 0)
+            self.assertTrue(os.path.exists(out))
+            with open(out, encoding="utf-8") as fh:
+                self.assertIn("fusil fleet", fh.read())
+
+
 if __name__ == "__main__":
     unittest.main()

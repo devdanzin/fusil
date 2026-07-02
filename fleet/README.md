@@ -35,7 +35,7 @@ and capture their logs — no VMs or containers needed.
 sudo ./fleet up            # start (nproc-1) instances; or: sudo ./fleet up 8
 ./fleet status             # per-instance state + crashes kept + NEW candidates
 ./fleet report             # rich observability: sessions, throughput, crash taxonomy, disk, health
-./fleet report 3           # ...for one instance;  add --watch for a live view, --json for scripts
+./fleet report 3           # ...for one instance;  add --watch (live), --html FILE (dashboard), or --json
 ./fleet finds              # list the oomNEW dirs across the whole fleet
 ./fleet tail 3             # follow instance 3's output live
 sudo ./fleet down          # stop everything
