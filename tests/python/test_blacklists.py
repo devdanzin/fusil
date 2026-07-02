@@ -49,6 +49,11 @@ class TestKnownEntriesPresent(unittest.TestCase):
     def test_builtins_pow_round(self):
         self.assertEqual(bl.BUILTINS, {"pow", "round"})
 
+    def test_module_completer_blacklisted(self):
+        # It auto-imports arbitrary modules for REPL completion (side effects: antigravity
+        # opens a browser); must not be fuzzed. See blacklists.py comment.
+        self.assertIn("_pyrepl._module_completer", bl.MODULE_BLACKLIST)
+
 
 if __name__ == "__main__":
     unittest.main()
