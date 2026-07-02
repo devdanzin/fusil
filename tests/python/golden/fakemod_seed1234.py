@@ -390,7 +390,10 @@ This module is embedded verbatim into generated fuzzing scripts, so it must stay
 self-contained (only ``random`` + builtins) and import-safe.
 """
 
-import random
+# Import the random *module* under a private alias. The generated script's boilerplate does
+# ``from random import ..., random``, which rebinds the bare name ``random`` to the random()
+# *function*; a private alias keeps this embedded code reaching the module's randint/choice.
+import random as _bomb_random
 
 # Weighted toward MemoryError (the unguarded-PyErr_Clear / swallowed-error bug class) but
 # spanning the exceptions C code is most likely to mishandle when a slot raises unexpectedly.
@@ -412,7 +415,7 @@ _BOMB_EXCEPTIONS = (
 
 
 def _bomb_exc(exc=None):
-    return exc if exc is not None else random.choice(_BOMB_EXCEPTIONS)
+    return exc if exc is not None else _bomb_random.choice(_BOMB_EXCEPTIONS)
 
 
 class _BombBase:
@@ -420,7 +423,7 @@ class _BombBase:
 
     def __init__(self, max_delay=3, exc=MemoryError):
         self._calls = 0
-        self._delay = random.randint(0, max_delay)
+        self._delay = _bomb_random.randint(0, max_delay)
         self._exc = exc
 
     def _fire(self):
@@ -514,7 +517,7 @@ class FailingIterator:
 
     def __init__(self, max_items=4, exc=None):
         self._i = 0
-        self._n = random.randint(0, max_items)
+        self._n = _bomb_random.randint(0, max_items)
         self._exc = exc
 
     def __iter__(self):
@@ -626,7 +629,7 @@ class SuperBomb(metaclass=_SuperBombMeta):
         # object.__setattr__: __setattr__ itself is not armed, but keep construction robust
         # regardless of what a subclass/metaclass does.
         object.__setattr__(self, "_bomb_calls", {})
-        object.__setattr__(self, "_bomb_delay", random.randint(0, max_delay))
+        object.__setattr__(self, "_bomb_delay", _bomb_random.randint(0, max_delay))
 
 
 # --- File-like bombs (target the common "try fd, else .read()" C pattern) ----------------
@@ -737,7 +740,7 @@ class _StatefulHashMeta(type):
     def __new__(mcls, name, bases, namespace):
         cls = super().__new__(mcls, name, bases, namespace)
         # list cell so __hash__ can mutate without triggering __setattr__ machinery
-        cls._bomb_hash_state = [0, random.randint(0, 3)]
+        cls._bomb_hash_state = [0, _bomb_random.randint(0, 3)]
         return cls
 
     def __hash__(cls):

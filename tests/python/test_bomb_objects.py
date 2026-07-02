@@ -131,6 +131,30 @@ class TestMetaclassBombs(unittest.TestCase):
             hash(T)
 
 
+class TestRandomShadowing(unittest.TestCase):
+    """Regression for the fleet bug (2026-07-02): the generated script's boilerplate emits
+    ``from random import choice, randint, random``, which rebinds the bare name ``random`` to
+    the random() *function*, shadowing the module. The embedded bomb source must reach
+    randint/choice via its private ``_bomb_random`` alias -- otherwise ``IndexBomb()`` etc.
+    die with ``AttributeError: 'builtin_function_or_method' object has no attribute 'randint'``.
+    """
+
+    def test_bombs_construct_with_random_name_shadowed(self):
+        # Mirror the generated boilerplate: `random` is now the function, not the module.
+        from random import choice, randint, random
+
+        ns = {"choice": choice, "randint": randint, "random": random}
+        # Precondition that made the old code fail: the shadowing `random` has no randint.
+        self.assertFalse(hasattr(ns["random"], "randint"))
+        # exec the source exactly as embedded into generated scripts. This also defines the
+        # type bombs, whose metaclasses call _bomb_random.randint at class-creation time.
+        exec(tricky_weird.bomb_objects, ns)
+        for name in B.BOMB_CLASS_NAMES:
+            ns[name]()  # must construct despite the shadow (regression: AttributeError)
+        for name in B.BOMB_TYPE_NAMES:
+            self.assertIsInstance(ns[name], type)
+
+
 class TestGeneratorWiring(unittest.TestCase):
     def test_all_class_names_construct_with_no_args(self):
         for name in B.BOMB_CLASS_NAMES:
