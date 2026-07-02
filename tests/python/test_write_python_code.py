@@ -441,6 +441,22 @@ class TestWritePythonCode(unittest.TestCase):
         # Check that at least one function call was generated
         self.assertIn('callFunc("f1",', full_script)
 
+    def test_target_import_guarded_for_missing_module(self):
+        """Regression: the target import is wrapped so a module absent from the CHILD interpreter
+        (e.g. pexpect/ptyprocess discovered in the parent env but not installed in the target
+        build) exits cleanly (SystemExit 0) instead of dying with ModuleNotFoundError -- which
+        --exitcode-score would otherwise score as a spurious finding."""
+        output_stream = StringIO()
+        self.writer.output = output_stream
+        self.writer._write_script_header_and_imports()
+        header = output_stream.getvalue()
+
+        ast.parse(header)  # syntactically valid
+        self.assertIn("try:", header)
+        self.assertIn(f"import {self.writer.module_name}", header)
+        self.assertIn("except ImportError as", header)
+        self.assertIn("raise SystemExit(0)", header)
+
     # --- Wiring and Call Order Tests ---
 
     def test_generate_fuzzing_script_call_order(self):

@@ -284,7 +284,22 @@ class WritePythonCode(WriteCode):
             self.write(0, "from string.templatelib import Interpolation, Template")
 
         self.write_print_to_stderr(0, f'"Importing target module: {self.module_name}"')
-        self.write(0, f"import {self.module_name}")
+        # The parent discovers importable modules in ITS interpreter; the target interpreter
+        # may not have them (e.g. pexpect/ptyprocess are importable in the parent env but absent
+        # in the target build). A missing target module is an environment mismatch, not a crash,
+        # so exit cleanly (0) -- otherwise the bare import raises ModuleNotFoundError, the script
+        # dies with a non-zero code, and --exitcode-score scores it as a spurious finding.
+        self.write(0, "try:")
+        with self.indented():
+            self.write(0, f"import {self.module_name}")
+        self.write(0, "except ImportError as _fusil_import_error:")
+        with self.indented():
+            self.write_print_to_stderr(
+                0,
+                f'"FUSIL: target module {self.module_name} not importable (skipping):",'
+                " repr(_fusil_import_error)",
+            )
+            self.write(0, "raise SystemExit(0)")
         self.emptyLine()
 
         self.write(

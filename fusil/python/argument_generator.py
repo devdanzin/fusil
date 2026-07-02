@@ -157,11 +157,15 @@ class ArgumentGenerator:
 
         self.hashable_argument_generators = safe_hashable_generators
         if allow_external_references:
-            # The 'errback' name is hashable but is an external reference. Bombs are hashable
-            # too (HashBomb/EqBomb/SuperBomb arm __hash__/__eq__) -- as dict keys / set members
-            # they hit the container insert & lookup error paths.
+            # The 'errback' name is hashable but is an external reference.
             self.hashable_argument_generators += (self.genErrback,)
-            self.hashable_argument_generators += (self.genBombObject,) * BOMB_WEIGHT
+            # NOTE: bombs are deliberately NOT added to the hashable pool. A bomb in a
+            # set-member / dict-key position is hashed when the container *literal* is built by
+            # the harness -- which frequently happens at module scope, outside the per-call
+            # try/except. A raising __hash__ (SuperBomb, or a HashBomb that drew delay 0) then
+            # detonates during harness construction, killing the whole script (exit 1) before
+            # any target call is reached, rather than exercising the target's C code. Bombs
+            # still reach the target as direct arguments and as list/tuple/dict-*value* elements.
 
         # Build the final lists based on the flag
         self.simple_argument_generators = safe_simple_generators
