@@ -156,9 +156,13 @@ class PythonSource(ProjectAgent):
             try:
                 self.loadModule(name)
                 break
-            except Exception as err:
-                # Catch Exception, not BaseException: a slow/wedged import must still be
-                # interruptible -- KeyboardInterrupt/SystemExit have to propagate.
+            except (Exception, SystemExit) as err:
+                # Catch Exception plus SystemExit: a module that runs argparse/optparse on
+                # sys.argv or calls sys.exit() at import time (seeing fusil's own flags) raises
+                # SystemExit, which would otherwise propagate straight through the fuzzer and
+                # kill it (clean exit code 2, "Project done", systemd restart). Treat it as an
+                # unloadable module instead. A real KeyboardInterrupt is BaseException but
+                # neither Exception nor SystemExit, so it still propagates and stops the run.
                 self.error(
                     "Unable to load module %s: [%s] %s" % (name, err.__class__.__name__, err)
                 )

@@ -299,7 +299,32 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
-        if self.options.oom_fuzz:
+        if self.options.oom_fuzz and self.options.oom_foreign:
+            # Foreign-allocator OOM: arm the LD_PRELOAD malloc shim (via ctypes) instead of
+            # _testcapi.set_nomemory. `fusil_malloc_arm(start, stop)` is a drop-in for
+            # set_nomemory, so oom_call/oom_run below use `_set_nomemory` unchanged. The shim
+            # is static LD_PRELOAD interposition -- no allocator swap -- so the one-time
+            # install dance the _testcapi path needs does not apply here.
+            self.write_block(
+                0,
+                """
+                import faulthandler
+                faulthandler.enable()
+                import ctypes
+                try:
+                    _set_nomemory = ctypes.CDLL(None).fusil_malloc_arm
+                    _set_nomemory.argtypes = (ctypes.c_long, ctypes.c_long)
+                    _OOM_AVAILABLE = True
+                except (OSError, AttributeError):
+                    _OOM_AVAILABLE = False
+                    print("--oom-foreign requested but fusil_malloc_shim not preloaded (LD_PRELOAD); running without injection", file=stderr)
+                _OOM_DISABLE = 2_000_000_000
+                if _OOM_AVAILABLE:
+                    _set_nomemory(_OOM_DISABLE, 0)
+            """,
+            )
+            self.emptyLine()
+        elif self.options.oom_fuzz:
             self.write_block(
                 0,
                 """

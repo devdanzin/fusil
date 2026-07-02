@@ -128,7 +128,9 @@ class ListAllModules:
 
         try:
             return __import__(fullname)
-        except ImportError as e:
+        except (ImportError, SystemExit) as e:
+            # SystemExit: a __main__ submodule (e.g. venv.__main__) runs its argparse CLI on
+            # import and calls sys.exit(); treat it as unimportable rather than letting it abort.
             if self.verbose:
                 print(f"    Import failed for {fullname}: {e}")
             return None
@@ -155,6 +157,13 @@ class ListAllModules:
 
         for finder, name, ispkg in pkgutil.walk_packages(path, prefix, onerror):
             if name in self.blacklist:
+                continue
+
+            if name == "__main__" or name.endswith(".__main__"):
+                # A package's __main__ is its CLI entry point: importing it *runs* the CLI
+                # (argparse over sys.argv, then sys.exit()) -- e.g. venv.__main__, json.__main__,
+                # zipfile.__main__. It is never a useful fuzz target and its import-time exit
+                # would otherwise churn the fuzzer, so skip the whole family here.
                 continue
 
             if name.endswith("_d"):
@@ -213,9 +222,11 @@ class ListAllModules:
         """
         try:
             __import__(info.name)
-        except Exception:
-            # Skip a package we can't import rather than aborting the whole discovery
-            # pass on a non-ImportError (KeyboardInterrupt/SystemExit still propagate).
+        except (Exception, SystemExit):
+            # Skip a package we can't import rather than aborting the whole discovery. Include
+            # SystemExit: importing a __main__ submodule (e.g. venv.__main__) runs its argparse
+            # CLI against fusil's own argv and calls sys.exit() -- that must not abort discovery.
+            # A real KeyboardInterrupt is neither Exception nor SystemExit, so it still propagates.
             if onerror:
                 onerror(info.name)
             return

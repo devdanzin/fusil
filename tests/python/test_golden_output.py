@@ -61,6 +61,8 @@ class _Options:
     oom_seq = False
     oom_seq_len = 3
     oom_window = 1
+    oom_foreign = False
+    oom_foreign_pythonmalloc = False
 
 
 class _Parent:

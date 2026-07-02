@@ -57,6 +57,10 @@ where = ["."]
 include = ["fusil*"]
 namespaces = false
 
+# Ship the LD_PRELOAD malloc-failure shim source (compiled on demand by --oom-foreign).
+[tool.setuptools.package-data]
+"fusil.python" = ["*.c"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
