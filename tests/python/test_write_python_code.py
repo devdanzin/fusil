@@ -441,6 +441,33 @@ class TestWritePythonCode(unittest.TestCase):
         # Check that at least one function call was generated
         self.assertIn('callFunc("f1",', full_script)
 
+    def test_generic_method_fuzzing_uses_method_blacklist(self):
+        """Regression: the generic / deep-dive method-fuzzing path must filter runtime method
+        names through the emitted METHOD_BLACKLIST, not a hardcoded ('wait', '_rehash') subset."""
+        from fusil.python.blacklists import METHOD_BLACKLIST
+
+        # 1. the denylist is emitted into the script as a runtime constant == METHOD_BLACKLIST
+        header_stream = StringIO()
+        self.writer.output = header_stream
+        self.writer._write_script_header_and_imports()
+        header = header_stream.getvalue()
+        self.assertIn("_FUSIL_METHOD_BLACKLIST = frozenset({", header)
+        ns: dict = {}
+        for line in header.splitlines():
+            if line.startswith("_FUSIL_METHOD_BLACKLIST"):
+                exec(line, ns)
+                break
+        self.assertEqual(set(ns["_FUSIL_METHOD_BLACKLIST"]), set(METHOD_BLACKLIST))
+
+        # 2. the full generated script filters through it, with no hardcoded name tuple left
+        full_stream = StringIO()
+        with patch.object(self.writer, "createFile"), patch.object(self.writer, "close"):
+            self.writer.output = full_stream
+            self.writer.generate_fuzzing_script()
+        script = full_stream.getvalue()
+        self.assertNotIn("('wait', '_rehash')", script)
+        self.assertIn("not in _FUSIL_METHOD_BLACKLIST", script)
+
     def test_target_import_guarded_for_missing_module(self):
         """Regression: the target import is wrapped so a module absent from the CHILD interpreter
         (e.g. pexpect/ptyprocess discovered in the parent env but not installed in the target

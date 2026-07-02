@@ -30,6 +30,8 @@ def skip_trivial_type(obj_instance_or_class):
     return False
 
 
+_FUSIL_METHOD_BLACKLIST = frozenset({'__class__', '__enter__', '__imul__', '__ipow__', '__mul__', '__pow__', '__rmul__', '_acquire_lock', '_acquire_restore', '_handle_request_noblock', '_randbelow', '_randbelow_with_getrandbits', '_read', '_rehash', '_run_once', '_serve', '_shutdown', 'accept', 'acquire', 'acquire_lock', 'cmdloop', 'copyfileobj', 'get', 'get_request', 'handle_request', 'handle_request_noblock', 'prefix', 'raise_signal', 'repeat', 'run_forever', 'select', 'serve_forever', 'shutdown', 'sleep', 'test', 'tri', 'tril_indices', 'wait', 'zfill'})
+
 import sys
 from _collections import OrderedDict, deque
 from abc import ABCMeta
@@ -921,7 +923,7 @@ if instance_c1_widget is not None:
                 if c1_widget_ops_generic_attr_name.startswith('_'): continue
                 try:
                     c1_widget_ops_generic_attr_val = getattr(instance_c1_widget, c1_widget_ops_generic_attr_name)
-                    if callable(c1_widget_ops_generic_attr_val) and not c1_widget_ops_generic_attr_val.__name__ in ('wait', '_rehash'): c1_widget_ops_generic_methods.append((c1_widget_ops_generic_attr_name, c1_widget_ops_generic_attr_val))
+                    if callable(c1_widget_ops_generic_attr_val) and c1_widget_ops_generic_attr_name not in _FUSIL_METHOD_BLACKLIST: c1_widget_ops_generic_methods.append((c1_widget_ops_generic_attr_name, c1_widget_ops_generic_attr_val))
                 except Exception: pass
         except Exception: c1_widget_ops_generic_methods = [] # Failed to get methods
         if c1_widget_ops_generic_methods:
@@ -929,7 +931,7 @@ if instance_c1_widget is not None:
             for _i_c1_widget_ops_generic in range(min(len(c1_widget_ops_generic_methods), 2)):
                 c1_widget_ops_generic_method_name_to_call, c1_widget_ops_generic_method_obj_to_call = choice(c1_widget_ops_generic_methods)
                 # Conceptual call to generic method fuzzer
-                if c1_widget_ops_generic_method_name_to_call not in ('wait', '_rehash'): callMethod(f'c1_widget_ops_generic_gen{_i_c1_widget_ops_generic}', instance_c1_widget, c1_widget_ops_generic_method_name_to_call)
+                if c1_widget_ops_generic_method_name_to_call not in _FUSIL_METHOD_BLACKLIST: callMethod(f'c1_widget_ops_generic_gen{_i_c1_widget_ops_generic}', instance_c1_widget, c1_widget_ops_generic_method_name_to_call)
 
 if instance_c1_widget is not None and instance_c1_widget is not SENTINEL_VALUE:
     print(f"--- Fuzzing instance: instance_c1_widget (type hint: Widget, prefix: c1m) ---", file=stderr)
