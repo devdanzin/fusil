@@ -227,6 +227,18 @@ what incidental fuzzing already finds.
 
 ### F. System-malloc fault injection via libfiu / LD_PRELOAD (Techniques 23 / 27 / 31)
 
+> **STATUS: IMPLEMENTED (own shim, not libfiu).** `--oom-foreign` LD_PRELOADs a small custom
+> shim (`fusil/python/fusil_malloc_shim.c`, compiled+cached by `foreign_oom.py`) that
+> interposes `malloc`/`calloc`/`realloc`/... and exports `fusil_malloc_arm(start, stop)` — a
+> drop-in for `_testcapi.set_nomemory`, armed from the harness via `ctypes.CDLL(None)`. Chosen
+> over libfiu because libfiu is rarely installed and its probabilistic mode isn't replayable,
+> whereas the shim mirrors `set_nomemory`'s deterministic windowed semantics exactly (so
+> foreign-allocator crashes stay replayable/dedup-able). Composes with `--oom-fuzz` (reuses the
+> whole sweep); `--oom-foreign-pythonmalloc` additionally sets `PYTHONMALLOC=malloc`. The child
+> env (incl. `LD_PRELOAD`) is captured into the replay script. Caveat: don't combine with an
+> ASan-instrumented target (ASan owns the allocator). Tests: `test_foreign_oom.py`,
+> `test_oom_fuzz.py::TestForeignOOMGeneration`.
+
 This is the strategic, higher-effort complement to `set_nomemory`. `set_nomemory` only hooks
 CPython's allocator domains; it **cannot** reach `malloc`/`calloc`/`realloc` inside foreign C
 libraries an extension links (HDF5, libzstd, libxml2, …). libfiu (`LD_PRELOAD` +

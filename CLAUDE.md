@@ -77,6 +77,10 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --oom-dedup-catalog F    in-loop crash dedupe/labeling vs known_sites.tsv; add
 #                            --oom-dedup-prune to drop dups, --oom-dedup-resolve-segv
 #                            to resolve segvs via gdb so they dedupe too
+#   --oom-foreign            inject failures at the C malloc() layer via an LD_PRELOAD shim
+#                            (fusil_malloc_shim.c, compiled on demand) instead of set_nomemory,
+#                            reaching FOREIGN C-lib allocs (HDF5/zstd/...); implies --oom-fuzz;
+#                            --oom-foreign-pythonmalloc also routes CPython allocs through it
 ```
 
 `jit_config.py` is a standalone helper (not part of the fuzzer) that rewrites CPython

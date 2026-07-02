@@ -42,6 +42,8 @@ def _make_options(oom_fuzz, oom_verbose=False):
     # General generation knobs
     o.fuzz_exceptions = False
     o.gc_aggressive = False
+    o.oom_foreign = False
+    o.oom_foreign_pythonmalloc = False
     o.test_private = False
     o.no_numpy = True
     o.no_tstrings = True
@@ -77,6 +79,7 @@ def _generate(
     oom_seq_len=3,
     oom_window=1,
     oom_seq_randomize=False,
+    oom_foreign=False,
 ):
     """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
@@ -88,6 +91,7 @@ def _generate(
     options.oom_seq_len = oom_seq_len
     options.oom_window = oom_window
     options.oom_seq_randomize = oom_seq_randomize
+    options.oom_foreign = oom_foreign
     parent.options = options
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
@@ -300,6 +304,27 @@ class TestOOMSeqGeneration(unittest.TestCase):
         src = _generate(oom_fuzz=True, oom_seq=False)
         for marker in ("oom_run", "_OOM_WINDOW", "[OOM-SEQ]", "_oom_seq_"):
             self.assertNotIn(marker, src, f"unexpected seq artifact {marker!r} without --oom-seq")
+
+
+class TestForeignOOMGeneration(unittest.TestCase):
+    """--oom-foreign arms the LD_PRELOAD malloc shim (via ctypes) instead of set_nomemory."""
+
+    def test_foreign_mode_arms_shim_via_ctypes(self):
+        src = _generate(oom_fuzz=True, oom_foreign=True)
+        ast.parse(src)
+        # arms the shim's fusil_malloc_arm, resolved from the preloaded lib
+        self.assertIn("fusil_malloc_arm", src)
+        self.assertIn("ctypes.CDLL(None)", src)
+        # does NOT use the _testcapi backend in foreign mode
+        self.assertNotIn("from _testcapi import set_nomemory", src)
+        # but still emits the shared OOM harness (aliased to _set_nomemory)
+        self.assertIn("oom_call", src)
+        self.assertIn("_set_nomemory", src)
+
+    def test_default_mode_uses_testcapi_not_shim(self):
+        src = _generate(oom_fuzz=True, oom_foreign=False)
+        self.assertIn("from _testcapi import set_nomemory", src)
+        self.assertNotIn("fusil_malloc_arm", src)
 
 
 if __name__ == "__main__":

@@ -351,6 +351,23 @@ class Fuzzer(Application):
             type="int",
             default=120,
         )
+        oom_options.add_option(
+            "--oom-foreign",
+            help="Inject allocation failures at the C malloc() layer via an LD_PRELOAD shim "
+            "(instead of _testcapi.set_nomemory), reaching FOREIGN C-library allocations "
+            "(HDF5, zstd, libxml2, ...) that set_nomemory can't. Composes with --oom-fuzz "
+            "(reuses the same sweep); needs a C compiler. Default: False",
+            action="store_true",
+            default=False,
+        )
+        oom_options.add_option(
+            "--oom-foreign-pythonmalloc",
+            help="With --oom-foreign, also set PYTHONMALLOC=malloc so CPython's own "
+            "allocations route through the shim too (superset of set_nomemory + foreign; "
+            "noisier). Default: False (leave pymalloc on, target foreign/large allocs)",
+            action="store_true",
+            default=False,
+        )
 
         options = (
             input_options,
@@ -372,6 +389,11 @@ class Fuzzer(Application):
 
     def setupProject(self) -> None:
         """Initialize the fuzzing project with process monitoring and output analysis."""
+        # --oom-foreign reuses the whole OOM harness (oom_call/oom_run sweep), just with the
+        # LD_PRELOAD malloc shim as the arming backend instead of _testcapi.set_nomemory.
+        if self.options.oom_foreign:
+            self.options.oom_fuzz = True
+
         project = self.project
         if not self.project:
             project = self.project = Project(self)
@@ -391,6 +413,20 @@ class Fuzzer(Application):
             timeout=self.options.timeout,
         )
         process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
+
+        # Foreign-allocator OOM: preload the malloc-failure shim so the generated harness can
+        # inject failures at the C malloc() layer (reaching foreign C libraries). Fail fast if
+        # requested but unbuildable -- the user asked for it and needs a working compiler.
+        if self.options.oom_foreign:
+            from fusil.python.foreign_oom import get_shim_path
+
+            shim = get_shim_path()
+            process.env.set("LD_PRELOAD", shim)
+            self.error("Foreign-OOM: LD_PRELOAD=%s" % shim)
+            if self.options.oom_foreign_pythonmalloc:
+                process.env.set("PYTHONMALLOC", "malloc")
+                self.error("Foreign-OOM: PYTHONMALLOC=malloc (CPython allocs route through shim)")
+
         options = {"exitcode_score": self.options.exitcode_score}
         if not self.options.record_timeouts:
             options["timeout_score"] = 0
