@@ -56,8 +56,19 @@ GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 # next-pointer (a real dict addr minus one byte) -> new_dict later pops the poisoned chain. Generic
 # (any freelist-corrupting producer trips it), so treat it the same way -> oomSEGV / rr-triage.
 # Expr only, NOT the `new_dict` func (dict allocation, not a pure detector -- may carry other asserts).
+#
+# `PyTuple_Check(op)` (tuple_alloc, Objects/tupleobject.c:48, via _PyTuple_RESET_HASH_CACHE) is the
+# TUPLE-freelist analog: the block popped from the tuple freelist isn't a tuple. The already-documented
+# OOM-0036 "tuple_alloc freelist SEGV" face, in its debug-abort form -- same list.append double-free,
+# victim=tuple landing on the tuple freelist. Generic tuple-freelist-corruption detector. Expr only
+# (the exact expr `PyTuple_Check(op)` is unique to the tuple-alloc hash-cache-reset -- other RESET
+# sites use `result`/`newobj`); NOT the `tuple_alloc` func (it also asserts `size != 0`).
 GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL",)
-GENERIC_ASSERT_EXPRS = ("!_Py_IsStaticImmortal(op)", "mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)")
+GENERIC_ASSERT_EXPRS = (
+    "!_Py_IsStaticImmortal(op)",
+    "mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)",
+    "PyTuple_Check(op)",
+)
 
 
 def _is_generic_assert(func, expr):
