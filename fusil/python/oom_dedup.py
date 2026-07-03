@@ -38,6 +38,24 @@ IMPORTERR = re.compile(r"(ModuleNotFoundError|ImportError):")
 # Generic fatal wrappers that carry no usable site in stdout -> resolve via gdb instead.
 GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 
+# Generic assert DETECTORS -- the assert() analog of GENERIC_FATAL. `Py_DECREF_MORTAL`'s
+# `!_Py_IsStaticImmortal(op)` fires when a mortal decref hits an object whose refcount word has
+# been corrupted to read back as static-immortal -- i.e. an over-decref / use-after-free where
+# the freed block's 0xDD PYMEM_DEADBYTE fill happens to set the static-immortal flag bits. It
+# CATCHES the corruption exactly like `_Py_NegativeRefcount` catches the negative-refcount face
+# of the SAME family (frame-teardown / eval-loop over-decref); the assert site (pycore_object.h
+# Py_DECREF_MORTAL) is never the defect. So carry NO site from it: drop it as a candidate and
+# resolve PAST it to the real caller (producer), just like a generic fatal. Matched by the
+# asserting FUNC or the expr (either alone is enough -- func parsing can vary by build). Kept in
+# lockstep with the catalog's gen_known_sites.GENERIC_DETECTOR_FUNCS / GENERIC_ASSERTS.
+GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL",)
+GENERIC_ASSERT_EXPRS = ("!_Py_IsStaticImmortal(op)",)
+
+
+def _is_generic_assert(func, expr):
+    """True if an assertion is a generic over-decref/UAF detector (carries no real site)."""
+    return func in GENERIC_ASSERT_FUNCS or expr in GENERIC_ASSERT_EXPRS
+
 
 def _nf(f):
     return f.lstrip("./")
@@ -108,7 +126,14 @@ def classify(text):
     ``kind`` in {abort, fatal, segv, import, clean} plus the *first* resolved signal."""
     a = all_asserts(text)
     if a:
-        f, ln, func, expr = a[0]
+        # Drop generic-detector asserts (Py_DECREF_MORTAL/!_Py_IsStaticImmortal): like a generic
+        # fatal they carry no real site -> treat as segv so callers resolve past them.
+        real = [t for t in a if not _is_generic_assert(t[2], t[3])]
+        if not real:
+            return dict(
+                kind="segv", file=None, line=None, func=None, assert_expr=None, fatal_msg=None
+            )
+        f, ln, func, expr = real[0]
         return dict(kind="abort", file=f, line=ln, func=func, assert_expr=expr, fatal_msg=None)
     fa = FATAL.search(text)
     if fa and not SEGV.search(text):
@@ -476,6 +501,13 @@ class Deduper:
     def decide(self, stdout_text, source_path=None):
         """Return (keep: bool, label: str) for one crash, matching ALL of its signals."""
         asserts = all_asserts(stdout_text)
+        # Split off generic-detector asserts (Py_DECREF_MORTAL/!_Py_IsStaticImmortal): like a
+        # generic fatal they carry no real site, so don't key them -- resolve past them instead.
+        # ``generic_assert`` = the crash's ONLY assertion(s) were such detectors.
+        real_asserts = [
+            (f, ln, fn, expr) for (f, ln, fn, expr) in asserts if not _is_generic_assert(fn, expr)
+        ]
+        generic_assert = bool(asserts) and not real_asserts
         fa = FATAL.search(stdout_text)
         fmsg = fa.group(1).strip() if fa else None
         has_segv = bool(SEGV.search(stdout_text))
@@ -485,22 +517,30 @@ class Deduper:
         if not asserts and not has_segv and not fmsg:
             return True, ("oomimport" if IMPORTERR.search(stdout_text) else "oomclean")
 
-        # Build candidate signals from everything the crash offers.
+        # Build candidate signals from everything the crash offers (generic-detector asserts
+        # dropped -- they never key a real site).
         candidates = [
             dict(file=f, line=ln, func=fn, assert_expr=expr, fatal_msg=None)
-            for (f, ln, fn, expr) in asserts
+            for (f, ln, fn, expr) in real_asserts
         ]
         if fmsg and not generic_fatal and not fmsg.lower().startswith(("segmentation", "aborted")):
             candidates.append(
                 dict(file=None, line=None, func=None, assert_expr=None, fatal_msg=fmsg)
             )
         # Resolve a crash site when the stdout assertion text is unreliable (pure segv /
-        # generic-assert fatal) or nothing matched yet. PREFER the native backtrace the
+        # generic-assert fatal) or there is no assertion at all. PREFER the native backtrace the
         # crash already printed (ASan/debug build, captured in stdout): it is the actual
         # fault, so it is deterministic -- unlike a gdb re-run, which can fail to reproduce
         # under a different hash seed or thread timing and leave the crash mislabelled
         # oomSEGV. Fall back to a gdb re-run of source.py only when stdout has no parseable
         # native frames and --oom-dedup-resolve-segv is set.
+        #
+        # Guard on ``not asserts`` (NOT ``not real_asserts``): a pure generic-detector assert
+        # (Py_DECREF_MORTAL/!_Py_IsStaticImmortal) must NOT trigger resolution. Its producer
+        # already returned, so every backtrace method (native/gdb/faulthandler) yields only frame
+        # teardown + bystander frames -- a gdb re-run would be slow AND resolve to a bystander
+        # (Py_DECREF_MORTAL itself, or the eval frame -> spurious oomNEW / mis-fold). Leave it to
+        # the needs-resolution branch below; the real producer is pinned offline via rr.
         chain = []
         if has_segv or generic_fatal or not asserts:
             chain = extract_native_sites(stdout_text)
@@ -521,6 +561,11 @@ class Deduper:
         # Faulthandler-only fallback: a SEGV/generic-fatal with no ASan file:line frames and
         # no gdb resolution still carries func names in the faulthandler C stack -- match the
         # innermost catalog-keyed func by name (e.g. PyList_New -> OOM-0004) before giving up.
+        # NOT done for a generic-detector assert (Py_DECREF_MORTAL/!_Py_IsStaticImmortal): its
+        # producer is an over-decref that already returned, so the visible stack is only frame
+        # teardown + innocent-bystander call frames -- matching one by name mis-folds the UAF
+        # into an unrelated bug (e.g. a generic _PyObject_MakeTpCall frame -> OOM-0026). Those
+        # need rr to pin the producer, so leave them needs-resolution.
         if not matched and not chain and (has_segv or generic_fatal):
             matched |= fh_match(stdout_text, self.snap)[0]
 
@@ -533,8 +578,12 @@ class Deduper:
             return True, oid
 
         # Nothing matched the catalog.
-        if has_segv and not chain and not asserts:
-            self.seen["segv:unresolved"] += 1
+        if (has_segv or generic_assert) and not chain and not real_asserts:
+            # A pure segv, or a generic-detector over-decref assert (Py_DECREF_MORTAL/
+            # !_Py_IsStaticImmortal) we couldn't resolve to a real caller: it's the over-decref/
+            # UAF family (needs rr to fold), NOT a discriminating new site. Keep it as
+            # needs-resolution, never oomNEW -- mirrors ingest's needs_gdb bucket.
+            self.seen["segv:unresolved" if has_segv else "assert:unresolved"] += 1
             return True, "oomSEGV"  # couldn't resolve a site -> always keep
         prim = candidates[0] if candidates else {}
         key = (
