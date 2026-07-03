@@ -48,8 +48,16 @@ GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 # resolve PAST it to the real caller (producer), just like a generic fatal. Matched by the
 # asserting FUNC or the expr (either alone is enough -- func parsing can vary by build). Kept in
 # lockstep with the catalog's gen_known_sites.GENERIC_DETECTOR_FUNCS / GENERIC_ASSERTS.
+#
+# `mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)` (new_dict, Objects/dictobject.c:961) is the
+# dict-freelist corruption detector -- a block popped from the dicts freelist isn't a dict.
+# rr-confirmed (fleet7) to be an OOM-0036 face: the list.append double-free's victim is a DICT
+# that lands on the dicts freelist, so the stale-stackref second decref decrements its freelist
+# next-pointer (a real dict addr minus one byte) -> new_dict later pops the poisoned chain. Generic
+# (any freelist-corrupting producer trips it), so treat it the same way -> oomSEGV / rr-triage.
+# Expr only, NOT the `new_dict` func (dict allocation, not a pure detector -- may carry other asserts).
 GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL",)
-GENERIC_ASSERT_EXPRS = ("!_Py_IsStaticImmortal(op)",)
+GENERIC_ASSERT_EXPRS = ("!_Py_IsStaticImmortal(op)", "mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)")
 
 
 def _is_generic_assert(func, expr):
