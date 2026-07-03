@@ -43,6 +43,23 @@ FATAL_0022 = "Fatal Python error: _Py_CheckSlotResult: Slot __delitem__ of type 
 GENERIC_FATAL = "Fatal Python error: _PyObject_AssertFailed: _PyObject_AssertFailed"
 SEGV = "Fatal Python error: Segmentation fault\nCurrent thread's C stack trace ..."
 ABORT_NEW = "python: Objects/brandnew.c:5: void totally_new(void): Assertion `nope' failed."
+# The generic over-decref/UAF DETECTOR assert: Py_DECREF_MORTAL's !_Py_IsStaticImmortal(op)
+# fires on a freed object whose refcount word reads back as static-immortal. Carries no real
+# site (like _Py_NegativeRefcount) -> must NOT become a discriminating oomNEW key. The
+# faulthandler C stack's innermost real frames are themselves generic teardown detectors.
+ABORT_IMMORTAL = "\n".join(
+    [
+        "python: ./Include/internal/pycore_object.h:414: void Py_DECREF_MORTAL"
+        "(const char *, int, PyObject *): Assertion `!_Py_IsStaticImmortal(op)' failed.",
+        "Fatal Python error: Aborted",
+        "Current thread's C stack trace (most recent call first):",
+        '  Binary file "/build/python", at _Py_DumpStack+0x32 [0x1]',
+        '  Binary file "/lib/libc.so.6", at abort+0x27 [0x2]',
+        '  Binary file "/build/python", at _PyFrame_ClearLocals+0x142 [0x3]',
+        '  Binary file "/build/python", at _PyFrame_ClearExceptCode+0x50e [0x4]',
+        '  Binary file "/build/python", at _PyEval_EvalFrameDefault+0x39124 [0x5]',
+    ]
+)
 
 
 class TestClassify(unittest.TestCase):
@@ -62,6 +79,17 @@ class TestClassify(unittest.TestCase):
     def test_generic_assert_fatal_routes_to_segv(self):
         # carries no real site -> must not be trusted as a known fatal
         self.assertEqual(oom_dedup.classify(GENERIC_FATAL)["kind"], "segv")
+
+    def test_generic_detector_assert_routes_to_segv(self):
+        # Py_DECREF_MORTAL/!_Py_IsStaticImmortal is a generic UAF detector -> no real site,
+        # classify past it like a generic fatal (kind=segv), never a trusted abort site.
+        c = oom_dedup.classify(ABORT_IMMORTAL)
+        self.assertEqual(c["kind"], "segv")
+        self.assertIsNone(c["assert_expr"])
+        # but a REAL assert alongside the detector still wins (its site is the discriminator).
+        real = ABORT_IMMORTAL + "\n" + ABORT_0003
+        self.assertEqual(oom_dedup.classify(real)["kind"], "abort")
+        self.assertEqual(oom_dedup.classify(real)["func"], "code_dealloc")
 
     def test_segv_and_import_and_clean(self):
         self.assertEqual(oom_dedup.classify(SEGV)["kind"], "segv")
@@ -161,6 +189,53 @@ class TestDeduper(unittest.TestCase):
     def test_prune_disabled_keeps_all(self):
         d = self._deduper(keep=1, prune=False)
         self.assertTrue(all(d.decide(ABORT_0003)[0] for _ in range(5)))
+
+
+class TestGenericDetectorAssert(unittest.TestCase):
+    """Py_DECREF_MORTAL/!_Py_IsStaticImmortal is the assert() face of the over-decref/UAF
+    family (like _Py_NegativeRefcount): a generic detector, never a real site. It must fold
+    to needs-resolution (oomSEGV), NOT flood ./fleet finds as a discriminating oomNEW."""
+
+    def _deduper(self, resolver=None, keep=5, prune=False):
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT)
+        self.addCleanup(os.unlink, path)
+        return oom_dedup.Deduper(
+            path, keep=keep, prune=prune, resolve_segv=resolver is not None, segv_resolver=resolver
+        )
+
+    def test_unresolved_immortal_assert_is_segv_not_new(self):
+        # No ASan frames, no resolver, and the faulthandler C stack's real frames are
+        # themselves teardown detectors -> can't resolve a producer -> needs-resolution.
+        keep, label = self._deduper().decide(ABORT_IMMORTAL, source_path=None)
+        self.assertTrue(keep)
+        self.assertEqual(label, "oomSEGV")
+
+    def test_immortal_assert_never_pruned(self):
+        # never a discriminating new/known site -> always kept even with prune on.
+        d = self._deduper(keep=1, prune=True)
+        for _ in range(3):
+            self.assertEqual(d.decide(ABORT_IMMORTAL)[0], True)
+
+    def test_immortal_assert_does_not_trigger_gdb_resolution(self):
+        # A pure detector assert must NOT run the (slow, per-crash) gdb re-run: its producer
+        # already returned, so resolution only yields frame-teardown / bystander frames. Even
+        # with resolve_segv on and a resolver that WOULD match a bug, the resolver is never
+        # called and it stays oomSEGV -- the producer is pinned offline via rr, not in-loop.
+        called = []
+        d = self._deduper(
+            resolver=lambda sp: called.append(sp) or ["dictiter_dealloc@Objects/dictobject.c:5532"]
+        )
+        self.assertEqual(d.decide(ABORT_IMMORTAL, source_path="s"), (True, "oomSEGV"))
+        self.assertEqual(called, [])
+
+    def test_immortal_assert_never_keys_pycore_object_site(self):
+        # regression: the raw assert site must never appear as an oomNEW key.
+        d = self._deduper()
+        d.decide(ABORT_IMMORTAL, source_path=None)
+        self.assertFalse(any("_Py_IsStaticImmortal" in k for k in d.seen))
+        self.assertFalse(any("pycore_object.h" in k for k in d.seen))
 
 
 class TestHardening(unittest.TestCase):
