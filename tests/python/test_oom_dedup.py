@@ -60,6 +60,22 @@ ABORT_IMMORTAL = "\n".join(
         '  Binary file "/build/python", at _PyEval_EvalFrameDefault+0x39124 [0x5]',
     ]
 )
+# The dict-freelist corruption DETECTOR assert: new_dict's `mp == NULL || Py_IS_TYPE(mp,
+# &PyDict_Type)` fires when a block popped from the dicts freelist isn't a dict (rr-confirmed
+# an OOM-0036 face -- a list.append double-free victim dict decrements its freelist next-pointer).
+# Generic -> must NOT become a discriminating oomNEW key.
+ABORT_DICT_FREELIST = "\n".join(
+    [
+        "python: Objects/dictobject.c:961: PyObject *new_dict(PyDictKeysObject *, PyDictValues *, "
+        "Py_ssize_t, int): Assertion `mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)' failed.",
+        "Fatal Python error: Aborted",
+        "Current thread's C stack trace (most recent call first):",
+        '  Binary file "/build/python", at _Py_DumpStack+0x32 [0x1]',
+        '  Binary file "/lib/libc.so.6", at abort+0x27 [0x2]',
+        '  Binary file "/build/python", at _PyEvalFramePushAndInit+0x200 [0x3]',
+        '  Binary file "/build/python", at _PyEval_EvalFrameDefault+0xc4ac [0x4]',
+    ]
+)
 
 
 class TestClassify(unittest.TestCase):
@@ -90,6 +106,13 @@ class TestClassify(unittest.TestCase):
         real = ABORT_IMMORTAL + "\n" + ABORT_0003
         self.assertEqual(oom_dedup.classify(real)["kind"], "abort")
         self.assertEqual(oom_dedup.classify(real)["func"], "code_dealloc")
+
+    def test_dict_freelist_detector_assert_routes_to_segv(self):
+        # new_dict's `mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)` is a generic dict-freelist
+        # corruption detector (an OOM-0036 face) -> no real site, classify past it (kind=segv).
+        c = oom_dedup.classify(ABORT_DICT_FREELIST)
+        self.assertEqual(c["kind"], "segv")
+        self.assertIsNone(c["assert_expr"])
 
     def test_segv_and_import_and_clean(self):
         self.assertEqual(oom_dedup.classify(SEGV)["kind"], "segv")
@@ -236,6 +259,14 @@ class TestGenericDetectorAssert(unittest.TestCase):
         d.decide(ABORT_IMMORTAL, source_path=None)
         self.assertFalse(any("_Py_IsStaticImmortal" in k for k in d.seen))
         self.assertFalse(any("pycore_object.h" in k for k in d.seen))
+
+    def test_dict_freelist_assert_is_segv_not_new(self):
+        # new_dict's dict-freelist corruption assert (an OOM-0036 face) is a generic detector ->
+        # needs-resolution, never a distinct oomNEW keyed on dictobject.c:961 / new_dict.
+        d = self._deduper()
+        keep, label = d.decide(ABORT_DICT_FREELIST, source_path=None)
+        self.assertEqual((keep, label), (True, "oomSEGV"))
+        self.assertFalse(any("PyDict_Type" in k or "new_dict" in k for k in d.seen))
 
 
 class TestHardening(unittest.TestCase):
