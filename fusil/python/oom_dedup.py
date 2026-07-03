@@ -63,7 +63,17 @@ GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 # victim=tuple landing on the tuple freelist. Generic tuple-freelist-corruption detector. Expr only
 # (the exact expr `PyTuple_Check(op)` is unique to the tuple-alloc hash-cache-reset -- other RESET
 # sites use `result`/`newobj`); NOT the `tuple_alloc` func (it also asserts `size != 0`).
-GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL",)
+#
+# `validate_list` (Python/gc.c:380, `(gc->_gc_next & NEXT_MASK_UNREACHABLE) == next_value`) is the
+# GC-list-invariant checker run at collection/shutdown. It fires when a PyGC_Head is corrupted --
+# another OOM-0036 face: the list.append double-free's freed victim (e.g. an over-decref'd co_consts
+# str, freed one ref early) has its slot reused by a GC-tracked object (a shutdown weakref), and the
+# stale-stackref second decref decrements that object's `_gc_next` (flipping the NEXT_MASK_UNREACHABLE
+# bit) -> validate_list aborts at the next collection. Generic (any GC_Head-corrupting producer trips
+# it, and validate_list's every assert is a GC-invariant check, never the defect) -> resolve past it
+# to the producer / oomSEGV. Whole FUNC (all its asserts are detectors); does not collide OOM-0017,
+# which keys gc_decref/gc_get_refs/gc.c:96, not validate_list/gc.c:380.
+GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL", "validate_list")
 GENERIC_ASSERT_EXPRS = (
     "!_Py_IsStaticImmortal(op)",
     "mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)",

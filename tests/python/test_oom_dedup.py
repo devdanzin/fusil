@@ -91,6 +91,22 @@ ABORT_TUPLE_FREELIST = "\n".join(
         '  Binary file "/build/python", at _PyEval_EvalFrameDefault+0x8513 [0x4]',
     ]
 )
+# The GC-list-invariant DETECTOR assert: validate_list's `(gc->_gc_next & NEXT_MASK_UNREACHABLE)
+# == next_value` fires at collection/shutdown when a PyGC_Head is corrupted -- another OOM-0036
+# face (the freed double-free victim's slot is reused by a GC-tracked object whose _gc_next the
+# stale-stackref second decref decrements). Generic -> must NOT become a discriminating oomNEW key.
+ABORT_VALIDATE_LIST = "\n".join(
+    [
+        "python: Python/gc.c:380: void validate_list(PyGC_Head *, enum flagstates): "
+        "Assertion `(gc->_gc_next & NEXT_MASK_UNREACHABLE) == next_value' failed.",
+        "Fatal Python error: Aborted",
+        "Current thread's C stack trace (most recent call first):",
+        '  Binary file "/build/python", at _Py_DumpStack+0x32 [0x1]',
+        '  Binary file "/lib/libc.so.6", at abort+0x27 [0x2]',
+        '  Binary file "/build/python", at gc_collect_main+0x9ab [0x3]',
+        '  Binary file "/build/python", at _PyGC_Collect+0x41 [0x4]',
+    ]
+)
 
 
 class TestClassify(unittest.TestCase):
@@ -133,6 +149,13 @@ class TestClassify(unittest.TestCase):
         # tuple_alloc's `PyTuple_Check(op)` is the tuple-freelist analog (an OOM-0036 face) ->
         # no real site, classify past it (kind=segv).
         c = oom_dedup.classify(ABORT_TUPLE_FREELIST)
+        self.assertEqual(c["kind"], "segv")
+        self.assertIsNone(c["assert_expr"])
+
+    def test_validate_list_detector_assert_routes_to_segv(self):
+        # validate_list@gc.c:380 is a generic GC_Head-corruption detector (an OOM-0036 face) ->
+        # no real site, classify past it (kind=segv).
+        c = oom_dedup.classify(ABORT_VALIDATE_LIST)
         self.assertEqual(c["kind"], "segv")
         self.assertIsNone(c["assert_expr"])
 
@@ -297,6 +320,14 @@ class TestGenericDetectorAssert(unittest.TestCase):
         keep, label = d.decide(ABORT_TUPLE_FREELIST, source_path=None)
         self.assertEqual((keep, label), (True, "oomSEGV"))
         self.assertFalse(any("PyTuple_Check" in k or "tuple_alloc" in k for k in d.seen))
+
+    def test_validate_list_assert_is_segv_not_new(self):
+        # validate_list@gc.c:380's GC_Head-corruption assert (an OOM-0036 face) -> needs-resolution,
+        # never a distinct oomNEW keyed on gc.c:380 / validate_list.
+        d = self._deduper()
+        keep, label = d.decide(ABORT_VALIDATE_LIST, source_path=None)
+        self.assertEqual((keep, label), (True, "oomSEGV"))
+        self.assertFalse(any("validate_list" in k or "gc.c:380" in k for k in d.seen))
 
 
 class TestHardening(unittest.TestCase):
