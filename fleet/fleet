@@ -6,7 +6,7 @@
 #   sudo ./fleet down        stop + disable all instances
 #   ./fleet status          per-instance state + crash/NEW-find counts
 #   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
-#   ./fleet report [N]      observability report: per-instance + campaign (--watch, --json, --no-systemd)
+#   ./fleet report [N]      observability report: per-instance + campaign (--watch, --json, --html PATH, --no-systemd)
 #   ./fleet triage          dedupe oomNEW/oomSEGV candidates across instances (needs INGEST); extra args pass to ingest (e.g. --gdb)
 #   ./fleet tail [N]        follow instance N's log (default: 1)
 #   sudo ./fleet restart    restart all instances (e.g. to pick up a new catalog)
