@@ -640,6 +640,42 @@ class TestFaulthandlerMatch(unittest.TestCase):
         keep, label = d.decide(self._segv("_Py_Dealloc", "some_unkeyed_helper"))
         self.assertEqual(label, "oomSEGV")
 
+    def test_generic_call_dispatch_frames_never_match(self):
+        # Regression (fusil-fleet7): a faulthandler-only over-decref segv whose only catalog-keyed
+        # frame is a generic call/vectorcall/stackref-steal trampoline must NOT fh_match the bug
+        # that keys it (OOM-0026 absorbed 210 unrelated dirs via _PyObject_MakeTpCall). Build a
+        # snapshot keying such frames to a fake bug and assert they are skipped.
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        os.write(
+            fd,
+            (
+                SNAPSHOT + "\n"
+                "OOM-9001\tsegv\tfunc\tObjects/call.c:_PyObject_MakeTpCall\n"
+                "OOM-9001\tsegv\tfunc\tPython/ceval.c:_Py_VectorCall_StackRefSteal\n"
+                "OOM-9001\tsegv\tfunc\tPython/ceval.c:_Py_BuiltinCallFastWithKeywords_StackRef\n"
+            ).encode(),
+        )
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        snap = oom_dedup.load_snapshot_file(path)
+        # every generic dispatch/steal frame is skipped -> no match -> the segv needs resolution.
+        oids, fn = oom_dedup.fh_match(
+            self._segv(
+                "_PyTuple_FromStackRefStealOnSuccess",
+                "_Py_VectorCall_StackRefSteal",
+                "_PyObject_MakeTpCall",
+                "cfunction_call",
+                "_PyEval_EvalFrameDefault",
+            ),
+            snap,
+        )
+        self.assertEqual((oids, fn), (set(), None))
+        # but a real discriminating frame deeper than the generic plumbing still wins.
+        oids2, fn2 = oom_dedup.fh_match(
+            self._segv("_PyObject_MakeTpCall", "dictiter_dealloc"), snap
+        )
+        self.assertEqual((oids2, fn2), ({"OOM-0006"}, "dictiter_dealloc"))
+
 
 class TestMsgFamily(unittest.TestCase):
     """msgfam catch-all: a new/fuzzer clears-exc type dedups to the family (OOM-0023) while

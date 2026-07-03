@@ -338,7 +338,19 @@ _FH_SKIP = re.compile(
     r"|fatal_error\w*|_Py_FatalError\w*|_PyObject_AssertFailed|_Py_NegativeRefcount"
     r"|_Py_Dealloc|_Py_MergeZeroLocalRefcount|Py_X?DECREF|Py_X?INCREF|_Py_X?DECREF\w*"
     r"|_PyMem_Debug\w*|PyMem_\w*Free|PyObject_\w*Free|PyMem_\w*Realloc|PyObject_\w*Realloc"
-    r"|hook_f\w+|tracemalloc_\w+)$"
+    r"|hook_f\w+|tracemalloc_\w+"
+    # Generic call/vectorcall dispatch trampolines + every *StackRef* frame (where an over-decref'd
+    # object's stolen stackref is dereferenced) -- bystanders in the over-decref/UAF family, never a
+    # real crash site. Skip them in this BY-NAME faulthandler walk so a faulthandler-only over-decref
+    # segv doesn't fh_match a bug that incidentally keys one: OOM-0026 absorbed 210 unrelated dirs via
+    # _PyObject_MakeTpCall on fusil-fleet7, and skipping only that exposed _Py_VectorCall_StackRefSteal
+    # -> OOM-0015/21 and _Py_BuiltinCallFastWithKeywords_StackRef -> OOM-0013/28. Bugs KEEP every
+    # func/line/assert key (a real OOM-0013 still matches via its result/error-contract assert, etc.);
+    # those keys just become inert here. Lockstep with the catalog's ingest.FH_SKIP. NOT skipped: the
+    # convention-specific cfunction_vectorcall_*/cfunction_check_kwargs (OOM-0015/0031) nor the result-
+    # check detectors _Py_CheckFunctionResult/_Py_CheckSlotResult (OOM-0021/0022) -- real defining sites.
+    r"|_PyObject_MakeTpCall|cfunction_call|_PyObject_Call|_PyObject_VectorcallTstate"
+    r"|\w*StackRef\w*)$"
 )
 
 
