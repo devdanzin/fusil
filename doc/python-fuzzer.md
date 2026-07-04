@@ -91,6 +91,23 @@ signal/code; `WatchStdout` (`process/stdout.py`) matches the child's stdout/stde
 the child's stdout, the fuzzer's own diagnostics must go through the logger / stderr, not bare
 prints (see `fusil/application_logger.py`).
 
+### Hit suppression (`--suppress-hit-regex` / `--suppress-hit-file`)
+
+A run accumulates many *duplicate* crashing sessions — the same known abort/segfault site over
+and over — that a triager would normally drop by hand. `fusil/python/hit_suppression.py` (a pure
+engine, mirroring `oom_dedup.py`'s split) lets you drop those automatically: each rule is a regex
+`re.search`ed against a crashing session's captured stdout, and a match **prunes** the session
+dir (the reason is logged). Rules come from three composable sources, unioned — repeatable
+`--suppress-hit-regex`, one or more `--suppress-hit-file` files (one regex per line; `#` comments;
+an optional reason after ` ## `), and plugins (`PluginManager.add_suppression_entry`, the
+extensible store called for in #52). `--suppress-hit-ignore-case` makes matching
+case-insensitive.
+
+It wires in through the same `application.session_keep_policy` hook as the OOM dedupe and
+**composes** with it: suppression runs first (a matched hit is pruned even if the OOM deduper
+would keep it); otherwise control defers to the OOM policy if one is installed. This is the
+general/non-OOM analogue of `--oom-dedup-catalog` — it needs no catalog and works for any crash.
+
 ### Deep diving (`--deep-dive`, off by default)
 
 After a method call, the generator can recursively fuzz the call's *return value*
@@ -167,7 +184,7 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 | Argument values / counts | `fusil/python/argument_generator.py`, `arg_numbers.py` |
 | Hostile inputs | `fusil/python/tricky_weird.py`, `samples/` |
 | OOM dedup engine | `fusil/python/oom_dedup.py` |
-| JIT generation | `fusil/python/jit/` |
+| Hit-suppression engine | `fusil/python/hit_suppression.py` |
 | Crash probes | `fusil/process/watch.py`, `process/stdout.py` |
 | Child setup / privilege drop / limits | `fusil/process/prepare.py`, `create.py`, `tools.py` |
 | MAS substrate | `fusil/mas/` |

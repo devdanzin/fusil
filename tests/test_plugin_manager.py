@@ -70,5 +70,19 @@ class TestBlacklistWhitelist(unittest.TestCase):
         self.assertFalse(m.is_whitelisted("method", "anything"))
 
 
+class TestSuppressionEntries(unittest.TestCase):
+    def test_register_and_get_pairs(self):
+        m = PluginManager()
+        m.add_suppression_entry(r"dictobject\.c:205", reason="known FT assert")
+        m.add_suppression_entry("segfault")  # reason defaults to None
+        self.assertEqual(
+            m.get_suppression_entries(),
+            [(r"dictobject\.c:205", "known FT assert"), ("segfault", None)],
+        )
+
+    def test_empty_manager_has_no_entries(self):
+        self.assertEqual(PluginManager().get_suppression_entries(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
