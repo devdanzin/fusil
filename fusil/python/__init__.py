@@ -16,7 +16,7 @@ with warnings.catch_warnings():
     from fusil.process.watch import WatchProcess
     from fusil.project import Project
     from fusil.python.python_source import PythonSource
-    from fusil.python.utils import print_running_time, remove_logging_pycache
+    from fusil.python.utils import print_running_time
     from fusil.python.write_python_code import time_start
 
 IGNORE_TIMEOUT = True
@@ -656,5 +656,4 @@ class PythonProcess(CreateProcess):
 
 def main() -> None:
     """Console-script entry point for ``fusil-python-threaded``."""
-    remove_logging_pycache()
     Fuzzer().main()
