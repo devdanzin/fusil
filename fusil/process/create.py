@@ -78,6 +78,10 @@ class CreateProcess(ProjectAgent):
         self.show_exit = True
         self.wrote_replay = False
         self.stdout_file = self.options.stdout_path
+        # Initialize stdin_file too: closeStreams() reads it, and it is only otherwise set
+        # in createPopenArguments(). Without this, any poll()/terminate()/clearProcess() path
+        # that reaches closeStreams() before a process was spawned raises AttributeError.
+        self.stdin_file = None
 
     def prepareProcess(self):
         prepareProcess(self)
@@ -85,8 +89,14 @@ class CreateProcess(ProjectAgent):
     def getWorkingDirectory(self):
         return self.session().directory.directory
 
-    def createProcess(self):
-        arguments = self.createArguments()
+    @staticmethod
+    def checkArguments(arguments):
+        """Validate process arguments: each must be a ``str``/``bytes`` free of NUL bytes.
+
+        Raises ``ValueError`` on the first offending argument (wrong type or embedded NUL).
+        Extracted from ``createProcess`` so the pure validation can be unit-tested directly;
+        the behaviour is unchanged.
+        """
         for index, argument in enumerate(arguments):
             if isinstance(argument, bytes):
                 has_null = b"\0" in argument
@@ -99,6 +109,10 @@ class CreateProcess(ProjectAgent):
                 )
             if has_null:
                 raise ValueError("Process argument %s contains nul byte: %r" % (index, argument))
+
+    def createProcess(self):
+        arguments = self.createArguments()
+        self.checkArguments(arguments)
         arguments[0] = locateProgram(arguments[0], raise_error=True)
         popen_args = self.createPopenArguments()
         self.info("Create process: %s" % repr(arguments))

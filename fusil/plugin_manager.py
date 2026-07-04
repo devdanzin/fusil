@@ -144,19 +144,26 @@ class PluginManager:
             "shutdown": [],
         }
 
-    def discover_and_load_plugins(self) -> None:
+    def discover_and_load_plugins(self, entry_points_func: Callable | None = None) -> None:
         """
         Discover plugins via entry points and call their register functions.
 
         Plugins should define an entry point in the 'fusil.plugins' group.
         The entry point should point to a callable that takes the PluginManager
         as its single argument.
+
+        Args:
+            entry_points_func: injectable ``importlib.metadata.entry_points`` replacement
+                (tests pass a fake); defaults to the real ``entry_points`` at runtime.
         """
+        if entry_points_func is None:
+            entry_points_func = entry_points
+
         # Handle different Python versions' entry_points API
         if sys.version_info >= (3, 10):
-            eps = entry_points(group="fusil.plugins")
+            eps = entry_points_func(group="fusil.plugins")
         else:
-            eps = entry_points().get("fusil.plugins", [])
+            eps = entry_points_func().get("fusil.plugins", [])
 
         for ep in eps:
             plugin_name = ep.name
