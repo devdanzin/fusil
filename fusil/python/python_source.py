@@ -23,7 +23,12 @@ class PythonSource(ProjectAgent):
     """Manages module discovery, loading, and Python source code generation."""
 
     def __init__(
-        self, project: Project, options: FusilConfig, source_output_path: str | None = None
+        self,
+        project: Project,
+        options: FusilConfig,
+        source_output_path: str | None = None,
+        module_lister_factory=None,
+        write_code_factory=None,
     ):
         ProjectAgent.__init__(self, project, "python_source")
         self.module: ModuleType | None = None
@@ -32,6 +37,16 @@ class PythonSource(ProjectAgent):
         self.filename = ""
         self.options = options
         self.source_output_path = source_output_path
+
+        # Factories for the two heavyweight collaborators, injectable for testing. Both default
+        # to None and resolve to the real class at the use site (staying monkeypatchable):
+        #   - module_lister_factory builds the module discoverer (ListAllModules), which scans
+        #     the whole importable module set in its search_modules()/discover_modules().
+        #   - write_code_factory builds the per-module code generator (WritePythonCode) in
+        #     loadModule(). None -> the module-global classes.
+        self.module_lister_factory = module_lister_factory
+        self.write_code_factory = write_code_factory
+        lister_factory = self.module_lister_factory or ListAllModules
 
         self.plugin_manager = None
         if hasattr(project.application(), "plugin_manager"):
@@ -46,7 +61,7 @@ class PythonSource(ProjectAgent):
                 self.modules.add(module)
         else:
             self.error("Search all Python modules...")
-            self.modules = ListAllModules(
+            self.modules = lister_factory(
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
@@ -57,7 +72,7 @@ class PythonSource(ProjectAgent):
 
         if self.options.packages != "*":
             self.info("Adding packages...")
-            all_modules = ListAllModules(
+            all_modules = lister_factory(
                 self,
                 self.options.only_c,
                 not self.options.no_site_packages,
@@ -130,7 +145,8 @@ class PythonSource(ProjectAgent):
         except AttributeError:
             pass
 
-        self.write = WritePythonCode(
+        write_code_factory = self.write_code_factory or WritePythonCode
+        self.write = write_code_factory(
             self,
             self.filename,
             self.module,
@@ -175,7 +191,9 @@ class PythonSource(ProjectAgent):
         self.error(print_running_time(time_start))
         self.send("session_rename", name)
 
-        assert isinstance(self.write, WritePythonCode)
+        # Narrow the Optional for type-checkers and guard against a missing generator; after a
+        # successful loadModule this is a WritePythonCode (or an injected test double), never None.
+        assert self.write is not None
         self.write.generate_fuzzing_script()
         self.send("python_source", self.filename)
 

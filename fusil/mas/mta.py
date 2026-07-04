@@ -40,9 +40,13 @@ class MTA(ApplicationAgent):
     def unregisterMailingList(self, mailbox, event):
         if event not in self.mailing_list:
             return
-        if mailbox not in self.mailing_list[event]:
+        # The mailing list stores *weakrefs* (see registerMailingList), so compare against a
+        # weakref of the mailbox -- not the mailbox object itself, which never matches, leaving
+        # the entry to be pruned lazily by live() only once the mailbox is GC'd.
+        mailbox_ref = weakref_ref(mailbox)
+        if mailbox_ref not in self.mailing_list[event]:
             return
-        self.mailing_list[event].remove(mailbox)
+        self.mailing_list[event].remove(mailbox_ref)
 
     def deliver(self, message):
         if self.trace is not None:

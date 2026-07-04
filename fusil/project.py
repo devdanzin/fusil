@@ -272,7 +272,7 @@ class Project(ProjectAgent):
             )
         duration = time() - self.project_start
         info.append("total %.1f seconds" % duration)
-        info.append("aggresssivity: %.1f%%" % (self.aggressivity * 100))
+        info.append("aggressivity: %.1f%%" % (self.aggressivity * 100))
         self.error("Project done: %s" % ", ".join(info))
         self.error("Total: %s success" % self.nb_success)
 

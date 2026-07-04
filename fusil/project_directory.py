@@ -6,9 +6,13 @@ from fusil.project_agent import ProjectAgent
 
 
 class ProjectDirectory(ProjectAgent, Directory):
-    def __init__(self, project):
-        # Create $PWD/run-0001 directory name
-        Directory.__init__(self, getcwd())
+    def __init__(self, project, base_dir=None):
+        # Create $PWD/run-0001 directory name. ``base_dir`` defaults to the process working
+        # directory; it is injectable so tests can create the run directory under a temp dir
+        # instead of $PWD. Runtime behaviour is unchanged (callers pass no base_dir).
+        if base_dir is None:
+            base_dir = getcwd()
+        Directory.__init__(self, base_dir)
         name = project.application().NAME
         self.directory = self.uniqueFilename(name, save=False)
 
