@@ -25,9 +25,16 @@ The core runtime is mostly healthy (narrow, well-targeted excepts). Real items:
 - **H2 — `list_all_modules._process_package` uses `except (ImportError, Exception)`**: redundant
   and aborts the whole discovery pass on any non-ImportError. Decide policy → `except Exception`
   and skip the package.
-- **H3 — `utils.remove_logging_pycache`** runs unconditionally at startup, mutates the installed
-  stdlib, and is uncaught if `__pycache__` is missing; then `reload(logging)` runs regardless.
-  Make it a no-op on any failure (guard `iterdir()`), and reconsider whether the reload is needed.
+- **H3 — `utils.remove_logging_pycache`** — ✅ RESOLVED by removal (issue #36). Ran
+  unconditionally at startup and mutated the installed stdlib's `logging/__pycache__`, but only
+  in the *parent* interpreter — whereas the `--- Logging error ---` spam it targeted comes from
+  the `--python` *child* (which defaults to `sys.executable`, so parent==child only when
+  `--python` is unset; this campaign always overrides it → the workaround touched the wrong
+  interpreter, hence "still happening"). The real trigger is stale/mismatched `logging` bytecode
+  in the *target build's* `__pycache__` (a git-checkout/rebuild hazard). Non-destructive fix if
+  it recurs: run the child with `PYTHONPYCACHEPREFIX=<scratch>` so it never reads stale in-tree
+  `.pyc`. The `reload(logging)` was "unverified necessity" (its own docstring). Removed the
+  function + its call in `main()`.
 - **H4 — `Application.exit()` runs `deinitX11()` outside the cleanup try**: a non-ptrace error in
   `agents.clear()` skips X11 deinit (leaves X access granted). Move to `finally`.
 - **M-series:** `Directory.rmtree_error`/`isEmpty` swallow then degrade silently; `runProject`'s
