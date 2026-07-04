@@ -16,11 +16,14 @@ class WatchProcess(ProjectAgent):
         signal_score=DEFAULT_SIGNAL_SCORE,
         default_score=0.0,
         timeout_score=DEFAULT_TIMEOUT_SCORE,
+        cpu_probe=None,
     ):
         self.process = weakref_ref(process)
         project = process.project()
         ProjectAgent.__init__(self, project, "watch:%s" % process.name)
-        self.cpu = CpuProbe(project, "%s:cpu" % self.name)
+        # The CPU-load probe; injectable so the agent can be tested without constructing a real
+        # CpuProbe (which reaches /proc via setPid). None -> the default CpuProbe.
+        self.cpu = cpu_probe if cpu_probe is not None else CpuProbe(project, "%s:cpu" % self.name)
 
         # Score if process exited normally
         self.default_score = default_score

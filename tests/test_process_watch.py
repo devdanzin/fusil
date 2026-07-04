@@ -112,6 +112,16 @@ class TestConstruction(unittest.TestCase):
         # Two agents were registered: the watch and its cpu probe.
         self.assertEqual(len(project.registered), 2)
 
+    def test_injected_cpu_probe_is_used_and_no_probe_constructed(self):
+        # An injected cpu_probe is used verbatim; the default CpuProbe (which reaches /proc via
+        # setPid) is not constructed, so only the watch itself registers on the project.
+        project = FakeProject()
+        proc = _FakeProcess(project)
+        stub = _RecordingCpu()
+        w = WatchProcess(proc, cpu_probe=stub)
+        self.assertIs(w.cpu, stub)
+        self.assertEqual(project.registered, [w])
+
 
 @unittest.skipUnless(HAVE_WATCH, "fusil runtime stack (python-ptrace) not importable")
 class TestInit(unittest.TestCase):

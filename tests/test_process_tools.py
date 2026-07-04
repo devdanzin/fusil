@@ -76,17 +76,17 @@ class TestSetrlimitLogic(unittest.TestCase):
         self.assertEqual(ret, 50)
         self.assertEqual(rec["limits"], (50, 50))
 
-    def test_valueerror_from_getrlimit_hits_buggy_except_branch(self):
-        # Characterization test (documents a latent bug, see testability notes):
-        # when getrlimit raises ValueError, `soft` is never bound, so the final
-        # setrlimit((soft, hard)) raises UnboundLocalError rather than degrading
-        # gracefully. Pinned here so the behaviour can't change silently.
+    def test_valueerror_from_getrlimit_degrades_gracefully(self):
+        # If getrlimit raises ValueError (e.g. an unsupported resource), _setrlimit no longer
+        # crashes with UnboundLocalError: it applies the requested value with an unchanged
+        # (-1) hard limit and returns it.
         with (
             mock.patch.object(tools, "getrlimit", side_effect=ValueError("bad key")),
-            mock.patch.object(tools, "setrlimit"),
+            mock.patch.object(tools, "setrlimit") as m_set,
         ):
-            with self.assertRaises((UnboundLocalError, NameError)):
-                tools._setrlimit(tools.RLIMIT_CPU, 10, False)
+            ret = tools._setrlimit(tools.RLIMIT_CPU, 10, False)
+        self.assertEqual(ret, 10)
+        m_set.assert_called_once_with(tools.RLIMIT_CPU, (10, -1))
 
 
 class TestResourceLimitWrappers(unittest.TestCase):
@@ -260,12 +260,12 @@ class TestSplitCommandErrorPaths(unittest.TestCase):
         # Characterization: back-to-back separators emit an empty token.
         self.assertEqual(tools.splitCommand("a  b"), ["a", "", "b"])
 
-    def test_tab_is_treated_as_a_quote_char(self):
-        # Characterization (documents a quirk, see testability notes): a tab is in the
-        # separator set but only ' ' is handled as whitespace, so a lone tab is parsed
-        # as an *opening quote* and left unclosed -> SyntaxError.
-        with self.assertRaises(SyntaxError):
-            tools.splitCommand("a\tb")
+    def test_tab_is_treated_as_whitespace(self):
+        # A tab separates arguments just like a space (it no longer opens a quote).
+        self.assertEqual(tools.splitCommand("a\tb"), ["a", "b"])
+        self.assertEqual(tools.splitCommand("ls\t-l"), ["ls", "-l"])
+        # ...but a tab inside quotes is preserved as part of the token.
+        self.assertEqual(tools.splitCommand("'a\tb'"), ["a\tb"])
 
 
 @unittest.skipUnless(_TRUE and _SH, "needs real 'true'/'sh' binaries")

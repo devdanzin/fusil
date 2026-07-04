@@ -81,11 +81,27 @@ class TestConstruction(_CalmTest):
     def test_init_stores_parameters_and_defaults(self):
         sc, _clock, fake_load = self.make_calm([0.1], max_load=0.7, sleep_second=2.5)
         self.assertEqual(sc.max_load, 0.7)
-        self.assertEqual(sc.sleep, 2.5)
+        self.assertEqual(sc.sleep_second, 2.5)
         self.assertIs(sc.load, fake_load)
         self.assertEqual(sc.first_message, 3.0)
         self.assertEqual(sc.repeat_message, 5.0)
         self.assertEqual(sc.max_wait, 60 * 5)
+
+
+class TestConstructorInjection(unittest.TestCase):
+    """The load source / clock / sleeper can be injected directly (no module patching),
+    exercising the non-default branches of __init__ and wait()."""
+
+    def test_injected_load_clock_and_sleeper_drive_wait(self):
+        clock = FakeClock(0.0)
+        load = FakeLoad([0.9, 0.1])  # busy once, then calm
+        sc = SystemCalm(0.5, 2.0, load=load, clock=clock.time, sleeper=clock.advance)
+        self.assertIs(sc.load, load)
+        agent = FakeAgent()
+        sc.wait(agent)
+        # One sleep of 2.0s happened between the busy and calm reads.
+        self.assertEqual(clock.now, 2.0)
+        self.assertIn("System is now calm", agent.infos[-1])
 
 
 class TestWaitImmediateCalm(_CalmTest):

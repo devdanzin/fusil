@@ -22,6 +22,11 @@ except ImportError:
 
 
 def _setrlimit(key, value, change_hard):
+    # Defaults so a ValueError from getrlimit() (e.g. an unsupported resource) degrades to
+    # "apply the requested value, leave the hard limit alone" instead of raising
+    # UnboundLocalError from the setrlimit() below (soft/hard would otherwise be unbound).
+    soft = value
+    hard = -1
     try:
         soft, hard = getrlimit(key)
         # Change soft limit
@@ -220,7 +225,10 @@ def splitCommand(command):
         if in_quote == sep:
             write = True
             in_quote = None
-        elif sep == " ":
+        elif sep in " \t":
+            # Whitespace (space or tab) separates arguments; tab is in the finditer charset
+            # too, so treat it as whitespace here rather than falling through to the
+            # open-a-quote branch (which left a lone tab as an unterminated quote).
             if not in_quote:
                 write = True
         elif not in_quote:
