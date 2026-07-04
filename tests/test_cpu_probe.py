@@ -101,6 +101,21 @@ class TestSetPid(unittest.TestCase):
         self.assertIs(probe.load, sentinel)
         self.assertEqual(seen["pid"], 31337)
 
+    def test_injected_load_factory_is_used(self):
+        # An injected load_factory is preferred over the default ProcessCpuLoad, so setPid
+        # can be exercised without touching /proc (no module patching needed).
+        seen = {}
+        sentinel = object()
+
+        def factory(pid):
+            seen["pid"] = pid
+            return sentinel
+
+        probe = CpuProbe(FakeProject(), "cpu", load_factory=factory)
+        probe.setPid(4242)
+        self.assertIs(probe.load, sentinel)
+        self.assertEqual(seen["pid"], 4242)
+
 
 @unittest.skipUnless(HAS_PTRACE, _SKIP)
 class TestLive(unittest.TestCase):

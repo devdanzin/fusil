@@ -139,6 +139,9 @@ class Environment(ProjectAgent):
                     "Variable %s is already set but the type is not EnvVarValue but %s"
                     % (name, variable.__class__.__name__)
                 )
+            # A "set" must set: update the existing variable's value rather than silently
+            # returning the stale one.
+            variable.value = value
         except KeyError:
             variable = EnvVarValue(name, value, max_count)
             self.add(variable)

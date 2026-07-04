@@ -287,12 +287,12 @@ class TestEnvironmentSetAndGetItem(unittest.TestCase):
         self.assertIs(env["FOO"], var)
         self.assertEqual(var.value, "bar")
 
-    def test_set_existing_returns_same_object_without_updating_value(self):
+    def test_set_existing_updates_value_in_place(self):
         env, _ = _make_env()
         first = env.set("FOO", "bar")
         second = env.set("FOO", "baz")
-        self.assertIs(first, second)
-        self.assertEqual(first.value, "bar")  # the second value is ignored
+        self.assertIs(first, second)  # same EnvVarValue object, reused
+        self.assertEqual(first.value, "baz")  # ...but its value is updated ("set" sets)
 
     def test_set_over_incompatible_type_raises(self):
         env, _ = _make_env()

@@ -7,11 +7,17 @@ from fusil.project_agent import ProjectAgent
 
 
 class CpuProbe(ProjectAgent):
-    def __init__(self, project, name, max_load=0.75, max_duration=10.0, max_score=1.0):
+    def __init__(
+        self, project, name, max_load=0.75, max_duration=10.0, max_score=1.0, load_factory=None
+    ):
         ProjectAgent.__init__(self, project, name)
         self.max_load = max_load
         self.max_duration = max_duration
         self.max_score = max_score
+        # Factory that builds the per-PID load reader in setPid(). Defaults to ProcessCpuLoad
+        # (which reads /proc/<pid>/stat in its constructor); injectable so setPid can be tested
+        # without a live process. None -> the module-global ProcessCpuLoad (stays monkeypatchable).
+        self.load_factory = load_factory
 
     def init(self):
         self.score = None
@@ -19,7 +25,8 @@ class CpuProbe(ProjectAgent):
         self.load = None
 
     def setPid(self, pid):
-        self.load = ProcessCpuLoad(pid)
+        factory = self.load_factory or ProcessCpuLoad
+        self.load = factory(pid)
 
     def live(self):
         # Read CPU load
