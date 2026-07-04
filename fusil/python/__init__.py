@@ -136,6 +136,31 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        running_options.add_option(
+            "--suppress-hit-regex",
+            help="Drop a crashing-session hit whose stdout matches this regex (re.search), "
+            "the way troublesome/known crashes are deduplicated by hand. Repeatable; "
+            "composes with --suppress-hit-file and plugin rules (default: none)",
+            action="append",
+            dest="suppress_hit_regex",
+            default=None,
+        )
+        running_options.add_option(
+            "--suppress-hit-file",
+            help="Read hit-suppression regexes from FILE (one per line; '#' comments; an "
+            "optional reason after ' ## '). Repeatable; composes with --suppress-hit-regex "
+            "(default: none)",
+            action="append",
+            dest="suppress_hit_file",
+            default=None,
+        )
+        running_options.add_option(
+            "--suppress-hit-ignore-case",
+            help="Match --suppress-hit-regex / --suppress-hit-file patterns "
+            "case-insensitively (default: False)",
+            action="store_true",
+            default=False,
+        )
         fuzzing_options = OptionGroup(parser, "Fuzzing")
         fuzzing_options.add_option(
             "--functions-number",
@@ -515,6 +540,70 @@ class Fuzzer(Application):
                 )
             )
 
+        # Regex hit suppression (issue #53): drop known/uninteresting crashing-session hits
+        # whose stdout matches a user- or plugin-supplied regex -- the general/non-OOM analogue
+        # of the OOM-catalog dedupe above. Composes with it: suppression runs first (a matched
+        # hit is pruned even if the OOM deduper would keep it); otherwise the previously-installed
+        # policy (if any) still decides.
+        self._hit_suppressor = None
+        suppress_regexes = self.options.suppress_hit_regex or []
+        suppress_files = self.options.suppress_hit_file or []
+        plugin_suppressions = self.plugin_manager.get_suppression_entries()
+        if suppress_regexes or suppress_files or plugin_suppressions:
+            from fusil.python.hit_suppression import build_suppressor
+
+            self._hit_suppressor = build_suppressor(
+                regexes=suppress_regexes,
+                files=suppress_files,
+                plugin_entries=plugin_suppressions,
+                ignore_case=self.options.suppress_hit_ignore_case,
+            )
+            self._suppression_prev_policy = getattr(self, "session_keep_policy", None)
+            self.session_keep_policy = self._suppression_keep_policy
+            project.error(
+                "Hit suppression enabled: %d rule(s) (%d CLI, %d file(s), %d plugin)"
+                % (
+                    len(self._hit_suppressor.rules),
+                    len(suppress_regexes),
+                    len(suppress_files),
+                    len(plugin_suppressions),
+                )
+            )
+
+    def _suppression_keep_policy(self, session):
+        """Return (keep, label): drop a crashed session whose stdout matches a suppression
+        regex (issue #53), else defer to the previously-installed policy (e.g. OOM dedupe).
+
+        Consulted synchronously by SessionDirectory.checkKeepDirectory, where the stdout file
+        is already complete. Returns (True, None) on any error so a crash is never lost to a
+        suppression failure.
+        """
+        import os
+
+        session_dir = session.directory.directory
+        try:
+            from fusil.python.oom_dedup import read_crash_stdout
+
+            # Bounded read: a crashing session's stdout can be tens of MB; reading it whole
+            # would make the suppression regexes backtrack catastrophically in this
+            # synchronous keep-policy (runs in deinit).
+            text = read_crash_stdout(os.path.join(session_dir, "stdout"))
+            keep, rule = self._hit_suppressor.decide(text)
+            if not keep:
+                reason = " (%s)" % rule.reason if rule.reason else ""
+                self.error(
+                    "Hit suppressed by regex %r%s: prune %s" % (rule.pattern, reason, session_dir)
+                )
+                return False, None
+        except Exception as err:
+            self.error("Hit suppression failed (%s); keeping crash dir" % err)
+            return True, None
+        # Not suppressed: defer to the previous keep-policy (e.g. OOM dedupe) if one exists.
+        prev = getattr(self, "_suppression_prev_policy", None)
+        if prev is not None:
+            return prev(session)
+        return True, None
+
     def _oom_keep_policy(self, session):
         """Return (keep, label) for a crashed session from its captured stdout.
 
@@ -546,6 +635,8 @@ class Fuzzer(Application):
         super().exit(keep_log=keep_log)
         if getattr(self, "_deduper", None):
             self.error(self._deduper.report())
+        if getattr(self, "_hit_suppressor", None):
+            self.error(self._hit_suppressor.report())
         self.error(print_running_time(time_start))
 
 

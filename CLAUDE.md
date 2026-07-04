@@ -70,6 +70,10 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --only-c                 only C-extension modules
 #   --sessions N             stop after N sessions
 #   --only-generate          write source.py without executing it
+#   --suppress-hit-regex R   drop a crashing session whose stdout matches regex R (repeatable);
+#                            --suppress-hit-file F reads rules from a file (one regex/line, '#'
+#                            comments, optional ' ## reason'); the general/non-OOM dedup path
+#                            (see Hit-suppression section). Composes with --oom-dedup-catalog.
 #   --oom-fuzz               OOM (allocation-failure) injection mode (see OOM section)
 #   --oom-seq                stateful call SEQUENCES (Phase 4): several calls per scan under
 #                            one failure window (found OOM-0036); --oom-seq-len/--oom-window;
@@ -201,6 +205,22 @@ via an injectable `segv_resolver`).
 `HANDOFF.md` + `CLAUDE.md` hold the campaign state, the commit/disclosure conventions, and
 how the maintainer and Claude work together. Read them before any outward-facing
 (issue / gist / PR) step.
+
+### Regex hit suppression — `--suppress-hit-regex` / `--suppress-hit-file`
+
+The general/non-OOM analogue of the OOM catalog dedupe: drop known/uninteresting *crashing
+sessions* by regex-matching their captured stdout (what a triager does by hand). Engine is
+`fusil/python/hit_suppression.py` — pure-Python, mirroring `oom_dedup.py`'s split (unit-tested
+in `tests/python/test_hit_suppression*.py`). Rules union three sources: repeatable
+`--suppress-hit-regex`, one or more `--suppress-hit-file` files (one regex/line; `#` comments;
+optional reason after ` ## `), and plugins via `PluginManager.add_suppression_entry` (the
+extensible store #52 asked for). `--suppress-hit-ignore-case` toggles case-insensitivity. On a
+crash, `Fuzzer._suppression_keep_policy` reads the session stdout (bounded via
+`read_crash_stdout`), and a match **prunes** the dir (reason logged) — returning `(False, None)`
+through the same `application.session_keep_policy` hook `SessionDirectory.checkKeepDirectory`
+consults. It **composes** with `--oom-dedup-catalog`: suppression runs first (a matched hit is
+pruned even if the OOM deduper would keep it); otherwise it defers to the OOM policy. Absent any
+`--suppress-hit-*` option, nothing is installed and behaviour is unchanged. Implements #53.
 
 ### JIT fuzzing — moved to lafleur (removed from fusil)
 

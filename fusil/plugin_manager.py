@@ -98,6 +98,19 @@ class NameFilterEntry:
 
 
 @dataclass
+class SuppressionEntry:
+    """A hit-suppression rule contributed by a plugin (issues #53/#52).
+
+    ``pattern`` is a regex matched (``re.search``) against a crashing session's stdout to
+    drop known/uninteresting hits, the same way ``--suppress-hit-regex`` does; ``reason``
+    is an optional human-readable note recorded in the logs when the rule fires.
+    """
+
+    pattern: str
+    reason: str | None = None
+
+
+@dataclass
 class PluginMetadata:
     """Metadata about a loaded plugin."""
 
@@ -125,6 +138,7 @@ class PluginManager:
         self.class_handlers: list[ClassHandler] = []
         self.blacklist_entries: list[NameFilterEntry] = []
         self.whitelist_entries: list[NameFilterEntry] = []
+        self.suppression_entries: list[SuppressionEntry] = []
         self.hooks: dict[str, list[Callable]] = {
             "startup": [],
             "shutdown": [],
@@ -294,6 +308,19 @@ class PluginManager:
         """
         self.whitelist_entries.append(NameFilterEntry(kind, pattern, pattern_type))
 
+    def add_suppression_entry(self, pattern: str, reason: str | None = None) -> None:
+        """Register a regex that suppresses a crashing-session hit when it matches stdout.
+
+        Lets a plugin drop known/uninteresting hits the same way ``--suppress-hit-regex``
+        does (issue #53); ``reason`` is recorded in the logs when the rule fires. This is
+        the plugin-extensible suppression store called for in #52.
+
+        Args:
+            pattern: a regex matched (``re.search``) against a crash's captured stdout.
+            reason: optional human-readable note logged when the rule suppresses a hit.
+        """
+        self.suppression_entries.append(SuppressionEntry(pattern=pattern, reason=reason))
+
     def add_hook(self, hook_name: str, hook_func: Callable) -> None:
         """
         Register a lifecycle hook.
@@ -412,6 +439,10 @@ class PluginManager:
     def is_whitelisted(self, kind: str, name: str) -> bool:
         """True if a plugin whitelisted `name` for the given `kind`."""
         return any(e.kind == kind and e.matches(name) for e in self.whitelist_entries)
+
+    def get_suppression_entries(self) -> list[tuple[str, str | None]]:
+        """Return plugin-registered hit-suppression rules as ``(pattern, reason)`` pairs."""
+        return [(e.pattern, e.reason) for e in self.suppression_entries]
 
     def get_active_mode(self, config: Any) -> FuzzingMode | None:
         """
