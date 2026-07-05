@@ -382,6 +382,29 @@ class TestHardening(unittest.TestCase):
         )
         self.assertEqual(d.decide(SEGV, source_path="s")[1], "oomNEW")
 
+    def test_tuple_freelist_segv_site_is_segv_not_new(self):
+        # The gdb-resolved chain bottoms out at the tuple-freelist detector (tuple_alloc's
+        # freelist-POP hash-cache reset) -- an OOM-0036 SEGV face with no in-stack producer
+        # (fusil-fleet10, gdb-pinned). Must be oomSEGV (needs rr), NEVER a discriminating oomNEW
+        # keyed on tuple_alloc; the eval-plumbing frames under it must not match either.
+        d = self._deduper(
+            resolver=lambda sp: [
+                "tuple_alloc@Objects/tupleobject.c:48",
+                "_PyTuple_FromStackRefStealOnSuccess@Objects/tupleobject.c:467",
+                "_PyEval_EvalFrameDefault@Python/generated_cases.c.h:1792",
+            ]
+        )
+        keep, label = d.decide(SEGV, source_path="s")
+        self.assertEqual((keep, label), (True, "oomSEGV"))
+        self.assertFalse(any("tuple_alloc" in k for k in d.seen))
+
+    def test_stackref_steal_builder_segv_site_is_segv_not_new(self):
+        # Same when the steal builder itself is the innermost resolved frame.
+        d = self._deduper(
+            resolver=lambda sp: ["_PyTuple_FromStackRefStealOnSuccess@Objects/tupleobject.c:467"]
+        )
+        self.assertEqual(d.decide(SEGV, source_path="s")[1], "oomSEGV")
+
 
 # A real ASan SEGV backtrace as captured in a session's stdout (stderr is merged in).
 # The leading nptl/libc frames carry no CPython path; the real site is frame #5.
