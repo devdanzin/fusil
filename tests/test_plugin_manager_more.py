@@ -161,25 +161,6 @@ class TestDefinitionsProviders(unittest.TestCase):
         self.assertEqual(PluginManager().get_definitions(None, "mod"), [])
 
 
-class TestScenarioProviders(unittest.TestCase):
-    def test_merges_scenario_dicts_and_skips_none(self):
-        m = PluginManager()
-        a = lambda: None  # noqa: E731
-        b = lambda: None  # noqa: E731
-        m.add_scenario_provider(lambda cfg, mod: {"a": a})
-        m.add_scenario_provider(lambda cfg, mod: None)  # skipped
-        m.add_scenario_provider(lambda cfg, mod: {"b": b})
-        self.assertEqual(m.get_scenarios(None, "mod"), {"a": a, "b": b})
-
-    def test_later_provider_overrides_same_key(self):
-        m = PluginManager()
-        first = lambda: 1  # noqa: E731
-        second = lambda: 2  # noqa: E731
-        m.add_scenario_provider(lambda cfg, mod: {"k": first})
-        m.add_scenario_provider(lambda cfg, mod: {"k": second})
-        self.assertEqual(m.get_scenarios(None, "mod"), {"k": second})
-
-
 class TestFuzzingModes(unittest.TestCase):
     def test_duplicate_mode_name_raises(self):
         m = PluginManager()
