@@ -241,7 +241,13 @@ Plugins extend the Python fuzzer without modifying core. They are discovered via
 `fusil.plugins` entry-point group; each entry point is a `register(manager)` callable invoked
 at `Application` startup. Through `PluginManager` a plugin can register: CLI options;
 argument generators (categories `simple`/`complex`/`hashable`, with weight and a
-`condition(config, module)` predicate); definitions/boilerplate providers; scenario
-providers; whole fuzzing modes (`activation_check` + `setup_script`); and `startup`/`shutdown`
-hooks. The cereggii fuzzing support was extracted into such a plugin (see git history) — use
-it as the reference example for plugin shape.
+`condition(config, module)` predicate); definitions/boilerplate providers (source spliced
+into every generated script); instance dispatchers + class handlers (type-specific fuzzing /
+instantiation); whole fuzzing modes (`activation_check` + `setup_script`); blacklist/whitelist
+name filters; hit-suppression regexes (`add_suppression_entry`, #53); dependency/incompatibility
+declarations; and `startup`/`shutdown` hooks. **Scenarios are delivered via definitions +
+fuzzing modes, not a dedicated hook** (the never-consumed `add_scenario_provider`/`get_scenarios`
+API was removed — a plugin can't emit a live callable into the out-of-process child).
+Full authoring guide + hook reference: **`doc/plugins.md`**. The h5py and cereggii fuzzing
+support were extracted into plugins (`fusil_h5py_plugin` / `fusil_cereggii_plugin`, sibling
+repos) — use them as reference examples.

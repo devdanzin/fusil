@@ -143,8 +143,12 @@ lafleur for JIT fuzzing. The analysis and decision are in
 Plugins extend the Python fuzzer without modifying core. They are discovered via the
 `fusil.plugins` entry-point group; each entry point is a `register(manager)` callable invoked at
 `Application` startup. Through `PluginManager` a plugin can register CLI options, argument
-generators, definitions/boilerplate, scenarios, whole fuzzing modes, and `startup`/`shutdown`
-hooks. The cereggii support was extracted into such a plugin — use it as the reference example.
+generators, definitions/boilerplate, instance dispatchers, class handlers, whole fuzzing modes,
+blacklist/whitelist name filters, hit-suppression regexes, dependency declarations, and
+`startup`/`shutdown` hooks. Scenarios are delivered via definitions + fuzzing modes (no separate
+hook). The h5py and cereggii support were extracted into plugins.
+
+**Full authoring guide + hook reference: [`plugins.md`](plugins.md).**
 
 ## Safety model
 

@@ -34,13 +34,6 @@ class DefinitionsProvider:
 
 
 @dataclass
-class ScenarioProvider:
-    """Registration info for a scenario provider."""
-
-    provider_func: Callable[[Any, str], dict[str, Callable] | None]
-
-
-@dataclass
 class FuzzingMode:
     """Registration info for a fuzzing mode."""
 
@@ -132,7 +125,6 @@ class PluginManager:
         self.cli_options: list[tuple[tuple, dict]] = []  # (args, kwargs) for add_option
         self.argument_generators: list[ArgumentGeneratorRegistration] = []
         self.definitions_providers: list[DefinitionsProvider] = []
-        self.scenario_providers: list[ScenarioProvider] = []
         self.fuzzing_modes: dict[str, FuzzingMode] = {}
         self.instance_dispatchers: list[InstanceDispatcher] = []
         self.class_handlers: list[ClassHandler] = []
@@ -242,18 +234,6 @@ class PluginManager:
                           Returns source code to embed in generated scripts, or None
         """
         self.definitions_providers.append(DefinitionsProvider(provider_func=provider_func))
-
-    def add_scenario_provider(
-        self, provider_func: Callable[[Any, str], dict[str, Callable] | None]
-    ) -> None:
-        """
-        Register a scenario provider.
-
-        Args:
-            provider_func: Function(config, module_name) -> dict[str, Callable] | None
-                          Returns a dict of {scenario_name: scenario_function}, or None
-        """
-        self.scenario_providers.append(ScenarioProvider(provider_func=provider_func))
 
     def add_fuzzing_mode(
         self,
@@ -412,24 +392,6 @@ class PluginManager:
             if code:
                 definitions.append(code)
         return definitions
-
-    def get_scenarios(self, config: Any, module_name: str) -> dict[str, Callable]:
-        """
-        Get all scenarios from providers.
-
-        Args:
-            config: Fusil configuration object
-            module_name: Target module being fuzzed
-
-        Returns:
-            Dictionary mapping scenario names to scenario functions
-        """
-        all_scenarios = {}
-        for provider in self.scenario_providers:
-            scenarios = provider.provider_func(config, module_name)
-            if scenarios:
-                all_scenarios.update(scenarios)
-        return all_scenarios
 
     def get_instance_dispatchers(self) -> list[Callable]:
         """Return the registered per-instance dispatch provider functions."""
