@@ -22,12 +22,13 @@ C extension modules, and out-of-memory (allocation-failure) error paths via `--o
   load, so the fuzzer cannot start without it. It **is installed** in the dev venv
   (`python-ptrace` 0.9.9), so the runtime stack imports and tests that touch it run. (A real
   fuzzing run still wants the dedicated `fusil` user / `--unsafe`; see Commands.)
-- `numpy` and `h5py` are optional; when absent, the relevant argument generators and tests
-  skip gracefully (you'll see "Could not import tricky_numpy" / "Numpy is not available").
-  Their support **is** verified to work when present: with `numpy`+`h5py` installed the suite
-  runs the h5py/numpy tests (skips drop from ~32 to 1) and passes. They have no wheels for the
-  free-threaded debug `3.16t` dev venv, so verification uses a normal-CPython venv
-  (`~/venvs/fusil_np_verify`, CPython 3.14) — see the numpy/h5py PR.
+- `numpy` and `h5py` support now live in **external plugins** (`fusil_numpy_plugin` /
+  `fusil_h5py_plugin`), not in core — install the plugin + the library to get it, uninstall to
+  remove it (see the Plugin section + `doc/plugins.md`). The numpy plugin injects tricky arrays
+  into *every* run when installed (opt out with `--no-numpy`); h5py activates only for h5py
+  targets. Neither library has wheels for the free-threaded debug `3.16t` dev venv, so plugin
+  verification uses a normal-CPython venv (`~/venvs/fusil_np_verify`, CPython 3.14), where both
+  plugins + libraries are installed editable.
 - Python floor is **3.13+** (`requires-python`): the code uses PEP 701 f-strings (3.12) and
   `types.CapsuleType` (3.13). Earlier metadata claimed 3.11, which never actually worked.
 - Tooling in the dev box: `gdb` (`/usr/bin/gdb`) is available and used by OOM-dedup segv
@@ -154,7 +155,8 @@ Entry: `fuzzers/fusil-python-threaded` → `fusil.python.Fuzzer(Application)`.
   the test script — imports the target, then emits randomized function calls, class
   instantiations, method calls, objects, and thread/async wrappers. Arguments come from
   **`ArgumentGenerator`** (`argument_generator.py`); hostile inputs come from `tricky_weird.py`
-  and `samples/` (weird classes, tricky typing, tricky numpy, mangled objects).
+  and `samples/` (weird classes, tricky typing, mangled objects). Tricky numpy arrays moved to
+  the `fusil_numpy_plugin` (see the Plugin section).
 
 ### OOM-injection fuzzing & in-loop dedup — `--oom-fuzz`
 

@@ -27,13 +27,10 @@ except ImportError:
 class TestArgumentGenerator(unittest.TestCase):
     def _setup_arg_gen(
         self,
-        use_numpy=True,
         use_templates=True,
-        no_numpy_opt=False,
         no_tstrings_opt=False,
     ):
         mock_options = make_test_options()
-        mock_options.no_numpy = no_numpy_opt
         mock_options.no_tstrings = no_tstrings_opt
         mock_options.functions_number = getattr(mock_options, "functions_number", 10)
         mock_options.methods_number = getattr(mock_options, "methods_number", 5)
@@ -52,7 +49,6 @@ class TestArgumentGenerator(unittest.TestCase):
             filenames=mock_options.filenames.split(",")
             if mock_options.filenames
             else default_filenames,
-            use_numpy=use_numpy,
             use_templates=use_templates,
         )
 
@@ -92,10 +88,6 @@ class TestArgumentGenerator(unittest.TestCase):
             "Interpolation": MagicMock(name="Interpolation_mock"),
         }
 
-        # Placeholders for tricky_numpy names
-        for name in fusil.python.tricky_weird.tricky_numpy_names:
-            self.test_globals[name] = f"numpy_placeholder_for_{name}"
-
         # Placeholders for tricky_objects names
         for name in fusil.python.tricky_weird.tricky_objects_names:
             self.test_globals[name] = f"tricky_obj_placeholder_for_{name}"
@@ -114,9 +106,7 @@ class TestArgumentGenerator(unittest.TestCase):
 
     def setUp(self):
         self._setup_arg_gen(
-            use_numpy=True,
             use_templates=True,
-            no_numpy_opt=False,
             no_tstrings_opt=False,
         )
 
@@ -280,7 +270,7 @@ class TestArgumentGenerator(unittest.TestCase):
         )
 
         # Test with no filenames provided to ArgumentGenerator
-        self._setup_arg_gen(use_numpy=False, use_templates=False)  # Re-init with no filenames
+        self._setup_arg_gen(use_templates=False)  # Re-init with no filenames
         self.arg_gen.filenames = []  # Explicitly empty it
         result_no_files = self.arg_gen.genExistingFilename()
         self.assertIsListOfStrings(result_no_files, "genExistingFilename (no files)")
@@ -320,26 +310,6 @@ class TestArgumentGenerator(unittest.TestCase):
             if hasattr(actual_func, "__name__") and actual_func.__name__ == generator_method_name:
                 return True
         return False
-
-    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
-    def test_simple_generators_composition_with_numpy(self):
-        self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
-        self.assertTrue(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
-
-    def test_simple_generators_composition_without_numpy_opt(self):
-        self._setup_arg_gen(use_numpy=True, no_numpy_opt=True)  # no_numpy option is True
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
-
-    def test_simple_generators_composition_without_numpy_init(self):
-        self._setup_arg_gen(use_numpy=False, no_numpy_opt=False)  # use_numpy init flag is False
-        # NumPy generators are off when the use_numpy init flag is False.
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "simple_argument_generators")
-        )
 
     def test_complex_generators_composition_with_templates(self):
         if (
@@ -400,9 +370,7 @@ class TestArgumentGenerator(unittest.TestCase):
     def test_create_simple_argument_variety(self):
         """Try to detect if create_simple_argument uses different sub-generators."""
         self._setup_arg_gen(
-            use_numpy=True,
             use_templates=True,
-            no_numpy_opt=False,
             no_tstrings_opt=False,
         )
 
@@ -424,8 +392,6 @@ class TestArgumentGenerator(unittest.TestCase):
                 seen_types.add("Bytes")
             elif arg_str.startswith("'") or arg_str.startswith('"'):
                 seen_types.add("String")
-            elif "numpy" in arg_str:
-                seen_types.add("Numpy")
             elif "weird_instances" in arg_str:
                 seen_types.add("WeirdInstance")
             # Add more checks for other types if needed
@@ -765,45 +731,6 @@ class TestArgumentGenerator(unittest.TestCase):
             )
 
     # --- Testing create_complex_argument composition ---
-    @unittest.skipUnless(USE_NUMPY, "Only works with Numpy")
-    def test_create_complex_argument_with_numpy(self):
-        self._setup_arg_gen(use_numpy=True, no_numpy_opt=False)
-        self.assertTrue(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
-        )
-
-        # Probabilistic check that genTrickyNumpy can be chosen
-        numpy_seen = False
-        for _ in range(100):  # Increase iterations if this is flaky
-            # Temporarily make genTrickyNumpy the only choice to ensure it's picked
-            with patch.object(
-                self.arg_gen, "complex_argument_generators", (self.arg_gen.genTrickyNumpy,)
-            ):
-                result = self.arg_gen.create_complex_argument()
-                if "numpy" in "".join(result) or any(
-                    name in "".join(result) for name in fusil.python.tricky_weird.tricky_numpy_names
-                ):
-                    numpy_seen = True
-                    break
-        self.assertTrue(
-            numpy_seen,
-            "create_complex_argument with numpy enabled did not seem to produce numpy output after forced choice.",
-        )
-        # Restore original setup for other tests
-        self.setUp()
-
-    def test_create_complex_argument_without_numpy_opt(self):
-        self._setup_arg_gen(use_numpy=True, no_numpy_opt=True)  # no_numpy option is True
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
-        )
-
-    def test_create_complex_argument_without_numpy_init(self):
-        self._setup_arg_gen(use_numpy=False, no_numpy_opt=False)  # use_numpy init flag is False
-        self.assertFalse(
-            self._check_if_generator_in_tuple("genTrickyNumpy", "complex_argument_generators")
-        )
-
     def test_create_complex_argument_with_templates(self):
         if fusil.python.argument_generator.TEMPLATES:
             self._setup_arg_gen(use_templates=True, no_tstrings_opt=False)

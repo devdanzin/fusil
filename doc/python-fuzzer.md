@@ -79,7 +79,7 @@ Entry point: `fuzzers/fusil-python-threaded` → `fusil.python.Fuzzer`.
   test script — imports the target, then emits randomized function calls, class instantiations,
   method calls, objects, and thread/async wrappers. Arguments come from **`ArgumentGenerator`**
   (`argument_generator.py`); hostile inputs come from `tricky_weird.py` and `samples/` (weird
-  classes, tricky typing, tricky numpy, mangled objects). Argument *counts* come from
+  classes, tricky typing, mangled objects; tricky numpy arrays live in the numpy plugin). Argument *counts* come from
   `arg_numbers.py` (tested in `tests/python/test_arg_numbers.py`).
 
 ### Crash detection

@@ -36,14 +36,6 @@ except ImportError:
     logger.info("Template strings not available.")
     _ARG_GEN_USE_TEMPLATES = False
 
-try:
-    import numpy  # type: ignore
-
-    logger.info("Numpy %s is available, using it to build tricky arrays.", numpy.__version__)
-    _ARG_GEN_USE_NUMPY = True
-except ImportError:
-    logger.info("Numpy is not available.")
-    _ARG_GEN_USE_NUMPY = False
 
 time_start = time.time()
 CALL_REPETITION_COUNT_CONST = 3
@@ -100,7 +92,6 @@ class WritePythonCode(WriteCode):
         self.arg_generator = ArgumentGenerator(
             self.options,
             self.filenames,
-            _ARG_GEN_USE_NUMPY,
             _ARG_GEN_USE_TEMPLATES,
             allow_external_references=self.options.external_references,
             plugin_manager=self.plugin_manager,
@@ -402,10 +393,6 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, fusil.python.tricky_weird.bomb_objects)
         self.emptyLine()
-        if not self.options.no_numpy and _ARG_GEN_USE_NUMPY:
-            self.write(0, "import numpy")
-            self.write(0, fusil.python.tricky_weird.tricky_numpy)
-            self.emptyLine()
 
         self.write(
             0,
