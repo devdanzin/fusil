@@ -486,6 +486,25 @@ class Fuzzer(Application):
         else:
             stdout.kill_words = {"MemoryError", "mimalloc"}
 
+        # fusil's own hostile-object machinery deliberately raises exceptions (SystemError
+        # among them) from injected bomb/weird objects -- that is the harness testing that
+        # the TARGET propagates hostile exceptions, not a target crash. Ignore our own
+        # synthetic signatures so a caught+printed SystemError neither ends the session
+        # early (FileWatch stops the moment the score reaches 1.0, and "SystemError" is a
+        # 1.0 word) nor keeps the session as noise; a genuine target-raised SystemError
+        # (different text) still scores. Plugins add their own synthetic signatures via
+        # PluginManager.add_stdout_ignore_regex (e.g. the cereggii plugin's raise_SystemError).
+        core_ignore_regexes = (
+            # The whole bomb-message family from fusil/python/samples/bomb_objects.py: any of
+            # these is the injected object's own exception text, never a target crash.
+            r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
+            r"|stateful hash)",
+        )
+        for ignore_pattern in core_ignore_regexes + tuple(
+            self.plugin_manager.get_stdout_ignore_regexes()
+        ):
+            stdout.ignoreRegex(ignore_pattern)
+
         # CPython critical messages
         stdout.addRegex("^XXX undetected error", 1.0)
         stdout.addRegex("Fatal Python error", 1.0)
