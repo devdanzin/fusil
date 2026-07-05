@@ -90,6 +90,20 @@ class TestSuperBomb(unittest.TestCase):
             sb.__hash__()  # call 3 > delay 2
 
 
+class TestBombExceptionPool(unittest.TestCase):
+    def test_pool_contains_only_exception_subclasses(self):
+        # BaseException-only types (KeyboardInterrupt/SystemExit/GeneratorExit) escape the
+        # generated `except Exception` handlers and abort the whole session (SIGINT / nonzero
+        # exit) as a false crash instead of exercising error handling. The pool must stay
+        # Exception-only.
+        offenders = [exc.__name__ for exc in B._BOMB_EXCEPTIONS if not issubclass(exc, Exception)]
+        self.assertEqual(offenders, [], f"BaseException-only bomb exceptions: {offenders}")
+
+    def test_bomb_exc_never_returns_baseexception_only(self):
+        drawn = {B._bomb_exc() for _ in range(2000)}
+        self.assertTrue(all(issubclass(e, Exception) for e in drawn))
+
+
 class TestFileBombs(unittest.TestCase):
     def test_read_bomb_delays_then_raises(self):
         rb = B.ReadBomb()

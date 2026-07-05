@@ -254,7 +254,10 @@ class WritePythonCode(WriteCode):
                 # FUSIL_BOILERPLATE_START
 
                 from gc import collect
-                from random import choice, randint, random, sample, seed
+                # NOTE: do NOT import `random` (the function) here -- it would shadow the
+                # `random` module that embedded tricky-object code imports and uses as
+                # `random.randint(...)`, turning those calls into AttributeError at module load.
+                from random import choice, randint, sample, seed
                 from sys import stderr, path as sys_path
                 from os.path import dirname
                 import ast
@@ -651,7 +654,9 @@ class WritePythonCode(WriteCode):
             dedent(
                 """
             import sys
-            from random import choice, randint, random, sample
+            # Do NOT import `random` (the function) -- it shadows the `random` module that
+            # embedded tricky-object code imports and calls as `random.randint(...)`.
+            from random import choice, randint, sample
             from sys import stderr, path as sys_path
             """
             ),
@@ -1322,9 +1327,22 @@ class WritePythonCode(WriteCode):
             else f'callFunc("{prefix}", "{callable_name}"'
         )
 
-        self.write(0, f"res_{prefix} = {call_prefix},")
-        self._write_arguments_for_call_lines(num_args, 1)
-        self.write(0, f"verbose={verbose})")
+        # Wrap the whole statement in try/except. The arguments are constructed inline, BEFORE
+        # callMethod/callFunc runs, so a hostile literal argument -- a set containing an
+        # unhashable object, a dict keyed on a `__hash__` that raises, a bomb object -- raises
+        # during argument construction, which callMethod's own handler can't catch. Unwrapped it
+        # would escape at module level and abort the whole session as a false crash; wrapped, the
+        # call is simply skipped and fuzzing continues.
+        self.write(0, "try:")
+        with self.indented():
+            self.write(0, f"res_{prefix} = {call_prefix},")
+            self._write_arguments_for_call_lines(num_args, 1)
+            self.write(0, f"verbose={verbose})")
+        self.write(0, f"except Exception as _argexc_{prefix}:")
+        with self.indented():
+            self.write_print_to_stderr(
+                0, f'"[{prefix}] call skipped (argument build failed):", repr(_argexc_{prefix})'
+            )
         self.emptyLine()
 
         self._write_result_deep_dive(prefix, callable_name, generation_depth)

@@ -1,7 +1,10 @@
 # FUSIL_BOILERPLATE_START
 
 from gc import collect
-from random import choice, randint, random, sample, seed
+# NOTE: do NOT import `random` (the function) here -- it would shadow the
+# `random` module that embedded tricky-object code imports and uses as
+# `random.randint(...)`, turning those calls into AttributeError at module load.
+from random import choice, randint, sample, seed
 from sys import stderr, path as sys_path
 from os.path import dirname
 import ast
@@ -416,7 +419,10 @@ _BOMB_EXCEPTIONS = (
     IndexError,
     StopIteration,
     SystemError,
-    KeyboardInterrupt,
+    # Only Exception subclasses belong here. BaseException types (KeyboardInterrupt,
+    # SystemExit, GeneratorExit) escape the generated `except Exception` handlers, so a bomb
+    # raising one aborts the whole session (SIGINT / nonzero exit) as a false crash rather
+    # than exercising the target's error handling.
 )
 
 
@@ -872,22 +878,33 @@ fuzz_target_module = fakemod
 
 
 import sys
-from random import choice, randint, random, sample
+# Do NOT import `random` (the function) -- it shadows the `random` module that
+# embedded tricky-object code imports and calls as `random.randint(...)`.
+from random import choice, randint, sample
 from sys import stderr, path as sys_path
 
 
 print("--- Fuzzing 2 functions in fakemod ---", file=stderr)
-res_f1 = callFunc("f1", "func_a",
-verbose=True)
+try:
+    res_f1 = callFunc("f1", "func_a",
+    verbose=True)
+except Exception as _argexc_f1:
+    print("[f1] call skipped (argument build failed):", repr(_argexc_f1), file=stderr)
 
 
-res_f2 = callFunc("f2", "func_a",
-verbose=True)
+try:
+    res_f2 = callFunc("f2", "func_a",
+    verbose=True)
+except Exception as _argexc_f2:
+    print("[f2] call skipped (argument build failed):", repr(_argexc_f2), file=stderr)
 
 
-res_f3 = callFunc("f3", "func_a",
-    None,
-verbose=True)
+try:
+    res_f3 = callFunc("f3", "func_a",
+        None,
+    verbose=True)
+except Exception as _argexc_f3:
+    print("[f3] call skipped (argument build failed):", repr(_argexc_f3), file=stderr)
 
 
 
@@ -938,13 +955,19 @@ if instance_c1_widget is not None and instance_c1_widget is not SENTINEL_VALUE:
     if skip_trivial_type(instance_c1_widget):
         print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
     # General method fuzzing for instance_c1_widget
-    res_c1m1 = callMethod("c1m1", instance_c1_widget, "method_two",
-        list[weird_classes['weird_OrderedDict']] | weird_classes['weird_set'] | big_union,
-    verbose=True)
+    try:
+        res_c1m1 = callMethod("c1m1", instance_c1_widget, "method_two",
+            list[weird_classes['weird_OrderedDict']] | weird_classes['weird_set'] | big_union,
+        verbose=True)
+    except Exception as _argexc_c1m1:
+        print("[c1m1] call skipped (argument build failed):", repr(_argexc_c1m1), file=stderr)
 
 
-    res_c1m2 = callMethod("c1m2", instance_c1_widget, "method_one",
-    verbose=True)
+    try:
+        res_c1m2 = callMethod("c1m2", instance_c1_widget, "method_one",
+        verbose=True)
+    except Exception as _argexc_c1m2:
+        print("[c1m2] call skipped (argument build failed):", repr(_argexc_c1m2), file=stderr)
 
 
     print(f"--- Finished fuzzing instance: instance_c1_widget ---", file=stderr)

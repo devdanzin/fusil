@@ -39,7 +39,10 @@ _BOMB_EXCEPTIONS = (
     IndexError,
     StopIteration,
     SystemError,
-    KeyboardInterrupt,
+    # Only Exception subclasses belong here. BaseException types (KeyboardInterrupt,
+    # SystemExit, GeneratorExit) escape the generated `except Exception` handlers, so a bomb
+    # raising one aborts the whole session (SIGINT / nonzero exit) as a false crash rather
+    # than exercising the target's error handling.
 )
 
 
