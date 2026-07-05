@@ -221,12 +221,6 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
-            "--no-numpy",
-            help="Don't use Numpy (default: False)",
-            action="store_true",
-            default=False,
-        )
-        fuzzing_options.add_option(
             "--no-tstrings",
             help="Don't use template strings (default: False)",
             action="store_true",

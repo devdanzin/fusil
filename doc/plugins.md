@@ -11,6 +11,10 @@ Two reference plugins live in sibling repos and are worth reading alongside this
   definitions + instance dispatcher + class handler + a `--fuzz-h5py` option.
 - **`fusil-cereggii-plugin`** (`github.com/devdanzin/fusil_cereggii_plugin`) — tricky-object
   argument generators + definitions + a dedicated **fuzzing mode** + blacklist/whitelist.
+- **`fusil-numpy-plugin`** (`github.com/devdanzin/fusil_numpy_plugin`) — the simplest example,
+  and the one that is **not target-gated**: it injects tricky numpy arrays into *every* run
+  when installed (condition = "not `--no-numpy`"), because numpy values are useful hostile
+  inputs for any C extension. It was extracted verbatim from the core.
 
 ## How discovery works
 

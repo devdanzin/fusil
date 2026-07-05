@@ -77,11 +77,6 @@ try:
 except ImportError:
     TEMPLATES = []
 
-try:
-    import numpy
-except ImportError:
-    numpy = None
-
 
 class ArgumentGenerator:
     """Handles the generation of diverse argument types for fuzzing."""
@@ -90,7 +85,6 @@ class ArgumentGenerator:
         self,
         options: FusilConfig,
         filenames: list[str],
-        use_numpy: bool = False,
         use_templates: bool = True,
         allow_external_references: bool = True,
         plugin_manager=None,
@@ -101,7 +95,6 @@ class ArgumentGenerator:
         Args:
             options: Fuzzer configuration options.
             filenames: A list of existing filenames to use for file arguments.
-            use_numpy: Whether to use NumPy arrays.
             use_templates: Whether to use template strings (t-strings).
         """
         self.options = options
@@ -184,18 +177,6 @@ class ArgumentGenerator:
                 self.genWeirdUnion,
                 self.genTrickyObjects,
             ) + (self.genBombObject,) * BOMB_WEIGHT
-
-        # NumPy tricky arrays -- gated on numpy alone, NOT on h5py. (Previously this whole
-        # block required H5PyArgumentGenerator, so numpy support silently did nothing unless
-        # h5py was also installed.)
-        if (
-            not self.options.no_numpy
-            and use_numpy
-            and numpy is not None
-            and allow_external_references
-        ):
-            self.simple_argument_generators += (self.genTrickyNumpy,) * 50
-            self.complex_argument_generators += (self.genTrickyNumpy,) * 50
 
         if (
             not self.options.no_tstrings
@@ -364,11 +345,6 @@ class ArgumentGenerator:
         type_names = fusil.python.tricky_weird.bomb_type_names
         name = choice(instance_names + type_names)
         return [name if name in type_names else f"{name}()"]
-
-    def genTrickyNumpy(self) -> list[str]:
-        """Generate a name of a 'tricky' predefined NumPy object from tricky_weird."""
-        tricky_name = choice(fusil.python.tricky_weird.tricky_numpy_names)
-        return [tricky_name]
 
     def genTrickyTemplate(self) -> list[str]:
         """Generate a predefined template string."""

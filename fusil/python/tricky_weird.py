@@ -14,12 +14,6 @@ from fusil.python.samples import bomb_objects, tricky_objects, tricky_typing, we
 
 logger = logging.getLogger(__name__)
 
-try:
-    from fusil.python.samples import tricky_numpy
-except ImportError:
-    logger.info("Could not import tricky_numpy (numpy not available).")
-    tricky_numpy = None
-
 weird_instance_names = list(weird_classes.weird_instances.keys())
 weird_names = list(weird_classes.weird_classes.keys())
 
@@ -29,10 +23,6 @@ tricky_objects_names = [
     key for key in tricky_objects_dict.keys() if isinstance(key, str) and not key.startswith("_")
 ]
 
-tricky_numpy_names = (
-    [name for name in dir(tricky_numpy) if name.startswith("numpy_")] if tricky_numpy else []
-)
-
 bomb_object_names = list(bomb_objects.BOMB_CLASS_NAMES)
 bomb_type_names = list(bomb_objects.BOMB_TYPE_NAMES)
 
@@ -40,7 +30,5 @@ weird_classes = pathlib.Path(weird_classes.__file__).read_text()
 tricky_typing = pathlib.Path(tricky_typing.__file__).read_text()
 tricky_objects = pathlib.Path(tricky_objects.__file__).read_text()
 bomb_objects = pathlib.Path(bomb_objects.__file__).read_text()
-if tricky_numpy:
-    tricky_numpy = pathlib.Path(tricky_numpy.__file__).read_text()
 
 type_names = ("list", "tuple", "dict")
