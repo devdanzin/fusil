@@ -80,10 +80,31 @@ GENERIC_ASSERT_EXPRS = (
     "PyTuple_Check(op)",
 )
 
+# The SEGV-resolution analog of GENERIC_ASSERT_* above: resolved crash-site FUNCS that are generic
+# freelist/stackref-steal DETECTORS, never a real producer. `tuple_alloc` (crashing on its
+# `_PyTuple_RESET_HASH_CACHE` write, tupleobject.c:48, after a poisoned tuple-freelist `_Py_FREELIST_POP`
+# hands back an object freed one ref early under OOM) and its `_PyTuple_FromStackRefStealOnSuccess`
+# caller are the SEGV face of the OOM-0036 tuple-freelist corruption whose debug-ABORT face is the
+# `PyTuple_Check(op)` assert above. The corrupting opcode has already returned, so a resolved chain
+# that bottoms out here has NO in-stack producer -- keying oomNEW on the detector mints a bogus
+# discriminating site, so route it to oomSEGV (needs rr), exactly like the assert face. Matched by
+# FUNC on the SEGV path ONLY: a real `tuple_alloc` `size != 0` abort is an ASSERT, handled via the
+# assert candidates (which is why the abort face keys the expr, not the func -- see above). fusil-fleet10's
+# GIL-on --oom-seq run surfaced thousands of these; gdb-pinned identical on 2 modules (tupleobject.c:48
+# <- _PyTuple_FromStackRefStealOnSuccess:467). Lockstep with catalog gen_known_sites.GENERIC_DETECTOR_FUNCS.
+GENERIC_SEGV_SITE_FUNCS = ("tuple_alloc", "_PyTuple_FromStackRefStealOnSuccess")
+
 
 def _is_generic_assert(func, expr):
     """True if an assertion is a generic over-decref/UAF detector (carries no real site)."""
     return func in GENERIC_ASSERT_FUNCS or expr in GENERIC_ASSERT_EXPRS
+
+
+def _is_generic_site(site):
+    """True if a resolved 'func@file:line' crash SITE is a generic freelist/steal detector -- the
+    SEGV analog of _is_generic_assert: it carries no real producer, so route the crash to oomSEGV."""
+    m = _SITE.match(site)
+    return bool(m) and m.group(1) in GENERIC_SEGV_SITE_FUNCS
 
 
 def _nf(f):
@@ -583,14 +604,25 @@ class Deduper:
         # (Py_DECREF_MORTAL itself, or the eval frame -> spurious oomNEW / mis-fold). Leave it to
         # the needs-resolution branch below; the real producer is pinned offline via rr.
         chain = []
+        generic_site = False
         if has_segv or generic_fatal or not asserts:
             chain = extract_native_sites(stdout_text)
             if not chain and self.resolve_segv:
                 chain = self._resolve(source_path)
+            if chain and _is_generic_site(chain[0]):
+                # The resolved chain bottoms out at a generic freelist/steal detector
+                # (tuple_alloc / _PyTuple_FromStackRefStealOnSuccess) -- the SEGV face of the
+                # OOM-0036 over-decref family, whose real producer already returned and is NOT in
+                # this stack (the frames under it are only eval plumbing). Discard it and route to
+                # oomSEGV, exactly like the PyTuple_Check(op) assert face: keying oomNEW on the
+                # detector would mint a bogus site, and the fh_match name fallback would mis-fold
+                # the UAF into whatever unrelated bug a bystander frame happens to key.
+                chain = []
+                generic_site = True
             # Match only the resolved SITE (chain[0], the innermost real frame after the
             # plumbing skip). Deeper frames are shared deallocator/eval plumbing
             # (_Py_Dealloc, subtype_dealloc, ...) that would over-match many bugs.
-            if chain:
+            elif chain:
                 cand = _site_to_candidate(chain[0])
                 if cand:
                     candidates.append(cand)
@@ -607,7 +639,7 @@ class Deduper:
         # teardown + innocent-bystander call frames -- matching one by name mis-folds the UAF
         # into an unrelated bug (e.g. a generic _PyObject_MakeTpCall frame -> OOM-0026). Those
         # need rr to pin the producer, so leave them needs-resolution.
-        if not matched and not chain and (has_segv or generic_fatal):
+        if not matched and not chain and not generic_site and (has_segv or generic_fatal):
             matched |= fh_match(stdout_text, self.snap)[0]
 
         if matched:
@@ -619,12 +651,13 @@ class Deduper:
             return True, oid
 
         # Nothing matched the catalog.
-        if (has_segv or generic_assert) and not chain and not real_asserts:
-            # A pure segv, or a generic-detector over-decref assert (Py_DECREF_MORTAL/
-            # !_Py_IsStaticImmortal) we couldn't resolve to a real caller: it's the over-decref/
-            # UAF family (needs rr to fold), NOT a discriminating new site. Keep it as
-            # needs-resolution, never oomNEW -- mirrors ingest's needs_gdb bucket.
-            self.seen["segv:unresolved" if has_segv else "assert:unresolved"] += 1
+        if (has_segv or generic_assert or generic_site) and not chain and not real_asserts:
+            # A pure segv, a generic-detector over-decref assert (Py_DECREF_MORTAL/
+            # !_Py_IsStaticImmortal), or a segv/fatal resolved only to a generic freelist/steal
+            # site (tuple_alloc / _PyTuple_FromStackRefStealOnSuccess) we couldn't tie to a real
+            # caller: it's the over-decref/UAF family (needs rr to fold), NOT a discriminating new
+            # site. Keep it as needs-resolution, never oomNEW -- mirrors ingest's needs_gdb bucket.
+            self.seen["segv:unresolved" if (has_segv or generic_site) else "assert:unresolved"] += 1
             return True, "oomSEGV"  # couldn't resolve a site -> always keep
         prim = candidates[0] if candidates else {}
         key = (
