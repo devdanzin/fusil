@@ -84,5 +84,26 @@ class TestSuppressionEntries(unittest.TestCase):
         self.assertEqual(PluginManager().get_suppression_entries(), [])
 
 
+class TestStdoutIgnoreRegexes(unittest.TestCase):
+    def test_register_and_get(self):
+        m = PluginManager()
+        m.add_stdout_ignore_regex("Exception from weird subclass")
+        m.add_stdout_ignore_regex("C-API level error simulation")
+        self.assertEqual(
+            m.get_stdout_ignore_regexes(),
+            ["Exception from weird subclass", "C-API level error simulation"],
+        )
+
+    def test_empty_manager_has_no_ignores(self):
+        self.assertEqual(PluginManager().get_stdout_ignore_regexes(), [])
+
+    def test_getter_returns_a_copy(self):
+        m = PluginManager()
+        m.add_stdout_ignore_regex("foo")
+        got = m.get_stdout_ignore_regexes()
+        got.append("bar")
+        self.assertEqual(m.get_stdout_ignore_regexes(), ["foo"])
+
+
 if __name__ == "__main__":
     unittest.main()

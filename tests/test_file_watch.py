@@ -98,6 +98,30 @@ class TestProcessLineScoring(unittest.TestCase):
         self.assertIsNone(w.processLine(b"ast.Assert() error"))
         self.assertEqual(w.score, 0.0)
 
+    def test_synthetic_systemerror_signatures_ignored_but_real_still_scores(self):
+        # The Python fuzzer sets up SystemError as a 1.0 crash-word and ignores fusil's OWN
+        # synthetic signatures (the bomb-message family + plugin raise_SystemError). A
+        # caught+printed synthetic SystemError must NOT score (so the session isn't
+        # stopped/kept), while a genuine target SystemError still does.
+        w = _watch(words={"SystemError": 1.0})
+        # the exact production patterns (core bomb family + a cereggii-plugin signature)
+        w.ignoreRegex(
+            r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
+            r"|stateful hash)"
+        )
+        w.ignoreRegex("C-API level error simulation")
+        for line in (
+            b"SystemError: fusil hidden name: __module__",
+            b"SystemError: fusil superbomb via __getitem__",
+            b"SystemError: fusil stateful hash",
+            b"SystemError: Exception from weird X: C-API level error simulation",
+        ):
+            self.assertIsNone(w.processLine(line))
+        self.assertEqual(w.score, 0.0)
+        # A genuine, differently-worded SystemError is still a hit.
+        w.processLine(b"SystemError: null argument to internal routine")
+        self.assertEqual(w.score, 1.0)
+
     def test_kill_word_returns_KILL(self):
         w = _watch(words={"error": 0.3}, kill_words={"MemoryError"})
         self.assertEqual(w.processLine(b"MemoryError: out of memory"), "KILL")

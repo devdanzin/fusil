@@ -131,6 +131,7 @@ class PluginManager:
         self.blacklist_entries: list[NameFilterEntry] = []
         self.whitelist_entries: list[NameFilterEntry] = []
         self.suppression_entries: list[SuppressionEntry] = []
+        self.stdout_ignore_regexes: list[str] = []
         self.hooks: dict[str, list[Callable]] = {
             "startup": [],
             "shutdown": [],
@@ -308,6 +309,22 @@ class PluginManager:
         """
         self.suppression_entries.append(SuppressionEntry(pattern=pattern, reason=reason))
 
+    def add_stdout_ignore_regex(self, pattern: str) -> None:
+        """Register a regex whose matching stdout lines are IGNORED by crash detection.
+
+        Unlike ``add_suppression_entry`` (which drops a *kept* hit after the fact), an
+        ignored line never scores -- so it neither ends the session early (``FileWatch``
+        stops as soon as the score reaches 1.0) nor gets the session kept as a crash. Use
+        it for the plugin's OWN synthetic exceptions: a hostile test object that
+        deliberately raises e.g. ``SystemError`` is the harness exercising the target, not
+        a target crash, and must not stop the run. A genuine target-raised exception
+        (different text) still scores normally.
+
+        Args:
+            pattern: a regex matched (``re.search``) against each captured stdout line.
+        """
+        self.stdout_ignore_regexes.append(pattern)
+
     def add_hook(self, hook_name: str, hook_func: Callable) -> None:
         """
         Register a lifecycle hook.
@@ -412,6 +429,10 @@ class PluginManager:
     def get_suppression_entries(self) -> list[tuple[str, str | None]]:
         """Return plugin-registered hit-suppression rules as ``(pattern, reason)`` pairs."""
         return [(e.pattern, e.reason) for e in self.suppression_entries]
+
+    def get_stdout_ignore_regexes(self) -> list[str]:
+        """Return plugin-registered crash-detection ignore regexes (see add_stdout_ignore_regex)."""
+        return list(self.stdout_ignore_regexes)
 
     def get_active_mode(self, config: Any) -> FuzzingMode | None:
         """
