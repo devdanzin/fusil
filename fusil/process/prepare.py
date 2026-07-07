@@ -12,7 +12,42 @@ class ChildError(Exception):
     pass
 
 
+def _report_preexec_failure(err):
+    """Write the real cause of a preexec_fn failure to the child's stderr (fd 2).
+
+    subprocess collapses *any* exception raised in preexec_fn into an opaque
+    "Exception occurred in preexec_fn." in the parent, discarding the real one. The child's
+    stderr is already dup2'd to the session's stdout file, so write the full traceback there
+    with a raw, unbuffered ``os.write`` -- the child is torn down with ``os._exit()``, which
+    does NOT flush Python's buffers, so ``print``/``sys.stderr`` output could be lost. The
+    parent reads this back (``CreateProcess.createProcess``) to report the true failure.
+    """
+    from os import write
+    from traceback import format_exception
+
+    try:
+        text = "FUSIL: child setup (preexec_fn) failed before exec:\n" + "".join(
+            format_exception(type(err), err, err.__traceback__)
+        )
+        write(2, text.encode("utf-8", "replace"))
+    except Exception:
+        pass  # diagnostics must never mask the original failure
+
+
 def prepareProcess(process):
+    """preexec_fn entry point -- runs in the forked child, before exec().
+
+    Thin wrapper that guarantees the real cause of any failure reaches the child's stderr
+    (see ``_report_preexec_failure``) before it is lost to subprocess's opaque wrapping.
+    """
+    try:
+        _prepare_child(process)
+    except BaseException as err:
+        _report_preexec_failure(err)
+        raise
+
+
+def _prepare_child(process):
     from sys import stderr
 
     project = process.project()

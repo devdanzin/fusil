@@ -442,6 +442,75 @@ class TestCreateProcess(unittest.TestCase):
             with self.assertRaises(ProcessError):
                 agent.createProcess()
 
+    def test_preexec_subprocess_error_surfaces_child_detail(self):
+        # subprocess collapses a preexec_fn failure into an opaque SubprocessError; createProcess
+        # reads the child's captured stderr back and names the true cause in the ProcessError.
+        agent, _ = _make(arguments=["python"], name="p")
+        self._prep(agent, None)
+        agent.readChildSetupError = lambda: "The user fusil is not allowed to execute /x"
+        with (
+            patch.object(create, "locateProgram", return_value="/usr/bin/python"),
+            patch.object(
+                create,
+                "Popen",
+                side_effect=create.SubprocessError("Exception occurred in preexec_fn."),
+            ),
+            patch.object(create, "time", return_value=1.0),
+        ):
+            with self.assertRaises(ProcessError) as ctx:
+                agent.createProcess()
+        msg = str(ctx.exception)
+        self.assertIn("preexec_fn", msg)
+        self.assertIn("not allowed to execute", msg)
+
+    def test_preexec_subprocess_error_without_detail_still_process_error(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        self._prep(agent, None)
+        agent.readChildSetupError = lambda: None
+        with (
+            patch.object(create, "locateProgram", return_value="/usr/bin/python"),
+            patch.object(
+                create,
+                "Popen",
+                side_effect=create.SubprocessError("Exception occurred in preexec_fn."),
+            ),
+            patch.object(create, "time", return_value=1.0),
+        ):
+            with self.assertRaises(ProcessError) as ctx:
+                agent.createProcess()
+        self.assertIn("Child setup failed", str(ctx.exception))
+
+
+@unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
+class TestReadChildSetupError(unittest.TestCase):
+    def test_reads_stdout_file_contents(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        fd, path = tempfile.mkstemp(suffix=".stdout")
+        os.write(fd, b"The user fusil is not allowed to execute /x\n")
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        # readChildSetupError only reads .name (re-opens for reading); a namespace avoids the
+        # truncation an actual open(path, "wb") live handle would have already done at fork time
+        # -- by the time we read, the child (not us) has written into it.
+        agent.stdout_file = SimpleNamespace(name=path)
+        self.assertIn("not allowed to execute", agent.readChildSetupError())
+
+    def test_none_when_no_stdout_file(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.stdout_file = None
+        self.assertIsNone(agent.readChildSetupError())
+
+    def test_none_when_name_not_a_path(self):
+        # e.g. stdout was seeded from options.stdout_path=None, or the object has no readable name
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.stdout_file = SimpleNamespace(name=None)
+        self.assertIsNone(agent.readChildSetupError())
+
+    def test_none_on_missing_file(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.stdout_file = SimpleNamespace(name="/nonexistent/does-not-exist.stdout")
+        self.assertIsNone(agent.readChildSetupError())
+
 
 # =========================================================================== renameSession
 @unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
