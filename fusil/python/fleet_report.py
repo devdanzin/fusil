@@ -61,8 +61,18 @@ def classify_crash_dir(name: str) -> tuple[str, str, str]:
     return module, (kind.group(1) if kind else "other"), (label.group(1) if label else "other")
 
 
+_RUNNING_SESSION_RE = re.compile(r"^session-\d+$")
+
+
 def iter_crash_dirs(inst_dir: str) -> list[str]:
-    """Basenames of kept crash dirs (those holding a source.py) under inst-NN/python*/ ."""
+    """Basenames of kept crash dirs (those holding a source.py) under inst-NN/python*/ .
+
+    A kept crash dir is *renamed* by ``session_rename`` to ``<module>-<kind>-<label>``. A dir
+    still named ``session-<N>`` is a **live running session** -- its ``source.py`` is written
+    at session start, before the session is kept-as-a-crash or ``rmtree``'d -- so exclude those.
+    Otherwise, on a run with few or no real crashes, the ~1 in-flight session per instance is
+    miscounted as a kept crash dir (both here and in the shell ``list_crashes``).
+    """
     out = []
     for run in sorted(_run_dirs(inst_dir)):
         try:
@@ -70,6 +80,8 @@ def iter_crash_dirs(inst_dir: str) -> list[str]:
         except OSError:
             continue
         for entry in entries:
+            if _RUNNING_SESSION_RE.match(entry.name):
+                continue  # live session, not a kept crash
             if entry.is_dir() and os.path.exists(os.path.join(entry.path, "source.py")):
                 out.append(entry.name)
     return out
