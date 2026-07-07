@@ -270,9 +270,18 @@ class Fuzzer(Application):
         oom_options.add_option(
             "--oom-max-start",
             help="Dense OOM sweep upper bound (exclusive): each call sweeps "
-            "range(0, N) (default: 1000)",
+            "range(--oom-start-min, N) (default: 1000)",
             type="int",
             default=1000,
+        )
+        oom_options.add_option(
+            "--oom-start-min",
+            help="Dense OOM sweep lower bound (inclusive): each call sweeps "
+            "range(M, --oom-max-start) instead of range(0, ...). Skips shallow "
+            "failure points, and (with a small window below --oom-max-start) enables "
+            "fast targeted replay of a known crash near its trigger start (default: 0)",
+            type="int",
+            default=0,
         )
         oom_options.add_option(
             "--oom-calls",
@@ -412,6 +421,17 @@ class Fuzzer(Application):
         # LD_PRELOAD malloc shim as the arming backend instead of _testcapi.set_nomemory.
         if self.options.oom_foreign:
             self.options.oom_fuzz = True
+
+        # Each OOM sweep is range(--oom-start-min, --oom-max-start); an empty range would make
+        # every oom_call/oom_run a silent no-op (labels printed, no injection). Fail fast rather
+        # than run a useless campaign -- e.g. `--oom-start-min 30` with the default max-start is
+        # fine, but `--oom-start-min 30 --oom-max-start 30` injects nothing.
+        if self.options.oom_fuzz and self.options.oom_start_min >= self.options.oom_max_start:
+            raise ValueError(
+                "--oom-start-min (%d) must be < --oom-max-start (%d); the sweep range "
+                "range(min, max) would otherwise be empty and inject nothing"
+                % (self.options.oom_start_min, self.options.oom_max_start)
+            )
 
         project = self.project
         if not self.project:

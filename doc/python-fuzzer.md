@@ -119,7 +119,8 @@ historically paid off, so it is opt-in via `--deep-dive`.
 Drives allocation-failure error paths to crash CPython / C-extensions. `WritePythonCode` emits
 an OOM harness: `faulthandler.enable()`, a guarded `from _testcapi import set_nomemory,
 remove_mem_hooks`, and an `oom_call(label, func, *args)` wrapper that sweeps
-`set_nomemory(start, 0)` over `range(0, --oom-max-start)` per call. Each call prints an
+`set_nomemory(start, 0)` over `range(--oom-start-min, --oom-max-start)` (default `range(0,
+1000)`; `--oom-start-min` skips shallow starts / enables fast targeted replay) per call. Each call prints an
 `[OOM] <label>` marker so the crashing allocation is pinpointable on replay; `MemoryError` is
 swallowed (the boring outcome) while `SystemError`/segv/abort are surfaced. **Phase 2** also
 sweeps class constructors + methods (`--oom-classes` / `--oom-methods`). Stateful **sequences**
