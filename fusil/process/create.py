@@ -3,7 +3,7 @@ from os import devnull, kill
 from os.path import basename
 from pwd import getpwuid
 from signal import SIGKILL
-from subprocess import STDOUT, Popen
+from subprocess import STDOUT, Popen, SubprocessError
 from time import sleep, time
 
 from ptrace.signames import signalName
@@ -125,6 +125,16 @@ class CreateProcess(ProjectAgent):
             self.process = Popen(arguments, **popen_args)
         except ChildError as err:
             raise ProcessError(err) from err
+        except SubprocessError as err:
+            # Popen collapses any preexec_fn (child setup) failure into an opaque
+            # "Exception occurred in preexec_fn." The child wrote the real cause to its
+            # stderr -- which we redirected to the session's stdout file -- before dying;
+            # read it back so the fusil log names the true failure instead of the opaque one.
+            detail = self.readChildSetupError()
+            message = "Child setup failed before exec (preexec_fn)"
+            if detail:
+                message += ":\n" + detail
+            raise ProcessError(message) from err
         except OSError as err:
             if err.errno == ENOENT:
                 raise ProcessError("Program doesn't exist: %s" % arguments[0]) from err
@@ -134,6 +144,25 @@ class CreateProcess(ProjectAgent):
         self.info("Process identifier: %s" % pid)
         self.closeStreams()
         self.send("process_create", self)
+
+    def readChildSetupError(self, limit=8000):
+        """Read back what the child wrote to its stdout (its dup'd stderr) before exec.
+
+        On a preexec_fn failure exec never runs, so the session's stdout file holds only the
+        child's setup diagnostics (the friendly permission/chdir messages plus the traceback
+        written by ``prepare._report_preexec_failure``). Returns a trimmed string, or ``None``
+        if nothing readable (e.g. stdout was /dev/null). Never raises -- it runs on an error
+        path and must not mask the original failure.
+        """
+        path = getattr(self.stdout_file, "name", None)
+        if not path or not isinstance(path, str):
+            return None
+        try:
+            with open(path, "r", errors="replace") as fh:
+                text = fh.read(limit).strip()
+        except OSError:
+            return None
+        return text or None
 
     def writeReplayScripts(self, arguments, popen_args):
         if self.wrote_replay:

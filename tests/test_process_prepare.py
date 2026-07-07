@@ -263,6 +263,9 @@ class TestPrepareProcess(unittest.TestCase):
             # Non-None so the "(... help)" message-append branches are exercised on the
             # EACCES/non-executable error paths.
             "permissionHelp": patch.object(prepare, "permissionHelp", return_value="retry as root"),
+            # Swallow the fd-2 traceback dump so the failing-path tests don't write to the
+            # real stderr; the reporting behaviour itself is covered in TestPreexecFailureReporting.
+            "_report_preexec_failure": patch.object(prepare, "_report_preexec_failure"),
         }
         started = {name: p.start() for name, p in cm.items()}
         for p in cm.values():
@@ -328,6 +331,56 @@ class TestPrepareProcess(unittest.TestCase):
         # changeUserGroup (drop) must happen before limitResources.
         self.assertTrue(m["changeUserGroup"].called)
         self.assertTrue(m["limitResources"].called)
+
+
+class TestPreexecFailureReporting(unittest.TestCase):
+    """prepareProcess wraps the child-setup body so any failure's real cause is written to
+    the child's stderr (fd 2) before subprocess collapses it into an opaque message."""
+
+    def test_wrapper_reports_then_reraises_on_failure(self):
+        boom = RuntimeError("kaboom")
+        with (
+            patch.object(prepare, "_prepare_child", side_effect=boom),
+            patch.object(prepare, "_report_preexec_failure") as report,
+        ):
+            with self.assertRaises(RuntimeError):
+                prepareProcess(object())
+        report.assert_called_once_with(boom)
+
+    def test_wrapper_silent_on_success(self):
+        with (
+            patch.object(prepare, "_prepare_child"),
+            patch.object(prepare, "_report_preexec_failure") as report,
+        ):
+            prepareProcess(object())
+        report.assert_not_called()
+
+    def test_report_writes_traceback_to_fd2(self):
+        # Capture what _report_preexec_failure writes to raw fd 2 (the dup'd child stderr).
+        import os
+
+        r, w = os.pipe()
+        saved = os.dup(2)
+        try:
+            os.dup2(w, 2)
+            os.close(w)
+            try:
+                raise ValueError("preexec-boom-xyz")
+            except ValueError as exc:
+                prepare._report_preexec_failure(exc)
+        finally:
+            os.dup2(saved, 2)
+            os.close(saved)
+        data = os.read(r, 65536).decode()
+        os.close(r)
+        self.assertIn("preexec-boom-xyz", data)  # the real cause
+        self.assertIn("preexec_fn", data)  # labelled as the child-setup failure
+        self.assertIn("Traceback", data)
+
+    def test_report_never_raises(self):
+        # Diagnostics must never mask the original failure: a write error is swallowed.
+        with patch("os.write", side_effect=OSError("no fd")):
+            prepare._report_preexec_failure(RuntimeError("x"))  # must not raise
 
 
 if __name__ == "__main__":
