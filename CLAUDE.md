@@ -163,8 +163,10 @@ Entry: `fuzzers/fusil-python-threaded` → `fusil.python.Fuzzer(Application)`.
 Drives allocation-failure error paths to crash CPython / C-extensions. `WritePythonCode`
 emits an OOM harness (`write_python_code.py`): `faulthandler.enable()`, a guarded
 `from _testcapi import set_nomemory, remove_mem_hooks`, and an `oom_call(label, func,
-*args, **kwargs)` wrapper that sweeps `set_nomemory(start, 0)` over `range(0, --oom-max-start)`
-(default 1000) per call. Each call prints an `[OOM] <label>` marker (and `start=` per
+*args, **kwargs)` wrapper that sweeps `set_nomemory(start, 0)` over
+`range(--oom-start-min, --oom-max-start)` (defaults `range(0, 1000)`; `--oom-start-min` skips
+shallow starts or enables fast targeted replay near a known crash's trigger `start`, and must be
+`< --oom-max-start` or startup aborts) per call. Each call prints an `[OOM] <label>` marker (and `start=` per
 iteration with `--oom-verbose`) so the crashing invocation/allocation is pinpointable on
 replay; `MemoryError` is swallowed — it's the expected boring outcome, so `WatchStdout.kill_words`
 drops "MemoryError" in OOM mode — while `SystemError` is surfaced. Real crashes (segfault/abort)

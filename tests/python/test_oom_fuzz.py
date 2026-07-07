@@ -37,6 +37,7 @@ def _make_options(oom_fuzz, oom_verbose=False):
     # OOM mode
     o.oom_fuzz = oom_fuzz
     o.oom_max_start = OOM_MAX_START
+    o.oom_start_min = 0
     o.oom_calls = OOM_CALLS
     o.oom_verbose = oom_verbose
     # General generation knobs
@@ -80,6 +81,7 @@ def _generate(
     oom_window=1,
     oom_seq_randomize=False,
     oom_foreign=False,
+    oom_start_min=0,
 ):
     """Generate a fuzzing script against ``module`` and return its source."""
     parent = MagicMock()
@@ -92,6 +94,7 @@ def _generate(
     options.oom_window = oom_window
     options.oom_seq_randomize = oom_seq_randomize
     options.oom_foreign = oom_foreign
+    options.oom_start_min = oom_start_min
     parent.options = options
     parent.filenames = ["/bin/sh"]
     fd, path = tempfile.mkstemp(suffix="_oom_test.py")
@@ -128,7 +131,8 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         # The dense-sweep harness, parameterised by --oom-max-start, now takes a label.
         self.assertIn("def oom_call(label, func", src)
         self.assertIn(f"_OOM_MAX_START = {OOM_MAX_START}", src)
-        self.assertIn("range(_OOM_MAX_START)", src)
+        self.assertIn("_OOM_MIN_START = 0", src)
+        self.assertIn("range(_OOM_MIN_START, _OOM_MAX_START)", src)
         # The allocation hook is installed ONCE (disarmed) and the loop re-arms/disarms the
         # failure window without swapping the allocator -- swapping (remove_mem_hooks) inside
         # the loop races fuzzed worker threads and corrupts the heap. So the per-iteration
@@ -157,6 +161,17 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         self.assertIn("_OOM_VERBOSE = True", src)
         self.assertIn('print("[OOM]   start=" + str(_start)', src)
 
+    def test_oom_start_min_sets_sweep_lower_bound(self):
+        # --oom-start-min emits _OOM_MIN_START and makes each sweep range(min, max) --
+        # skipping shallow failure points (e.g. for fast targeted replay near a known start).
+        src = _generate(oom_fuzz=True, oom_start_min=30)
+        ast.parse(src)
+        self.assertIn("_OOM_MIN_START = 30", src)
+        self.assertIn("range(_OOM_MIN_START, _OOM_MAX_START)", src)
+        # default (0) is the unchanged full sweep from the bottom.
+        src0 = _generate(oom_fuzz=True)
+        self.assertIn("_OOM_MIN_START = 0", src0)
+
     def test_non_oom_mode_has_no_oom_artifacts(self):
         src = _generate(oom_fuzz=False)
 
@@ -166,6 +181,7 @@ class TestOOMFuzzGeneration(unittest.TestCase):
             "set_nomemory",
             "_OOM_AVAILABLE",
             "_OOM_MAX_START",
+            "_OOM_MIN_START",
             "_OOM_VERBOSE",
             "remove_mem_hooks",
         ):

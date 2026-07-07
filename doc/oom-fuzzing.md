@@ -87,8 +87,9 @@ A new `OOM Fuzzing` option group:
 | Option | Type | Default | Meaning |
 |--------|------|---------|---------|
 | `--oom-fuzz` | bool | `False` | Enable OOM mode. |
-| `--oom-max-start` | int | `1000` | Dense sweep upper bound (exclusive): each call sweeps `range(0, N)`. |
-| `--oom-calls` | int | `10` | Number of OOM-wrapped function calls per script (replaces `--functions-number` in OOM mode, bounding `oom_calls × oom_max_start` total iterations). |
+| `--oom-max-start` | int | `1000` | Dense sweep upper bound (exclusive): each call sweeps `range(--oom-start-min, N)`. |
+| `--oom-start-min` | int | `0` | Dense sweep lower bound (inclusive): sweep `range(M, --oom-max-start)` instead of from 0. Skips shallow failure points; with a small window below `--oom-max-start` it enables fast **targeted replay** of a known crash near its trigger `start`. Must be `< --oom-max-start` (an empty range is rejected at startup). |
+| `--oom-calls` | int | `10` | Number of OOM-wrapped function calls per script (replaces `--functions-number` in OOM mode, bounding `oom_calls × (oom_max_start − oom_start_min)` total iterations). |
 | `--oom-verbose` | bool | `False` | Also print the sweep `start` index before each injection, so the exact failing allocation can be pinpointed on replay (verbose; ~`oom_max_start` lines per call). |
 
 Options thread automatically via `self.options` → `PythonSource` →
@@ -113,6 +114,7 @@ except ImportError:
 
 ```python
 _OOM_MAX_START = <oom_max_start>
+_OOM_MIN_START = <oom_start_min>   # default 0
 _OOM_VERBOSE = <oom_verbose>
 
 def oom_call(label, func, *args, **kwargs):
@@ -126,7 +128,7 @@ def oom_call(label, func, *args, **kwargs):
     if not _OOM_AVAILABLE:
         return
     print("[OOM] " + label, file=stderr)
-    for _start in range(_OOM_MAX_START):
+    for _start in range(_OOM_MIN_START, _OOM_MAX_START):
         if _OOM_VERBOSE:
             print("[OOM]   start=" + str(_start), file=stderr)
         _set_nomemory(_start, 0)

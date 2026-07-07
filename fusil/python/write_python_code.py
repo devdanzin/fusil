@@ -534,6 +534,7 @@ class WritePythonCode(WriteCode):
                 0,
                 f"""
                 _OOM_MAX_START = {self.options.oom_max_start}
+                _OOM_MIN_START = {getattr(self.options, "oom_start_min", 0)}
                 _OOM_VERBOSE = {bool(self.options.oom_verbose)}
 
                 def oom_call(label, func, *args, **kwargs):
@@ -552,7 +553,7 @@ class WritePythonCode(WriteCode):
                     if not _OOM_AVAILABLE or func is None:
                         return
                     print("[OOM] " + label, file=stderr)
-                    for _start in range(_OOM_MAX_START):
+                    for _start in range(_OOM_MIN_START, _OOM_MAX_START):
                         if _OOM_VERBOSE:
                             print("[OOM]   start=" + str(_start), file=stderr)
                         _set_nomemory(_start, 0)
@@ -595,7 +596,7 @@ class WritePythonCode(WriteCode):
                             pass
                         return
                     print("[OOM-SEQ] " + label + " window=" + str(window), file=stderr)
-                    for _start in range(_OOM_MAX_START):
+                    for _start in range(_OOM_MIN_START, _OOM_MAX_START):
                         if _OOM_VERBOSE:
                             print("[OOM-SEQ]   start=" + str(_start) + " window=" + str(window), file=stderr)
                         if window > 0:
