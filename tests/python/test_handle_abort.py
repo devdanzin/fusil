@@ -17,9 +17,11 @@ class TestAugmentAsanOptions(unittest.TestCase):
     def _keys(self, s):
         return {p.split("=", 1)[0] for p in s.split(":") if p}
 
-    def test_empty_gets_both_defaults(self):
-        self.assertEqual(augment_asan_options(None), "handle_abort=1:abort_on_error=1")
-        self.assertEqual(augment_asan_options(""), "handle_abort=1:abort_on_error=1")
+    def test_empty_gets_all_defaults(self):
+        self.assertEqual(
+            augment_asan_options(None), "handle_abort=1:abort_on_error=1:detect_leaks=0"
+        )
+        self.assertEqual(augment_asan_options(""), "handle_abort=1:abort_on_error=1:detect_leaks=0")
 
     def test_existing_options_preserved_and_extended(self):
         out = augment_asan_options("detect_leaks=0")
