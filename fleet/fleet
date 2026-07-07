@@ -29,9 +29,15 @@ inst_dir(){ printf '%s/inst-%02d' "$FLEET_DIR" "$1"; }
 units(){  # active/loaded fusil@N units, one per line
     systemctl list-units --all --no-legend --plain 'fusil@*.service' 2>/dev/null | awk '{print $1}'
 }
-list_crashes(){  # every kept crash dir under an instance (layout-agnostic: has source.py)
+list_crashes(){  # kept crash dirs under an instance (layout-agnostic: has source.py).
+                 # A kept crash dir is *renamed* to "<module>-<kind>-<label>"; a dir still
+                 # named "session-N" is a LIVE running session (its source.py is written at
+                 # session start, before it's kept-or-rmtree'd), so exclude those -- else, on
+                 # a run with few/no real crashes, the ~1 in-flight session per instance is
+                 # miscounted as a kept crash.
     [ -d "$1" ] || return 0                     # dir may not exist yet -> don't trip set -e
-    find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null | sort -u || true
+    find "$1" -maxdepth 3 -name source.py -printf '%h\n' 2>/dev/null \
+        | grep -vE '/session-[0-9]+$' | sort -u || true
 }
 
 cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:

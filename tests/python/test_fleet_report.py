@@ -126,6 +126,19 @@ class TestCollectAndAggregate(unittest.TestCase):
             insts = fr.discover_instances(os.path.join(tmp, "inst-01"))
             self.assertEqual(len(insts), 1)
 
+    def test_live_session_dirs_not_counted_as_crashes(self):
+        # A still-named "session-N" dir holds a source.py while it runs, but it's a live
+        # session, not a kept crash (kept crashes are renamed <module>-<kind>-<label>).
+        # Regression: on a run with 0 real crashes these were miscounted as kept crashes.
+        with tempfile.TemporaryDirectory() as tmp:
+            r = os.path.join(tmp, "inst-01", "python")
+            os.makedirs(r)
+            _crash(r, "session-377")  # live running session
+            _crash(r, "session-378")  # another, mid-restart
+            _crash(r, "json-sigsegv-oomNEW")  # a genuine kept crash
+            names = fr.iter_crash_dirs(os.path.join(tmp, "inst-01"))
+            self.assertEqual(names, ["json-sigsegv-oomNEW"])
+
 
 class TestAnomaliesAndRender(unittest.TestCase):
     def test_churn_flag(self):
