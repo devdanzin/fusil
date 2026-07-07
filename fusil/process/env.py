@@ -16,12 +16,16 @@ def augment_asan_options(value):
     crash is still scored as a signal death (no scoring change) and other ASan errors
     (segv/UAF) likewise abort consistently. The backtrace lands in the captured stdout,
     letting the in-loop OOM dedup resolve the crash site straight from stdout instead of a
-    nondeterministic gdb re-run. Keys the caller already set are preserved; this is a no-op
-    on non-ASan builds, which ignore ASAN_OPTIONS entirely.
+    nondeterministic gdb re-run. ``detect_leaks=0`` disables LeakSanitizer's exit-time report:
+    the interpreter and many C libraries leave one-time allocations unfreed at exit, so LSan
+    would flag a benign "leak" on *every* session and score it as a false AddressSanitizer
+    crash -- and we hunt crashes/corruption, not leaks. Keys the caller already set are
+    preserved (so a run that explicitly wants leak detection can pass ``detect_leaks=1``);
+    this is a no-op on non-ASan builds, which ignore ASAN_OPTIONS entirely.
     """
     opts = [p for p in (value or "").split(":") if p]
     have = {p.split("=", 1)[0] for p in opts}
-    for key, val in (("handle_abort", "1"), ("abort_on_error", "1")):
+    for key, val in (("handle_abort", "1"), ("abort_on_error", "1"), ("detect_leaks", "0")):
         if key not in have:
             opts.append("%s=%s" % (key, val))
     return ":".join(opts)

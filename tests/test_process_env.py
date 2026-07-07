@@ -52,31 +52,34 @@ def _make_env():
 
 
 class TestAugmentAsanOptions(unittest.TestCase):
-    def test_none_fills_both_defaults(self):
-        self.assertEqual(augment_asan_options(None), "handle_abort=1:abort_on_error=1")
+    def test_none_fills_all_defaults(self):
+        self.assertEqual(
+            augment_asan_options(None), "handle_abort=1:abort_on_error=1:detect_leaks=0"
+        )
 
-    def test_empty_string_fills_both_defaults(self):
-        self.assertEqual(augment_asan_options(""), "handle_abort=1:abort_on_error=1")
+    def test_empty_string_fills_all_defaults(self):
+        self.assertEqual(augment_asan_options(""), "handle_abort=1:abort_on_error=1:detect_leaks=0")
 
-    def test_preserves_unrelated_option_and_appends_defaults(self):
+    def test_caller_detect_leaks_survives(self):
+        # A run that explicitly wants leak detection keeps detect_leaks=1 (not overridden to 0).
         self.assertEqual(
             augment_asan_options("detect_leaks=1"),
             "detect_leaks=1:handle_abort=1:abort_on_error=1",
         )
 
     def test_existing_handle_abort_value_is_not_overwritten(self):
-        # A caller-provided handle_abort=0 must survive; only the missing key is added.
+        # A caller-provided handle_abort=0 must survive; only the missing keys are added.
         self.assertEqual(
             augment_asan_options("handle_abort=0"),
-            "handle_abort=0:abort_on_error=1",
+            "handle_abort=0:abort_on_error=1:detect_leaks=0",
         )
 
-    def test_both_present_returns_unchanged(self):
-        val = "handle_abort=1:abort_on_error=1"
+    def test_all_present_returns_unchanged(self):
+        val = "handle_abort=1:abort_on_error=1:detect_leaks=0"
         self.assertEqual(augment_asan_options(val), val)
 
-    def test_both_present_with_custom_values_preserved_in_order(self):
-        val = "abort_on_error=0:handle_abort=5"
+    def test_all_present_with_custom_values_preserved_in_order(self):
+        val = "abort_on_error=0:handle_abort=5:detect_leaks=1"
         self.assertEqual(augment_asan_options(val), val)
 
     def test_empty_segments_are_filtered_out(self):
@@ -89,7 +92,7 @@ class TestAugmentAsanOptions(unittest.TestCase):
         # Key detection splits on '=', so a valueless "handle_abort" is still "present".
         self.assertEqual(
             augment_asan_options("handle_abort"),
-            "handle_abort:abort_on_error=1",
+            "handle_abort:abort_on_error=1:detect_leaks=0",
         )
 
     def test_idempotent(self):
@@ -323,7 +326,7 @@ class TestEnvironmentCreate(unittest.TestCase):
         env, _ = _make_env()
         with mock.patch.dict(os.environ, {}, clear=True):
             result = env.create()
-        self.assertEqual(result, {"ASAN_OPTIONS": "handle_abort=1:abort_on_error=1"})
+        self.assertEqual(result, {"ASAN_OPTIONS": "handle_abort=1:abort_on_error=1:detect_leaks=0"})
 
     def test_present_copy_names_are_copied_from_parent(self):
         env, _ = _make_env()
