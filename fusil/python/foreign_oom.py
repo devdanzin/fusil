@@ -46,7 +46,105 @@ def _make_child_readable(cache_dir: Path, so_path: Path) -> None:
 
 
 class ForeignOOMError(Exception):
-    """Raised when the foreign-OOM shim cannot be built (no compiler / compile failure)."""
+    """Raised when the foreign-OOM shim cannot be built or is ineffective.
+
+    Covers both "no compiler / compile failure" (see ``get_shim_path``) and "the shim loads but
+    does not actually intercept ``malloc`` in the target" (see ``probe_shim_effective`` /
+    ``ShimShadowedError``) -- either way ``--oom-foreign`` cannot inject anything.
+    """
+
+
+class ShimShadowedError(ForeignOOMError):
+    """The shim is preloaded but the target's ``malloc`` bypasses it, so no failure is injected.
+
+    The usual cause is a **statically-linked AddressSanitizer** target: ASan defines/exports its
+    own ``malloc`` in the executable, which sits ahead of ``LD_PRELOAD`` in the global symbol
+    scope and shadows the shim. ``--oom-foreign`` then silently injects *nothing*. Remedy: use a
+    non-ASan target, or rebuild the target (and its C libs) with ``-shared-libasan`` and set
+    ``ASAN_OPTIONS=verify_asan_link_order=0`` so the preloaded shim wins over the shared runtime.
+    """
+
+
+# A tiny program run in the *target* interpreter (with the shim LD_PRELOAD'd) to check that the
+# shim's malloc is actually on the allocation path. ``fusil_malloc_count`` only increments while
+# armed and only from *inside the shim's own malloc*, so a nonzero count after some allocations
+# proves interposition; zero means the shim is shadowed. Armed with an unreachable failure window
+# (fail nothing) so the probe itself can't be killed by an injected failure.
+_PROBE_SRC = (
+    "import ctypes\n"
+    "l = ctypes.CDLL(None)\n"
+    "l.fusil_malloc_count.restype = ctypes.c_long\n"
+    "l.malloc.restype = ctypes.c_void_p\n"
+    "l.malloc.argtypes = [ctypes.c_size_t]\n"
+    "l.free.argtypes = [ctypes.c_void_p]\n"
+    "l.fusil_malloc_arm(ctypes.c_long(1 << 40), ctypes.c_long((1 << 40) + 1))\n"
+    "ps = [l.malloc(1 << 20) for _ in range(8)]\n"
+    "n = l.fusil_malloc_count()\n"
+    "l.fusil_malloc_disarm()\n"
+    "[l.free(ctypes.c_void_p(p)) for p in ps if p]\n"
+    "print('FUSIL_SHIM_COUNT=%d' % n)\n"
+)
+
+_PROBE_MARKER = "FUSIL_SHIM_COUNT="
+
+
+def _parse_probe_count(stdout):
+    """Extract the shim allocation counter from probe stdout; None if the marker is absent.
+
+    Returns the integer count (>0 means the shim intercepted, 0 means it was shadowed), or None
+    when the probe did not report a count at all (e.g. the control symbol wasn't found, so the
+    shim isn't preloaded -- an inconclusive result, not a definitive shadow).
+    """
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith(_PROBE_MARKER):
+            try:
+                return int(line[len(_PROBE_MARKER) :])
+            except ValueError:  # pragma: no cover - malformed marker line
+                return None
+    return None
+
+
+def probe_shim_effective(python_exe, shim_path, timeout=30):
+    """Return whether the malloc shim actually intercepts allocations in ``python_exe``.
+
+    Runs a short probe in the target interpreter with the shim ``LD_PRELOAD``'d. Returns:
+
+    * ``True``  -- the shim intercepts (nonzero allocation count): ``--oom-foreign`` will work;
+    * ``False`` -- the shim is shadowed (count 0): injection is a **no-op** (see
+      ``ShimShadowedError``);
+    * ``None``  -- inconclusive: the probe couldn't run or reported no count (don't block on it).
+
+    This never raises: the caller decides what to do with each verdict.
+    """
+    env = dict(os.environ)
+    # Prepend the shim; keep any existing LD_PRELOAD (e.g. the shared ASan runtime) after it.
+    existing = env.get("LD_PRELOAD", "")
+    env["LD_PRELOAD"] = shim_path + ((" " + existing) if existing else "")
+    # Leak detection would fire on the probe's tiny leaks and muddy stderr on ASan targets.
+    env["ASAN_OPTIONS"] = (env.get("ASAN_OPTIONS", "") + ":detect_leaks=0").lstrip(":")
+    try:
+        proc = subprocess.run(
+            [python_exe, "-c", _PROBE_SRC],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as err:  # pragma: no cover - env-dependent
+        logger.warning(
+            "foreign-OOM shim probe could not run (%s); skipping effectiveness check", err
+        )
+        return None
+    count = _parse_probe_count(proc.stdout)
+    if count is None:
+        logger.warning(
+            "foreign-OOM shim probe reported no count (rc=%s, stderr=%r); skipping check",
+            proc.returncode,
+            (proc.stderr or "")[-200:],
+        )
+        return None
+    return count > 0
 
 
 def get_shim_path() -> str:

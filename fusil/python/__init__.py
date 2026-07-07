@@ -443,11 +443,31 @@ class Fuzzer(Application):
         # inject failures at the C malloc() layer (reaching foreign C libraries). Fail fast if
         # requested but unbuildable -- the user asked for it and needs a working compiler.
         if self.options.oom_foreign:
-            from fusil.python.foreign_oom import get_shim_path
+            from fusil.python.foreign_oom import (
+                ShimShadowedError,
+                get_shim_path,
+                probe_shim_effective,
+            )
 
             shim = get_shim_path()
             process.env.set("LD_PRELOAD", shim)
             self.error("Foreign-OOM: LD_PRELOAD=%s" % shim)
+            # Fail fast if the shim is loaded but doesn't actually intercept the target's
+            # malloc (e.g. a statically-linked ASan build shadows it) -- otherwise the whole
+            # run silently injects nothing. `None` (couldn't verify) is non-fatal.
+            effective = probe_shim_effective(self.options.python, shim)
+            if effective is False:
+                raise ShimShadowedError(
+                    "--oom-foreign: the malloc shim is preloaded but does NOT intercept "
+                    "allocations in the target interpreter (%s) -- allocations bypass it, so "
+                    "NO failures would be injected. The usual cause is a statically-linked "
+                    "AddressSanitizer target whose own malloc shadows the LD_PRELOAD shim. Use "
+                    "a non-ASan target, or rebuild with -shared-libasan and set "
+                    "ASAN_OPTIONS=verify_asan_link_order=0. Aborting rather than running a "
+                    "no-op OOM campaign." % self.options.python
+                )
+            if effective:
+                self.error("Foreign-OOM: shim interception verified on %s" % self.options.python)
             if self.options.oom_foreign_pythonmalloc:
                 process.env.set("PYTHONMALLOC", "malloc")
                 self.error("Foreign-OOM: PYTHONMALLOC=malloc (CPython allocs route through shim)")

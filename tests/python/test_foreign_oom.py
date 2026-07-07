@@ -15,7 +15,12 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
-from fusil.python.foreign_oom import _cache_dir, get_shim_path
+from fusil.python.foreign_oom import (
+    _cache_dir,
+    _parse_probe_count,
+    get_shim_path,
+    probe_shim_effective,
+)
 
 _HAVE_CC = bool(shutil.which("cc") or shutil.which("gcc") or shutil.which("clang"))
 
@@ -82,6 +87,36 @@ class TestForeignOOMShim(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip().splitlines()[-1], "PASS", proc.stdout + proc.stderr)
+
+
+class TestParseProbeCount(unittest.TestCase):
+    """Pure parse of the shim-effectiveness probe's stdout (no compiler/subprocess)."""
+
+    def test_intercepted(self):
+        self.assertEqual(_parse_probe_count("noise\nFUSIL_SHIM_COUNT=8\nmore"), 8)
+
+    def test_shadowed(self):
+        self.assertEqual(_parse_probe_count("FUSIL_SHIM_COUNT=0"), 0)
+
+    def test_absent_marker_is_none(self):
+        self.assertIsNone(_parse_probe_count("Traceback ...\nAttributeError"))
+        self.assertIsNone(_parse_probe_count(""))
+        self.assertIsNone(_parse_probe_count(None))
+
+
+@unittest.skipUnless(_HAVE_CC, "needs a C compiler to build the malloc shim")
+class TestProbeShimEffective(unittest.TestCase):
+    def test_intercepts_on_non_asan_python(self):
+        # The test runner is a normal (non-ASan) interpreter, so the preloaded shim is on the
+        # allocation path -> the probe must report interception. (A statically-linked ASan
+        # target would return False; that path is exercised by the wiring, not portably here.)
+        shim = get_shim_path()
+        self.assertIs(probe_shim_effective(sys.executable, shim), True)
+
+    def test_missing_python_is_inconclusive_not_fatal(self):
+        # A probe that can't run at all is inconclusive (None), never a false "shadowed" verdict.
+        shim = get_shim_path()
+        self.assertIsNone(probe_shim_effective("/nonexistent/python-xyz", shim))
 
 
 if __name__ == "__main__":
