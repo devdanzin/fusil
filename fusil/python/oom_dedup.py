@@ -73,7 +73,18 @@ GENERIC_FATAL = ("_PyObject_AssertFailed", "_Py_NegativeRefcount")
 # it, and validate_list's every assert is a GC-invariant check, never the defect) -> resolve past it
 # to the producer / oomSEGV. Whole FUNC (all its asserts are detectors); does not collide OOM-0017,
 # which keys gc_decref/gc_get_refs/gc.c:96, not validate_list/gc.c:380.
-GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL", "validate_list")
+#
+# `_Py_NegativeRefcount` (Objects/object.c) is the ASSERT face of the negative-refcount detector: on a
+# Py_DEBUG build an over-decref trips its `object has negative ref count` assert at a LATER decref. Two
+# shapes reach it -- (a) the producer is INLINE, right under the refcount frames (OOM-0019 = a double
+# `Py_XDECREF` inside `_PyPegen_raise_error_known_location`), and (b) the producer already RETURNED and
+# the negref surfaces during unrelated frame/exception teardown (the OOM-0036 stackref family). Marking
+# the FUNC generic makes the negref assert itself carry no site -- but decide() STILL resolves the chain
+# (so (a) folds to its inline producer, e.g. OOM-0019's pegen frame), and only when that resolution
+# fails to hit the catalog is the crash routed to oomSEGV (case (b), producer needs rr). Same detector
+# as the `_Py_NegativeRefcount` FATAL in GENERIC_FATAL; mirrors gen_known_sites.GENERIC_DETECTOR_FUNCS
+# (which already emits no keys for a `_Py_NegativeRefcount` assert) and catalog ingest.GENERIC_ASSERT_FUNCS.
+GENERIC_ASSERT_FUNCS = ("Py_DECREF_MORTAL", "validate_list", "_Py_NegativeRefcount")
 GENERIC_ASSERT_EXPRS = (
     "!_Py_IsStaticImmortal(op)",
     "mp == NULL || Py_IS_TYPE(mp, &PyDict_Type)",
@@ -640,12 +651,20 @@ class Deduper:
         # Faulthandler-only fallback: a SEGV/generic-fatal with no ASan file:line frames and
         # no gdb resolution still carries func names in the faulthandler C stack -- match the
         # innermost catalog-keyed func by name (e.g. PyList_New -> OOM-0004) before giving up.
-        # NOT done for a generic-detector assert (Py_DECREF_MORTAL/!_Py_IsStaticImmortal): its
-        # producer is an over-decref that already returned, so the visible stack is only frame
-        # teardown + innocent-bystander call frames -- matching one by name mis-folds the UAF
-        # into an unrelated bug (e.g. a generic _PyObject_MakeTpCall frame -> OOM-0026). Those
-        # need rr to pin the producer, so leave them needs-resolution.
-        if not matched and not chain and not generic_site and (has_segv or generic_fatal):
+        # NOT done for a generic-detector assert (Py_DECREF_MORTAL/_Py_NegativeRefcount/
+        # !_Py_IsStaticImmortal): its producer is an over-decref that already returned, so the
+        # visible stack is only frame teardown + innocent-bystander call frames -- matching one by
+        # name mis-folds the UAF into an unrelated bug (e.g. a generic _PyObject_MakeTpCall frame ->
+        # OOM-0026). These aborts carry a generic fatal, so gate on ``not generic_assert`` (else the
+        # ``generic_fatal`` arm would let fh_match run). Those need rr to pin the producer, so leave
+        # them needs-resolution.
+        if (
+            not matched
+            and not chain
+            and not generic_site
+            and not generic_assert
+            and (has_segv or generic_fatal)
+        ):
             matched |= fh_match(stdout_text, self.snap)[0]
 
         if matched:
@@ -657,12 +676,15 @@ class Deduper:
             return True, oid
 
         # Nothing matched the catalog.
-        if (has_segv or generic_assert or generic_site) and not chain and not real_asserts:
-            # A pure segv, a generic-detector over-decref assert (Py_DECREF_MORTAL/
-            # !_Py_IsStaticImmortal), or a segv/fatal resolved only to a generic freelist/steal
-            # site (tuple_alloc / _PyTuple_FromStackRefStealOnSuccess) we couldn't tie to a real
-            # caller: it's the over-decref/UAF family (needs rr to fold), NOT a discriminating new
-            # site. Keep it as needs-resolution, never oomNEW -- mirrors ingest's needs_gdb bucket.
+        if generic_assert or ((has_segv or generic_site) and not chain and not real_asserts):
+            # A generic-detector over-decref assert (Py_DECREF_MORTAL/_Py_NegativeRefcount/
+            # !_Py_IsStaticImmortal) whose chain didn't fold, a pure segv, or a segv/fatal resolved
+            # only to a generic freelist/steal site (tuple_alloc / _PyTuple_FromStackRefStealOnSuccess)
+            # we couldn't tie to a real caller: it's the over-decref/UAF family (needs rr to fold),
+            # NOT a discriminating new site. The generic-assert arm fires even when a chain resolved,
+            # because that chain[0] is a bystander teardown frame (e.g. frame_dealloc) -- the inline-
+            # producer negref aborts (OOM-0019) already returned above via a catalog match. Keep it as
+            # needs-resolution, never oomNEW -- mirrors ingest's needs_gdb bucket.
             self.seen["segv:unresolved" if (has_segv or generic_site) else "assert:unresolved"] += 1
             return True, "oomSEGV"  # couldn't resolve a site -> always keep
         prim = candidates[0] if candidates else {}
