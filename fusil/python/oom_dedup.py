@@ -333,7 +333,13 @@ _BT_SKIP = re.compile(
     # ASan trace exposes these frames where Clang inlines them away.
     r"|hook_fmalloc|hook_fcalloc|hook_frealloc|hook_ffree"
     r"|PyMem_Free|PyMem_RawFree|PyObject_Free|PyMem_Realloc|PyMem_RawRealloc|PyObject_Realloc"
-    r"|tracemalloc_(raw_)?(alloc|calloc|realloc|free))$"
+    r"|tracemalloc_(raw_)?(alloc|calloc|realloc|free)"
+    # Inlined GC-bits readers (pycore_gc.h): when a bad/NULL object's ob_gc_bits is read they
+    # show as the innermost frame, masking the real .c caller (e.g. copy_lock_held_untracked =
+    # OOM-0044, a NULL-deref in the empty-dict copy assert under OOM). Analog of the
+    # refcount.h/object.h header skips below. NOT _PyObject_GC_TRACK/_UNTRACK (real sites, e.g.
+    # the OOM-0006 untrack), only the pure readers. Lockstep with catalog ingest.py NATIVE_SKIP.
+    r"|_PyObject_HAS_GC_BITS|_PyObject_GC_IS_TRACKED)$"
 )
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
 # of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.
