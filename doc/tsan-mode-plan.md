@@ -277,6 +277,16 @@ This composes with the existing hooks — no new keep/prune plumbing, just a thi
   clean report), the `fleet` preflight validates a `--tsan` fleet's TSan target + `known_races.tsv`
   catalog, and `fleet/README.md` documents the `--tsan` fleet config + the ingest → report →
   `gen_known_races` triage loop. Ready to point at a real target and catalog real races.
+- **Fleet 01 (first real run) + a harness fix.** The first `--tsan` fleet found ~17 distinct race
+  signatures (11 seeded as `TSAN-0001..0011`; dominant = cjkcodecs `MultibyteIncrementalDecoder`
+  getstate/reset, 10 vehicles). It also surfaced a repeated `SEGV addr=0xd8` in `pty` runs: the
+  crashing pc resolves to **`__tsan::TraceSwitchPart`** — the *ThreadSanitizer runtime*, not
+  CPython. Cause: the stress region reached `pty.fork()`/`os.forkpty()` (via the shared module
+  object's `dir()`), forking a worker thread; TSan does not support `fork()` in a multithreaded
+  process without an immediate `exec`, so the child crashes in the TSan runtime. Fix: the emitter
+  now excludes process-lifecycle calls (`TSAN_UNSAFE_CALLS`: fork/forkpty/spawn*/exec*/_exit/
+  abort/system/popen/…) from both `_tsan_funcs` and the runtime `dir()` loop — they are never a
+  useful race target and would fork/replace the fuzzer anyway.
 
 ## Phase 1 as-built: the environment recipe (hard-won)
 
