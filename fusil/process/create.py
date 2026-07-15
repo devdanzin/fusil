@@ -50,13 +50,19 @@ class CreateProcess(ProjectAgent):
         self.cmdline = CommandLine(self, arguments)
         self.timeout = timeout
         self.max_memory = config.process_max_memory
-        # ASan targets reserve a huge virtual address space; applying RLIMIT_AS would
-        # kill them on startup (this is why the memory cap was historically disabled
-        # wholesale). Drop the cap for ASan builds (auto-detected) or when the user
-        # passes --no-memory-limit; the external cgroup cap (e.g. the fleet's systemd
-        # MemoryMax) is the real limit in that setup.
+        # ASan/TSan targets reserve a huge virtual address space (TSan mmaps terabytes of
+        # shadow memory); applying RLIMIT_AS would kill them on startup (this is why the
+        # memory cap was historically disabled wholesale). Drop the cap for ASan builds
+        # (auto-detected), for --tsan (whose command is `setarch -R <python> ...`, so the
+        # program isn't arguments[0] to auto-detect), or when the user passes
+        # --no-memory-limit; the external cgroup cap (e.g. the fleet's systemd MemoryMax)
+        # is the real limit in that setup.
         program = arguments[0] if arguments else None
-        if getattr(options, "no_memory_limit", False) or target_is_asan(program):
+        if (
+            getattr(options, "no_memory_limit", False)
+            or getattr(options, "tsan", False)
+            or target_is_asan(program)
+        ):
             self.max_memory = 0
         self.max_user_process = config.process_max_user_process
         self.core_dump = config.process_core_dump

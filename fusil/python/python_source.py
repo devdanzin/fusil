@@ -151,8 +151,11 @@ class PythonSource(ProjectAgent):
             self.filename,
             self.module,
             self.module_name,
-            threads=not self.options.no_threads,
-            _async=not self.options.no_async,
+            # --tsan replaces the per-call one-thread-per-callsite wrappers with a concentrated
+            # concurrency-stress region (WritePythonCode._write_tsan_stress_region), so disable
+            # them here -- otherwise they would dilute the stress and double-run every call.
+            threads=(not self.options.no_threads) and not self.options.tsan,
+            _async=(not self.options.no_async) and not self.options.tsan,
             plugin_manager=self.plugin_manager,
         )
 

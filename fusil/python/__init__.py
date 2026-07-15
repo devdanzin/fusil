@@ -397,11 +397,52 @@ class Fuzzer(Application):
             default=False,
         )
 
+        tsan_options = OptionGroup(parser, "TSan Fuzzing")
+        tsan_options.add_option(
+            "--tsan",
+            help="Enable ThreadSanitizer concurrency-stress mode: generate code that hammers "
+            "SHARED objects from many threads at once to surface C-level data races. Requires "
+            "a free-threaded, --with-thread-sanitizer target interpreter (see --python) run "
+            "under disabled ASLR (fusil wraps it in `setarch -R`). Mutually exclusive with "
+            "--oom-fuzz/--oom-foreign. Default: False",
+            action="store_true",
+            default=False,
+        )
+        tsan_options.add_option(
+            "--tsan-threads",
+            help="Worker threads per shared object in the stress region (>=2 so each shared "
+            "object is hit concurrently). Default: 4",
+            type="int",
+            default=4,
+        )
+        tsan_options.add_option(
+            "--tsan-iterations",
+            help="Op iterations each worker runs over its shared object (repetition = race "
+            "manifestation). Default: 200",
+            type="int",
+            default=200,
+        )
+        tsan_options.add_option(
+            "--tsan-shared-objects",
+            help="How many module objects are instantiated and shared across workers. Default: 3",
+            type="int",
+            default=3,
+        )
+        tsan_options.add_option(
+            "--tsan-suppressions",
+            help="Path to a ThreadSanitizer suppressions file (passed to the target via "
+            "TSAN_OPTIONS=suppressions=...). Default: none (CPython's "
+            "suppressions_free_threading.txt is currently empty, so core races are in scope).",
+            type="str",
+            default=None,
+        )
+
         options = (
             input_options,
             running_options,
             fuzzing_options,
             oom_options,
+            tsan_options,
         )
         for option in options:
             parser.add_option_group(option)
@@ -433,6 +474,16 @@ class Fuzzer(Application):
                 % (self.options.oom_start_min, self.options.oom_max_start)
             )
 
+        # --tsan is a different failure class (data races) on a different build (free-threaded +
+        # ThreadSanitizer) and cannot share a run with OOM injection: the _testcapi.set_nomemory
+        # allocator swap is itself thread-unsafe (the documented _thread-*-oomNEW harness race), so
+        # combining them just manufactures harness races. Fail fast.
+        if self.options.tsan and (self.options.oom_fuzz or self.options.oom_foreign):
+            raise ValueError(
+                "--tsan is mutually exclusive with --oom-fuzz/--oom-foreign (the set_nomemory "
+                "allocator swap is not thread-safe; combining them races the harness itself)"
+            )
+
         project = self.project
         if not self.project:
             project = self.project = Project(self)
@@ -451,13 +502,28 @@ class Fuzzer(Application):
         from fusil.python.stats_agent import StatsAgent
 
         StatsAgent(project, self.source)
+        # Under --tsan the target MUST run with ASLR disabled: ThreadSanitizer's shadow-memory
+        # layout is incompatible with modern high-entropy ASLR ("memory layout is incompatible"
+        # -> it silently detects nothing). `setarch -R` (ADDR_NO_RANDOMIZE) is a thin exec wrapper
+        # -- it sets the personality then execs the target, so the PID (and thus process
+        # monitoring) is unaffected. Keeping the source file last preserves on_python_source's
+        # `arguments[-1] = filename` substitution.
+        target_cmd = [self.options.python, "-u", "<source.py>"]
+        if self.options.tsan:
+            target_cmd = ["setarch", "-R"] + target_cmd
         process = PythonProcess(
             project,
             self.options,
-            [self.options.python, "-u", "<source.py>"],
+            target_cmd,
             timeout=self.options.timeout,
         )
-        process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
+        # ThreadSanitizer reserves more virtual address space than any finite RLIMIT_AS allows and
+        # re-execs itself to raise the cap; a finite hard cap makes that re-exec fail (setrlimit
+        # EINVAL) and TSan then runs DEGRADED, detecting nothing. So leave the cap OFF under --tsan
+        # -- CreateProcess already zeroed max_memory for it, and limitResources resets RLIMIT_AS to
+        # unlimited. (This ~4 PiB cap is fine for ASan, which fits within it.)
+        if not self.options.tsan:
+            process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
 
         # Foreign-allocator OOM: preload the malloc-failure shim so the generated harness can
         # inject failures at the C malloc() layer (reaching foreign C libraries). Fail fast if
@@ -491,6 +557,52 @@ class Fuzzer(Application):
             if self.options.oom_foreign_pythonmalloc:
                 process.env.set("PYTHONMALLOC", "malloc")
                 self.error("Foreign-OOM: PYTHONMALLOC=malloc (CPython allocs route through shim)")
+
+        # ThreadSanitizer mode: verify the target build and set the child environment. Fail fast if
+        # the interpreter is not free-threaded + TSan-instrumented -- otherwise the whole run
+        # silently finds nothing (mirrors the --oom-foreign shim-shadow self-check).
+        if self.options.tsan:
+            import os
+            import subprocess
+
+            probe = (
+                "import sys, sysconfig; ca = sysconfig.get_config_var('CONFIG_ARGS') or ''; "
+                "print(int(not sys._is_gil_enabled()), int('thread-sanitizer' in ca))"
+            )
+            try:
+                out = subprocess.run(
+                    [self.options.python, "-c", probe],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    env={**os.environ, "PYTHON_GIL": "0"},
+                ).stdout.split()
+            except (OSError, subprocess.SubprocessError, ValueError):
+                out = []
+            free_threaded = out[:1] == ["1"]
+            thread_sanitizer = out[1:2] == ["1"]
+            if not (free_threaded and thread_sanitizer):
+                raise ValueError(
+                    "--tsan requires a free-threaded, --with-thread-sanitizer interpreter as "
+                    "--python (probed free_threaded=%s thread_sanitizer=%s for %s). Build CPython "
+                    "with `--disable-gil --with-thread-sanitizer` and point --python at it."
+                    % (free_threaded, thread_sanitizer, self.options.python)
+                )
+            # symbolize=0: at present the symbolizer hangs the child on the first race (a
+            # regression under investigation -- this did not used to happen, even on debug builds).
+            # Sidestepping it is safe because the `WARNING: ThreadSanitizer: data race` line prints
+            # BEFORE the frames, so textual detection is unaffected -- resolve frames offline for
+            # triage. Revisit (symbolize=1 in-loop) once the hang is fixed. halt_on_error=1/
+            # exitcode=66: stop at the first race with a clean exit.
+            tsan_opts = ["halt_on_error=1", "symbolize=0", "exitcode=66", "history_size=4"]
+            if self.options.tsan_suppressions:
+                tsan_opts.append("suppressions=%s" % self.options.tsan_suppressions)
+            process.env.set("TSAN_OPTIONS", ":".join(tsan_opts))
+            process.env.set("PYTHON_GIL", "0")
+            self.error(
+                "TSan: target verified free-threaded + ThreadSanitizer; ASLR disabled via "
+                "`setarch -R`; TSAN_OPTIONS=%s" % ":".join(tsan_opts)
+            )
 
         options = {"exitcode_score": self.options.exitcode_score}
         if not self.options.record_timeouts:
@@ -549,6 +661,11 @@ class Fuzzer(Application):
         stdout.addRegex("^XXX undetected error", 1.0)
         stdout.addRegex("Fatal Python error", 1.0)
         # Match "Cannot allocate memory"?
+
+        # ThreadSanitizer data-race report (--tsan). The `WARNING:` header is printed before the
+        # (possibly unsymbolized) frames, so this scores the session even with symbolize=0. Added
+        # unconditionally: it only matches when a TSan-instrumented target actually reports a race.
+        stdout.addRegex("WARNING: ThreadSanitizer: data race", 1.0)
 
         # PyPy messages
         stdout.addRegex("Fatal RPython error", 1.0)

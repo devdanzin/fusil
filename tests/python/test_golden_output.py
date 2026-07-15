@@ -63,6 +63,7 @@ class _Options:
     oom_window = 1
     oom_foreign = False
     oom_foreign_pythonmalloc = False
+    tsan = False
 
 
 class _Parent:
