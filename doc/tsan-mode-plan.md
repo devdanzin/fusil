@@ -287,13 +287,19 @@ Getting TSan to *actually report* took several non-obvious fixes — each one si
   nothing. fusil applies a ~4 PiB `RLIMIT_AS` by default (fine for ASan, which fits); under
   `--tsan` the cap is dropped entirely (`create.py` zeroes `max_memory`, and `setupProject`
   skips the 4 PiB override so `limitResources` resets `RLIMIT_AS` to unlimited).
-- **`TSAN_OPTIONS=halt_on_error=1:symbolize=0:exitcode=66:history_size=4`.** `symbolize=0`
-  because **at present** the symbolizer hangs the child on the first race — a **regression under
-  investigation** (it did not used to happen, even on debug builds), not an inherent property.
-  Sidestepping it is safe because the `WARNING: ThreadSanitizer: data race` header prints
-  *before* the frames, so textual detection is unaffected; resolve frames offline for triage.
-  Flip back to `symbolize=1` in-loop once the hang is fixed. `halt_on_error=1` + `exitcode=66`
-  stop at the first race with a clean exit.
+- **`TSAN_OPTIONS=halt_on_error=1:symbolize=1:exitcode=66:history_size=4` + `DEBUGINFOD_URLS=`
+  (cleared in the child).** The earlier "symbolizer hang" was **diagnosed, not a TSan/build
+  fault**: `llvm-symbolizer` honours `DEBUGINFOD_URLS`, which Ubuntu sets to
+  `https://debuginfod.ubuntu.com` in every login shell (`/etc/profile.d/debuginfod.sh`), and
+  that endpoint is currently blackholed (TCP connect gets no SYN-ACK/RST → libcurl spins in a
+  ~forever `poll()` retry). Clearing `DEBUGINFOD_URLS` in the child makes symbolization return in
+  ~0.3s with full frames from the target's own (complete) local debug info — so we **symbolize
+  in-loop**, and the racing site lands in the crash dir for triage/dedup. (`DEBUGINFOD_TIMEOUT=1`
+  is a gentler alternative but pays ~1s per module; the empty form is better for crash sessions.
+  gdb was immune because Ubuntu's gdb defaults debuginfod off in batch mode.) fusil's child env
+  is minimal and doesn't copy `DEBUGINFOD_URLS`, but it's set empty explicitly so symbolization
+  stays fast regardless of the parent env. `halt_on_error=1` + `exitcode=66` stop at the first
+  race with a clean exit.
 - **`PYTHON_GIL=0`** (set explicitly even though the build defaults to it).
 - **`--no-numpy` is required today.** The `fusil_numpy_plugin` (installed in the fuzzer venv)
   injects `import numpy` into *every* generated script's boilerplate; the TSan target has no
