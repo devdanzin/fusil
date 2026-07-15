@@ -26,6 +26,14 @@ import re
 
 # ---- report parsing ----
 WARNING = re.compile(r"WARNING: ThreadSanitizer: data race")
+# A non-race TSan report: SEGV / heap-use-after-free / lock-order-inversion / deadlock. These
+# carry ONE crash stack (not two access stanzas). `SEGV on unknown address 0xADDR (pc 0xPC ...)`
+# often can't be unwound (TSan prints "nested bug ... aborting" with no frames), so the fault
+# address + pc is the only stable signal; use the symbolized crash site when frames ARE present.
+SEGV = re.compile(
+    r"ThreadSanitizer:\s*(SEGV|heap-use-after-free|lock-order-inversion|deadlock)"
+    r"(?:.*?\baddress 0x0*([0-9a-fA-F]+))?(?:.*?\bpc 0x0*([0-9a-fA-F]+))?"
+)
 # An access stanza header: "[Previous ][Atomic ](Write|Read) of size N at 0xADDR by thread T#:".
 # TSan capitalises the FIRST access ("Write"/"Read") but lowercases the second ("Previous
 # write"/"Previous read"), so match either case. The thread-CREATION stanzas ("Thread T1 '...'
@@ -119,13 +127,48 @@ def _top_site(frames):
 
 
 def parse_report(text):
-    """Parse the first ThreadSanitizer data-race report in ``text``.
+    """Parse the first ThreadSanitizer report in ``text``.
 
-    Returns a dict {signature, sites:[(file,func,line)|None, ...], framework:bool} or None if
-    there is no data-race report (or it can't be reduced to any site).
+    Returns a dict {signature, sites, framework, kind} where kind is "race" (a data race, two
+    access sites) or "segv" (a SEGV/UAF/deadlock, one crash site), or None if there is no TSan
+    report (or it can't be reduced to any signature).
     """
-    if not WARNING.search(text):
-        return None
+    if WARNING.search(text):
+        return _parse_race(text)
+    m = SEGV.search(text)
+    if m:
+        return _parse_segv(text, m)
+    return None
+
+
+def _parse_segv(text, m):
+    """Parse a non-race TSan report (SEGV/UAF/deadlock): one crash stack. Signature is the top
+    real crash site if TSan symbolized it, else the fault address + pc (deterministic under the
+    fixed load address `setarch -R` gives; build-specific -- regenerate the catalog per build)."""
+    kind_word, addr, pc = m.group(1), m.group(2), m.group(3)
+    frames = []
+    started = False
+    for line in text.splitlines():
+        if not started:
+            if SEGV.search(line):
+                started = True
+            continue
+        fm = FRAME.match(line)
+        if fm:
+            frames.append((fm.group(1), fm.group(2)))
+        elif frames:
+            break  # crash stack ended
+    site = _top_site(frames)
+    if site:
+        signature = "%s %s:%s" % (kind_word, site[0], site[1])
+        sites = [site]
+    else:
+        signature = "%s addr=0x%s pc=0x%s" % (kind_word, addr or "?", pc or "?")
+        sites = []
+    return dict(signature=signature, sites=sites, framework=False, kind="segv")
+
+
+def _parse_race(text):
     lines = text.splitlines()
     stanzas = []  # list of frame-lists, one per access stanza (in order)
     i = 0
@@ -163,7 +206,7 @@ def parse_report(text):
     framework = all(s is not None and FRAMEWORK_FILES.search(s[0]) for s in sites if s)
     keys = sorted("%s:%s" % (s[0], s[1]) if s else "?" for s in sites)
     signature = " | ".join(keys)
-    return dict(signature=signature, sites=sites, framework=framework)
+    return dict(signature=signature, sites=sites, framework=framework, kind="race")
 
 
 # ---- catalog snapshot ----
@@ -291,7 +334,7 @@ class TSanDeduper:
         if self.suppressor.suppresses(report):
             self.seen["suppressed"] += 1
             return False, None
-        if report["framework"]:
+        if report.get("framework"):
             self.seen["framework"] += 1
             return True, "tsanFRAME"  # kept, but out of the tsanNEW bucket
         rid = self.snap.get(report["signature"])
@@ -301,8 +344,10 @@ class TSanDeduper:
                 return False, rid  # known + over cap -> prune duplicate
             self.kept[rid] += 1
             return True, rid
-        self.seen["NEW:" + report["signature"]] += 1
-        return True, "tsanNEW"
+        # A new (uncatalogued) finding -- label a SEGV/UAF distinctly from a data race.
+        is_segv = report.get("kind") == "segv"
+        self.seen[("NEW-SEGV:" if is_segv else "NEW:") + report["signature"]] += 1
+        return True, "tsanSEGV" if is_segv else "tsanNEW"
 
     def report(self):
         lines = ["TSan dedupe summary (seen / kept):"]

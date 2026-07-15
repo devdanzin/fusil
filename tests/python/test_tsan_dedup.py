@@ -66,6 +66,27 @@ REPORT_FRAMEWORK = "\n".join(
 
 NO_RACE = "hello, no ThreadSanitizer here\nSUMMARY: nothing\n"
 
+# A SEGV whose stack TSan couldn't unwind (nested bug) -> signature is the fault addr + pc.
+REPORT_SEGV_NOFRAMES = "\n".join(
+    [
+        "==123==ERROR: ThreadSanitizer: SEGV on unknown address 0x0000000000d8"
+        " (pc 0x5555556bf69f bp 0xdead sp 0xbeef T123)",
+        "==123==The signal is caused by a READ memory access.",
+        "ThreadSanitizer: nested bug in the same thread, aborting.",
+    ]
+)
+
+# A use-after-free with a symbolized crash stack -> signature is the top real site.
+REPORT_UAF_FRAMES = "\n".join(
+    [
+        "==1==ERROR: ThreadSanitizer: heap-use-after-free on address 0x7f00"
+        " (pc 0x1234 bp 0x1 sp 0x2 T1)",
+        "    #0 dictiter_dealloc /b/./Objects/dictobject.c:5620:9 (python+0x1) (BuildId: aa)",
+        "    #1 _Py_Dealloc /b/Objects/object.c:3319:5 (python+0x2) (BuildId: aa)",
+        "SUMMARY: ThreadSanitizer: heap-use-after-free Objects/dictobject.c:5620 in dictiter_dealloc",
+    ]
+)
+
 
 class TestParse(unittest.TestCase):
     def test_signature_is_sorted_site_pair(self):
@@ -138,6 +159,37 @@ class TestDecide(unittest.TestCase):
 
     def test_unparseable_kept(self):
         self.assertEqual(self._deduper().decide(NO_RACE), (True, "tsanNOPARSE"))
+
+
+class TestSegv(unittest.TestCase):
+    def test_segv_no_frames_keyed_on_addr_and_pc(self):
+        r = tsan_dedup.parse_report(REPORT_SEGV_NOFRAMES)
+        self.assertEqual(r["kind"], "segv")
+        self.assertEqual(r["signature"], "SEGV addr=0xd8 pc=0x5555556bf69f")
+        self.assertFalse(r["framework"])
+
+    def test_uaf_with_frames_keyed_on_site(self):
+        r = tsan_dedup.parse_report(REPORT_UAF_FRAMES)
+        self.assertEqual(r["kind"], "segv")
+        self.assertEqual(
+            r["signature"], "heap-use-after-free Objects/dictobject.c:dictiter_dealloc"
+        )
+
+    def test_new_segv_labeled_tsansegv(self):
+        self.assertEqual(tsan_dedup.TSanDeduper().decide(REPORT_SEGV_NOFRAMES), (True, "tsanSEGV"))
+
+    def test_known_segv_labeled_and_prunable(self):
+        d = tsan_dedup.TSanDeduper(keep=1, prune=True)
+        d.snap = tsan_dedup.load_catalog(["TSAN-0009\tSEGV addr=0xd8 pc=0x5555556bf69f"])
+        self.assertEqual(
+            [d.decide(REPORT_SEGV_NOFRAMES) for _ in range(2)],
+            [(True, "TSAN-0009"), (False, "TSAN-0009")],
+        )
+
+    def test_segv_suppressible(self):
+        d = tsan_dedup.TSanDeduper()
+        d.suppressor = tsan_dedup.Suppressor.from_lines(["dictiter_dealloc"])
+        self.assertEqual(d.decide(REPORT_UAF_FRAMES), (False, None))
 
 
 class TestReadStdout(unittest.TestCase):

@@ -344,7 +344,11 @@ C-level race TSan reports. Dropping it in the target's `Lib` and pointing
   Function-level (lines drift). `TSanDeduper.decide(text) -> (keep, label)`: suppressed →
   `(False, None)`; both-sites-in-thread-scaffolding → `(True, "tsanFRAME")` (framework noise,
   kept out of the NEW bucket); catalog hit → the race id (prune past `--tsan-dedup-keep` with
-  `--tsan-dedup-prune`); else `(True, "tsanNEW")`.
+  `--tsan-dedup-prune`); else `(True, "tsanNEW")`. `parse_report` also handles non-race TSan
+  reports (`SEGV`/`heap-use-after-free`/`lock-order-inversion`/`deadlock`): one crash stack →
+  the top-real-site signature if symbolized, else `SEGV addr=0x.. pc=0x..` (deterministic under
+  `setarch -R`), labeled `tsanSEGV`. Added after fleet 01 turned up unsymbolizable SEGV storms
+  (`nested bug … aborting`) that otherwise lumped as `tsanNOPARSE`.
 - **Wiring** (`__init__.py`): `--tsan-dedup-catalog` / `--tsan-dedup-keep` / `--tsan-dedup-prune`,
   installed as `_tsan_keep_policy` on the same `application.session_keep_policy` hook the OOM/hit
   paths use (hit-suppression still wraps it). The kept dir self-labels e.g.
