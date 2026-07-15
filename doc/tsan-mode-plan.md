@@ -263,10 +263,14 @@ This composes with the existing hooks — no new keep/prune plumbing, just a thi
 - **Phase 2: IMPLEMENTED (2026-07-15).** `fusil/python/tsan_dedup.py` (pure engine) + the sibling
   `cpython-tsan-findings` catalog repo + the `session_keep_policy` wiring + unit tests. See
   "Phase 2 as-built" below. Turns a noisy stream into deduped, labeled, prunable findings.
-- **Phase 3:** richer op-mix (shared-argument container races, dunder/`__eq__`-raising churn,
-  weakref/GC interplay), barrier/iteration tuning, per-target suppression management, a fleet
-  profile, and folding the operational knobs below into `--tsan` itself (imply numpy-off; an
-  offline `symbolize=1` re-run to resolve frames for triage).
+- **Phase 3: op-mix enrichment IMPLEMENTED (2026-07-15).** The worker now also exercises the
+  FT-race-rich classes: concurrent `gc.collect()`, attribute-dict churn (`setattr`/`getattr`/
+  `delattr` on one shared instance — the managed-dict race class), `weakref.ref` creation, and
+  shared-container mutation (every sibling worker hammers one `list`/`dict`/`set`/`bytearray`).
+  And **`--tsan` now implies `--no-numpy`** (the numpy plugin injected `import numpy` the TSan
+  target lacks). See "Phase 3 as-built" below. **Still open (future):** per-target suppression
+  management, barrier/iteration auto-tuning, a fleet profile, and pointing it at real CPython
+  core / an FT-unsafe extension (cereggii) rather than the synthetic fixture.
 
 ## Phase 1 as-built: the environment recipe (hard-won)
 
@@ -350,6 +354,29 @@ C-level race TSan reports. Dropping it in the target's `Lib` and pointing
   and can't drift. Empty today (no races catalogued).
 - Tests: `tests/python/test_tsan_dedup.py` (14) — parse, unordered-pair canonicalisation,
   interceptor/plumbing skip, catalog match, prune-past-cap, suppression, framework, no-race.
+
+## Phase 3 as-built: op-mix enrichment + numpy-off
+
+The Phase 1 worker only did read-churn + a method call + a module-function call. Phase 3 adds the
+operation classes where free-threading bugs actually live (the ones the OOM/cereggii campaign
+kept hitting), all guarded and type-agnostic, per worker iteration:
+
+- **Attribute-dict churn** — `setattr(_obj, "_tsan_aN", i)` / `getattr` / periodic `delattr` on a
+  *shared* instance: concurrent `__dict__` materialise/mutate, the managed-dict race class
+  (OOM-0023/`set_keys`, dpdani's cereggii deferred-refcount corruption).
+- **Concurrent `gc.collect()`** (every 16th iteration) while the above churns refcounts and
+  containers — concurrent collection is itself a rich FT-race surface.
+- **`weakref.ref(_obj)`** creation — concurrent weakref-list mutation on the shared object.
+- **Shared-container mutation** — every sibling worker on one `_idx` hammers the same
+  `list`/`dict`/`set`/`bytearray` (`append`/`pop`/`update`/`add`/`discard`), so the container
+  itself is a concurrent-access target, not just an argument.
+
+**`--tsan` implies `--no-numpy`** (`setupProject`): numpy isn't FT-clean and the numpy plugin
+injects `import numpy` into every generated script, which the numpy-less TSan target can't import
+— it died before the stress region. Now auto-forced (guarded: only when that plugin option exists
+and the user didn't already pass it), logged as `TSan: forcing --no-numpy`. Verified end-to-end:
+a run with **no** `--no-numpy` flag now auto-suppresses numpy and still detects + labels the race.
+Test: `test_tsan_generation.py::test_enriched_op_mix_emitted`. Goldens unchanged (emitter gated).
 
 ## 10. Testing
 
