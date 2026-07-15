@@ -431,10 +431,32 @@ class Fuzzer(Application):
         tsan_options.add_option(
             "--tsan-suppressions",
             help="Path to a ThreadSanitizer suppressions file (passed to the target via "
-            "TSAN_OPTIONS=suppressions=...). Default: none (CPython's "
-            "suppressions_free_threading.txt is currently empty, so core races are in scope).",
+            "TSAN_OPTIONS=suppressions=..., and honoured post-hoc by --tsan-dedup-catalog). "
+            "Default: none (CPython's suppressions_free_threading.txt is currently empty, so "
+            "core races are in scope).",
             type="str",
             default=None,
+        )
+        tsan_options.add_option(
+            "--tsan-dedup-catalog",
+            help="Path to a known_races.tsv snapshot (from the cpython-tsan-findings catalog). "
+            "In-loop dedupe: each detected race is reduced to its site-pair signature, labelled "
+            "with its race id (or tsanNEW / tsanFRAME), and -- with --tsan-dedup-prune -- known "
+            "duplicates past --tsan-dedup-keep are dropped. Default: none (label-only, keep all).",
+            type="str",
+            default=None,
+        )
+        tsan_options.add_option(
+            "--tsan-dedup-keep",
+            help="With --tsan-dedup-prune, keep at most N dirs per known race (default: 5)",
+            type="int",
+            default=5,
+        )
+        tsan_options.add_option(
+            "--tsan-dedup-prune",
+            help="Drop known-race duplicate crash dirs past --tsan-dedup-keep (default: False)",
+            action="store_true",
+            default=False,
         )
 
         options = (
@@ -715,11 +737,35 @@ class Fuzzer(Application):
                 )
             )
 
+        # TSan race dedupe (Phase 2): the --tsan analogue of the OOM catalog dedupe above. Reduce
+        # each detected data race to its site-pair signature, label the crash dir with its race id
+        # (or tsanNEW / tsanFRAME), and optionally prune known duplicates past the sample cap. Only
+        # under --tsan (mutually exclusive with --oom-*, so it never coexists with the OOM deduper).
+        self._tsan_deduper = None
+        if self.options.tsan and self.options.tsan_dedup_catalog:
+            from fusil.python.tsan_dedup import TSanDeduper
+
+            self._tsan_deduper = TSanDeduper(
+                self.options.tsan_dedup_catalog,
+                keep=self.options.tsan_dedup_keep,
+                prune=self.options.tsan_dedup_prune,
+                suppressions_path=self.options.tsan_suppressions,
+            )
+            self.session_keep_policy = self._tsan_keep_policy
+            project.error(
+                "TSan dedupe enabled: %s (keep=%d, prune=%s)"
+                % (
+                    self.options.tsan_dedup_catalog,
+                    self.options.tsan_dedup_keep,
+                    self.options.tsan_dedup_prune,
+                )
+            )
+
         # Regex hit suppression (issue #53): drop known/uninteresting crashing-session hits
         # whose stdout matches a user- or plugin-supplied regex -- the general/non-OOM analogue
         # of the OOM-catalog dedupe above. Composes with it: suppression runs first (a matched
         # hit is pruned even if the OOM deduper would keep it); otherwise the previously-installed
-        # policy (if any) still decides.
+        # policy (if any -- OOM or TSan dedupe) still decides.
         self._hit_suppressor = None
         suppress_regexes = self.options.suppress_hit_regex or []
         suppress_files = self.options.suppress_hit_file or []
@@ -805,11 +851,32 @@ class Fuzzer(Application):
             self.error("OOM keep-policy failed (%s); keeping crash dir unlabelled" % err)
             return True, None
 
+    def _tsan_keep_policy(self, session):
+        """Return (keep, label) for a crashed --tsan session from its captured stdout: reduce the
+        ThreadSanitizer report to its race signature, then label / prune via the catalog.
+
+        Consulted synchronously by SessionDirectory.checkKeepDirectory (stdout is complete).
+        Returns (True, None) on any error so a race is never lost to a dedupe failure.
+        """
+        import os
+
+        session_dir = session.directory.directory
+        try:
+            from fusil.python.tsan_dedup import read_crash_stdout
+
+            text = read_crash_stdout(os.path.join(session_dir, "stdout"))
+            return self._tsan_deduper.decide(text)
+        except Exception as err:
+            self.error("TSan keep-policy failed (%s); keeping crash dir unlabelled" % err)
+            return True, None
+
     def exit(self, keep_log: bool = True) -> None:
         """Clean up and exit the fuzzer, printing runtime statistics."""
         super().exit(keep_log=keep_log)
         if getattr(self, "_deduper", None):
             self.error(self._deduper.report())
+        if getattr(self, "_tsan_deduper", None):
+            self.error(self._tsan_deduper.report())
         if getattr(self, "_hit_suppressor", None):
             self.error(self._hit_suppressor.report())
         self.error(print_running_time(time_start))
