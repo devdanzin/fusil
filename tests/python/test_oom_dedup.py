@@ -107,6 +107,44 @@ ABORT_VALIDATE_LIST = "\n".join(
         '  Binary file "/build/python", at _PyGC_Collect+0x41 [0x4]',
     ]
 )
+# The negative-refcount DETECTOR assert (`_Py_NegativeRefcount: ... object has negative ref count`)
+# has TWO shapes. DEFERRED: the over-decref'd object is detected during unrelated frame/exception
+# teardown (the OOM-0036 stackref family), so the ASan backtrace is the dealloc-detection cascade and
+# every real frame under the refcount plumbing (PyStackRef_XCLOSE, frame_dealloc, tb_dealloc, ...) is a
+# bystander -- the producer already returned. Must fold to needs-resolution (oomSEGV), never a distinct
+# oomNEW keyed on the useless negref assert expr or a bystander dealloc frame.
+ABORT_NEGREF_DEFERRED = "\n".join(
+    [
+        "./Include/internal/pycore_stackref.h:726: _Py_NegativeRefcount: "
+        "Assertion failed: object has negative ref count",
+        "Fatal Python error: _PyObject_AssertFailed: _PyObject_AssertFailed",
+        "    #8 0x5b61fdfbb838 in _PyObject_AssertFailed Objects/object.c:3278",
+        "    #9 0x5b61fdfbbb22 in _Py_NegativeRefcount Objects/object.c:275",
+        "    #10 0x5b61fdf34272 in Py_DECREF Include/refcount.h:354",
+        "    #11 0x5b61fdf34b93 in PyStackRef_XCLOSE Include/internal/pycore_stackref.h:726",
+        "    #12 0x5b61fdf3ad42 in frame_dealloc Objects/frameobject.c:1949",
+        "    #13 0x5b61fdfba573 in _Py_Dealloc Objects/object.c:3319",
+        "    #14 0x5b61fe33a297 in tb_dealloc Python/traceback.c:246",
+    ]
+)
+# INLINE: the producer over-decref's in place and the very next decref trips the negref assert, so the
+# producer frame sits right under the refcount plumbing (this is OOM-0019 = a double `Py_XDECREF` inside
+# `_PyPegen_raise_error_known_location`). decide() must still resolve past the detectors and FOLD it to
+# the known bug -- NOT swallow it as an unresolved oomSEGV. Here the inline producer is `code_dealloc`
+# (an OOM-0003 catalog site) to reuse the base snapshot.
+ABORT_NEGREF_INLINE = "\n".join(
+    [
+        "./Include/refcount.h:520: _Py_NegativeRefcount: "
+        "Assertion failed: object has negative ref count",
+        "Fatal Python error: _PyObject_AssertFailed: _PyObject_AssertFailed",
+        "    #8 0x5b61fdfbb838 in _PyObject_AssertFailed Objects/object.c:3278",
+        "    #9 0x5b61fdfbbb22 in _Py_NegativeRefcount Objects/object.c:275",
+        "    #10 0x5b61fdf34272 in Py_DECREF Include/refcount.h:354",
+        "    #11 0x5b61fdf34b93 in Py_XDECREF Include/refcount.h:520",
+        "    #12 0x5b61fdf3ad42 in code_dealloc Objects/codeobject.c:2440",
+        "    #13 0x5b61fdfba573 in _PyEval_EvalFrameDefault Python/ceval.c:1000",
+    ]
+)
 
 
 class TestClassify(unittest.TestCase):
@@ -328,6 +366,43 @@ class TestGenericDetectorAssert(unittest.TestCase):
         keep, label = d.decide(ABORT_VALIDATE_LIST, source_path=None)
         self.assertEqual((keep, label), (True, "oomSEGV"))
         self.assertFalse(any("validate_list" in k or "gc.c:380" in k for k in d.seen))
+
+
+class TestNegrefDetectorAssert(unittest.TestCase):
+    """`_Py_NegativeRefcount`'s `object has negative ref count` assert is the negref DETECTOR face
+    of the over-decref family. Its DEFERRED shape (producer already returned; the OOM-0036 stackref
+    family) must fold to needs-resolution (oomSEGV), while its INLINE shape (OOM-0019: producer right
+    under the refcount plumbing) must STILL resolve past the detectors and fold to the known bug."""
+
+    def _deduper(self, keep=5, prune=False):
+        fd, path = tempfile.mkstemp(suffix=".tsv")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SNAPSHOT)
+        self.addCleanup(os.unlink, path)
+        return oom_dedup.Deduper(path, keep=keep, prune=prune)
+
+    def test_deferred_negref_is_segv_not_new(self):
+        # A full ASan dealloc-detection cascade whose only real frames under the refcount plumbing are
+        # bystanders (frame_dealloc/tb_dealloc) -> the producer returned -> oomSEGV, never oomNEW.
+        d = self._deduper()
+        keep, label = d.decide(ABORT_NEGREF_DEFERRED, source_path=None)
+        self.assertEqual((keep, label), (True, "oomSEGV"))
+        # never keyed on the useless negref assert expr nor a bystander teardown frame.
+        self.assertFalse(any("negative ref count" in k for k in d.seen))
+        self.assertFalse(any("frame_dealloc" in k or "pycore_stackref" in k for k in d.seen))
+
+    def test_deferred_negref_never_pruned(self):
+        d = self._deduper(keep=1, prune=True)
+        for _ in range(3):
+            self.assertEqual(d.decide(ABORT_NEGREF_DEFERRED)[0], True)
+
+    def test_inline_negref_folds_to_known_producer(self):
+        # regression guard for OOM-0019: the negref assert is generic, but its chain resolves to the
+        # inline producer (code_dealloc = an OOM-0003 site) -> must fold there, NOT be swallowed as
+        # an unresolved oomSEGV.
+        d = self._deduper()
+        keep, label = d.decide(ABORT_NEGREF_INLINE, source_path=None)
+        self.assertEqual((keep, label), (True, "OOM-0003"))
 
 
 class TestHardening(unittest.TestCase):
