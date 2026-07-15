@@ -695,6 +695,8 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
         self.write(0, "# --- TSan concurrency-stress region (--tsan) ---")
         self.write(0, "import threading as _tsan_threading")
+        self.write(0, "import gc as _tsan_gc")
+        self.write(0, "import weakref as _tsan_weakref")
         self.write_print_to_stderr(0, '"[TSAN] entering concurrency-stress region"')
         # Free-threading is mandatory: without it the whole region is GIL-serialised noise.
         self.write(0, 'if getattr(sys, "_is_gil_enabled", lambda: True)():')
@@ -729,13 +731,17 @@ class WritePythonCode(WriteCode):
             def _tsan_worker(_idx, _wid):
                 _obj = _tsan_shared[_idx]
                 _names = [n for n in dir(_obj) if not n.startswith("_")]
+                # one shared mutable container this worker (and its siblings on _idx) also hammers
+                _bag = _tsan_shared_args[_idx % len(_tsan_shared_args)]
                 _tsan_barrier.wait()
                 for _i in range(_ITERS):
+                    # (a) dunder / read churn on the shared object
                     for _op in (repr, hash, list, len, bool, iter, str):
                         try:
                             _op(_obj)
                         except Exception:
                             pass
+                    # (b) a method call with shared (mutable) arguments
                     if _names:
                         try:
                             _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
@@ -743,10 +749,48 @@ class WritePythonCode(WriteCode):
                                 _m(*_tsan_shared_args[: (_i % 3)])
                         except Exception:
                             pass
+                    # (c) a module function with the shared object as an argument
                     if _tsan_funcs:
                         try:
                             getattr(fuzz_target_module,
                                     _tsan_funcs[(_wid + _i) % len(_tsan_funcs)])(_obj)
+                        except Exception:
+                            pass
+                    # (d) attribute-dict churn: concurrent __dict__ materialise/mutate on one
+                    # shared instance (the managed-dict race class -- e.g. OOM-0023/set_keys,
+                    # the deferred-refcount corruption dpdani's cereggii hit).
+                    try:
+                        setattr(_obj, "_tsan_a%d" % (_i % 4), _i)
+                        getattr(_obj, "_tsan_a%d" % (_wid % 4), None)
+                        if _i % 8 == 0:
+                            delattr(_obj, "_tsan_a%d" % (_i % 4))
+                    except Exception:
+                        pass
+                    # (e) weakref churn: concurrent weakref creation/clear on the shared object
+                    try:
+                        _tsan_weakref.ref(_obj)
+                    except Exception:
+                        pass
+                    # (f) shared-container mutation: hammer ONE container from every sibling worker
+                    try:
+                        if isinstance(_bag, list):
+                            _bag.append(_i)
+                            _bag[:1]
+                        elif isinstance(_bag, dict):
+                            _bag[_wid] = _i
+                            _bag.get(_i)
+                        elif isinstance(_bag, set):
+                            _bag.add(_wid)
+                            _bag.discard(_i)
+                        elif isinstance(_bag, bytearray):
+                            _bag.append(_i & 0xFF)
+                    except Exception:
+                        pass
+                    # (g) concurrent GC while all the above churns refcounts + containers
+                    # (concurrent collection is itself a rich FT-race surface).
+                    if _i % 16 == 0:
+                        try:
+                            _tsan_gc.collect()
                         except Exception:
                             pass
             """,

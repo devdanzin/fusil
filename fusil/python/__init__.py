@@ -506,6 +506,14 @@ class Fuzzer(Application):
                 "allocator swap is not thread-safe; combining them races the harness itself)"
             )
 
+        # --tsan implies --no-numpy: numpy isn't free-threading-clean, and the numpy plugin
+        # injects `import numpy` into EVERY generated script -- which the (numpy-less)
+        # ThreadSanitizer target can't import, so the child dies before the stress region. Only
+        # act if the plugin registered its --no-numpy option and the user didn't already pass it.
+        if self.options.tsan and getattr(self.options, "no_numpy", None) is False:
+            self.options.no_numpy = True
+            self.error("TSan: forcing --no-numpy (numpy is not free-threading-clean)")
+
         project = self.project
         if not self.project:
             project = self.project = Project(self)

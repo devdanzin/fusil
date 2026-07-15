@@ -99,6 +99,16 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("_is_gil_enabled", src)
         self.assertIn("raise SystemExit(3)", src)
 
+    def test_enriched_op_mix_emitted(self):
+        # Phase 3: the worker exercises the FT-race-rich classes, not just method calls.
+        src = _generate_tsan()
+        self.assertIn("import gc as _tsan_gc", src)
+        self.assertIn("import weakref as _tsan_weakref", src)
+        self.assertIn("_tsan_gc.collect()", src)  # concurrent GC
+        self.assertIn("_tsan_weakref.ref(_obj)", src)  # weakref churn
+        self.assertIn("setattr(_obj,", src)  # managed-dict / attribute churn
+        self.assertIn("isinstance(_bag,", src)  # shared-container mutation
+
     def test_shares_objects_and_module_functions(self):
         src = _generate_tsan()
         # a module class is instantiated into the shared pool, plus the module itself.
