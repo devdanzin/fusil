@@ -287,6 +287,16 @@ This composes with the existing hooks — no new keep/prune plumbing, just a thi
   now excludes process-lifecycle calls (`TSAN_UNSAFE_CALLS`: fork/forkpty/spawn*/exec*/_exit/
   abort/system/popen/…) from both `_tsan_funcs` and the runtime `dir()` loop — they are never a
   useful race target and would fork/replace the fuzzer anyway.
+- **`posix-sigabrt` NOPARSE = the same self-destruct class, second face.** The other `tsanNOPARSE`
+  cluster was two `posix` runs killed by **SIGABRT** (signal 6) with *no* ThreadSanitizer output at
+  all — stdout ending exactly at `[TSAN] entering concurrency-stress region`. Diagnosed as
+  `posix.abort()` (≡ `os.abort()`): the pre-fix unfiltered `dir()` loop over the shared `posix`
+  module called it, and C `abort()` raises SIGABRT directly. Reproduces in one line
+  (`posix.abort()` → exit 134). Same root cause and **same fix** as the `pty` SEGV — `abort` is in
+  `TSAN_UNSAFE_CALLS`, so post-fix the shared module never exposes it. Deliberately *not*
+  auto-suppressed in the deduper: a bare signal-6 with no message is a harness self-abort, but a
+  signal-6 carrying a `Fatal Python error:` / `Assertion` banner would be a real concurrency crash,
+  so NOPARSE stays a manual glance. (Catalog: `notes/harness-self-destruct-noparse.md`.)
 
 ## Phase 1 as-built: the environment recipe (hard-won)
 
