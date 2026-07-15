@@ -34,6 +34,7 @@ _DEFAULT_OPTIONS = dict(
     verbose=False,
     no_threads=False,
     no_async=False,
+    tsan=False,
     filenames="",
 )
 

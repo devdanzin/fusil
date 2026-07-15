@@ -622,6 +622,13 @@ class WritePythonCode(WriteCode):
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self._write_fuzzing_logic_preamble()
 
+        # TSan mode: skip the single-threaded function/class/object sweeps and emit only the
+        # concurrency-stress region -- it instantiates its own shared objects and hammers them
+        # from many threads, which is the whole point (and keeps the instrumented script small).
+        if self.options.tsan:
+            self._write_tsan_stress_region()
+            return
+
         self._write_function_fuzzing_loop()
         self.emptyLine()
 
@@ -662,6 +669,103 @@ class WritePythonCode(WriteCode):
             """
             ),
         )
+        self.emptyLine()
+
+    def _write_tsan_stress_region(self) -> None:
+        """Emit the --tsan concurrency-stress region.
+
+        Instantiates a few SHARED objects and hammers each from multiple worker threads
+        (barrier-released so they start hot, each repeating an op-mix `--tsan-iterations` times),
+        so concurrent C-level access to one object's state -- and to shared mutable arguments --
+        surfaces data races under ThreadSanitizer. Unlike the per-call thread wrapper (disabled
+        under --tsan), the concurrency here is CONCENTRATED on shared state, which is what trips
+        a race. The worker is type-agnostic (introspects `dir(obj)` at runtime) so one emitted
+        body drives any shared object.
+        """
+        from random import sample
+
+        workers_per_obj = max(2, self.options.tsan_threads)
+        iters = max(1, self.options.tsan_iterations)
+        n_shared = max(1, self.options.tsan_shared_objects)
+
+        classes = self.module_classes or []
+        shared_classes = sample(classes, min(n_shared, len(classes))) if classes else []
+        funcs = list(self.module_functions or [])[:40]
+
+        self.emptyLine()
+        self.write(0, "# --- TSan concurrency-stress region (--tsan) ---")
+        self.write(0, "import threading as _tsan_threading")
+        self.write_print_to_stderr(0, '"[TSAN] entering concurrency-stress region"')
+        # Free-threading is mandatory: without it the whole region is GIL-serialised noise.
+        self.write(0, 'if getattr(sys, "_is_gil_enabled", lambda: True)():')
+        with self.indented():
+            self.write_print_to_stderr(
+                0, '"[TSAN] FATAL: GIL enabled; need PYTHON_GIL=0 + a --disable-gil build"'
+            )
+            self.write(0, "raise SystemExit(3)")
+        # Mutable containers shared BY REFERENCE across every worker (shared-argument races).
+        self.write(0, '_tsan_shared_args = [[1, 2, 3], {"k": 1}, {1, 2, 3}, bytearray(b"fusil")]')
+        self.write(0, "_tsan_funcs = %r" % (funcs,))
+        # Build the shared objects: instantiate a few module classes (guarded), plus the module.
+        self.write(0, "_tsan_shared = []")
+        for class_name in shared_classes:
+            self.write(0, "try:")
+            with self.indented():
+                self.write(0, "_tsan_shared.append(getattr(fuzz_target_module, %r)())" % class_name)
+            self.write(0, "except Exception:")
+            with self.indented():
+                self.write(0, "pass")
+        self.write(0, "_tsan_shared.append(fuzz_target_module)")
+        self.write(0, "if not _tsan_shared:")
+        with self.indented():
+            self.write(0, "_tsan_shared = [fuzz_target_module]")
+        self.write(0, "_WORKERS_PER_OBJ = %d" % workers_per_obj)
+        self.write(0, "_ITERS = %d" % iters)
+        self.write(0, "_tsan_total = len(_tsan_shared) * _WORKERS_PER_OBJ")
+        self.write(0, "_tsan_barrier = _tsan_threading.Barrier(_tsan_total)")
+        self.write_block(
+            0,
+            """
+            def _tsan_worker(_idx, _wid):
+                _obj = _tsan_shared[_idx]
+                _names = [n for n in dir(_obj) if not n.startswith("_")]
+                _tsan_barrier.wait()
+                for _i in range(_ITERS):
+                    for _op in (repr, hash, list, len, bool, iter, str):
+                        try:
+                            _op(_obj)
+                        except Exception:
+                            pass
+                    if _names:
+                        try:
+                            _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
+                            if callable(_m):
+                                _m(*_tsan_shared_args[: (_i % 3)])
+                        except Exception:
+                            pass
+                    if _tsan_funcs:
+                        try:
+                            getattr(fuzz_target_module,
+                                    _tsan_funcs[(_wid + _i) % len(_tsan_funcs)])(_obj)
+                        except Exception:
+                            pass
+            """,
+        )
+        self.write_block(
+            0,
+            """
+            _tsan_threads = []
+            for _idx in range(len(_tsan_shared)):
+                for _wid in range(_WORKERS_PER_OBJ):
+                    _tsan_threads.append(_tsan_threading.Thread(
+                        target=_tsan_worker, args=(_idx, _wid), name="tsan_%d_%d" % (_idx, _wid)))
+            for _t in _tsan_threads:
+                _t.start()
+            for _t in _tsan_threads:
+                _t.join()
+            """,
+        )
+        self.write_print_to_stderr(0, '"[TSAN] concurrency-stress region complete"')
         self.emptyLine()
 
     def _write_function_fuzzing_loop(self) -> None:

@@ -45,6 +45,8 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.gc_aggressive = False
     o.oom_foreign = False
     o.oom_foreign_pythonmalloc = False
+    # TSan mode OFF (explicit: a bare MagicMock attr would be truthy and divert generation).
+    o.tsan = False
     o.test_private = False
     o.no_numpy = True
     o.no_tstrings = True
