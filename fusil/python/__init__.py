@@ -588,17 +588,22 @@ class Fuzzer(Application):
                     "with `--disable-gil --with-thread-sanitizer` and point --python at it."
                     % (free_threaded, thread_sanitizer, self.options.python)
                 )
-            # symbolize=0: at present the symbolizer hangs the child on the first race (a
-            # regression under investigation -- this did not used to happen, even on debug builds).
-            # Sidestepping it is safe because the `WARNING: ThreadSanitizer: data race` line prints
-            # BEFORE the frames, so textual detection is unaffected -- resolve frames offline for
-            # triage. Revisit (symbolize=1 in-loop) once the hang is fixed. halt_on_error=1/
-            # exitcode=66: stop at the first race with a clean exit.
-            tsan_opts = ["halt_on_error=1", "symbolize=0", "exitcode=66", "history_size=4"]
+            # symbolize=1: the "symbolizer hang" was NOT a TSan/build fault -- llvm-symbolizer
+            # honours DEBUGINFOD_URLS (Ubuntu sets it to debuginfod.ubuntu.com in every login
+            # shell) and blocks ~forever on that currently-blackholed endpoint. With it cleared in
+            # the child (below), symbolization returns in ~0.3s with full file:line frames -- worth
+            # having in-loop, since the racing site then lands in the crash dir for triage/dedup.
+            # halt_on_error=1/exitcode=66: stop at the first race with a clean exit.
+            tsan_opts = ["halt_on_error=1", "symbolize=1", "exitcode=66", "history_size=4"]
             if self.options.tsan_suppressions:
                 tsan_opts.append("suppressions=%s" % self.options.tsan_suppressions)
             process.env.set("TSAN_OPTIONS", ":".join(tsan_opts))
             process.env.set("PYTHON_GIL", "0")
+            # Clear DEBUGINFOD_URLS so llvm-symbolizer resolves frames from the target's own (full)
+            # debug info instead of blocking on the unreachable Ubuntu debuginfod server. fusil's
+            # child env is minimal and does not copy DEBUGINFOD_URLS, but set it empty explicitly so
+            # symbolization stays fast regardless of how the parent env is configured.
+            process.env.set("DEBUGINFOD_URLS", "")
             self.error(
                 "TSan: target verified free-threaded + ThreadSanitizer; ASLR disabled via "
                 "`setarch -R`; TSAN_OPTIONS=%s" % ":".join(tsan_opts)
