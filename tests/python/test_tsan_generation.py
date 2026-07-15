@@ -26,8 +26,16 @@ def _tsan_module():
     def helper(*a):
         return a
 
+    def fork(*a):  # a process-lifecycle call the stress region must NOT invoke
+        return a
+
+    def execv(*a):
+        return a
+
     mod.Widget = Widget
     mod.helper = helper
+    mod.fork = fork
+    mod.execv = execv
     return mod
 
 
@@ -122,6 +130,18 @@ class TestTSanGeneration(unittest.TestCase):
         src = _generate_tsan(threads=7, iterations=42)
         self.assertIn("_WORKERS_PER_OBJ = 7", src)
         self.assertIn("_ITERS = 42", src)
+
+    def test_process_lifecycle_calls_excluded(self):
+        # fork/exec/spawn/... must not be in the module-function list, and the runtime dir()
+        # filter must guard the shared module object too (forking a worker crashes the child
+        # under TSan -- __tsan::TraceSwitchPart -- and would fork/replace the fuzzer anyway).
+        src = _generate_tsan()
+        funcs_line = next(ln for ln in src.splitlines() if ln.startswith("_tsan_funcs = "))
+        self.assertIn("'helper'", funcs_line)
+        self.assertNotIn("'fork'", funcs_line)
+        self.assertNotIn("'execv'", funcs_line)
+        self.assertIn("_tsan_unsafe = frozenset(", src)
+        self.assertIn("n not in _tsan_unsafe", src)
 
     def test_replaces_single_threaded_sweeps(self):
         # Under --tsan the normal function-fuzzing sweep is skipped in favour of the stress

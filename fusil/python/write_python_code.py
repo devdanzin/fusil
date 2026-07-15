@@ -59,6 +59,23 @@ TRIVIAL_TYPES = {
 }
 TRIVIAL_TYPES_STR = "{int, str, float, bool, bytes, tuple, list, dict, set, type(None),}"
 
+# Process-lifecycle calls the --tsan stress region must never make: forking a fuzzer worker
+# thread (os.fork/forkpty, pty.fork/spawn, os.spawn*/posix_spawn without an immediate exec)
+# leaves the child with an inconsistent runtime -- and under ThreadSanitizer that is an
+# *unsupported* case (fork in a multithreaded process w/o immediate exec), so the child crashes
+# inside the TSan runtime (__tsan::TraceSwitchPart, a NULL ThreadState deref). exec*/_exit/abort
+# would replace or kill the fuzzing process outright. None of these are useful to race; skip them.
+TSAN_UNSAFE_CALLS = frozenset(
+    {
+        "fork", "forkpty", "posix_spawn", "posix_spawnp",
+        "spawn", "spawnl", "spawnle", "spawnlp", "spawnlpe",
+        "spawnv", "spawnve", "spawnvp", "spawnvpe",
+        "exec", "execl", "execle", "execlp", "execlpe",
+        "execv", "execve", "execvp", "execvpe",
+        "_exit", "abort", "system", "popen", "register_at_fork",
+    }
+)  # fmt: skip
+
 
 class PythonFuzzerError(Exception):
     """Custom exception raised when fuzzer encounters unrecoverable errors."""
@@ -690,7 +707,9 @@ class WritePythonCode(WriteCode):
 
         classes = self.module_classes or []
         shared_classes = sample(classes, min(n_shared, len(classes))) if classes else []
-        funcs = list(self.module_functions or [])[:40]
+        # Drop process-lifecycle calls (fork/exec/spawn/...): forking a worker crashes the child
+        # under TSan and is never a useful race target (see TSAN_UNSAFE_CALLS).
+        funcs = [f for f in (self.module_functions or []) if f not in TSAN_UNSAFE_CALLS][:40]
 
         self.emptyLine()
         self.write(0, "# --- TSan concurrency-stress region (--tsan) ---")
@@ -708,6 +727,9 @@ class WritePythonCode(WriteCode):
         # Mutable containers shared BY REFERENCE across every worker (shared-argument races).
         self.write(0, '_tsan_shared_args = [[1, 2, 3], {"k": 1}, {1, 2, 3}, bytearray(b"fusil")]')
         self.write(0, "_tsan_funcs = %r" % (funcs,))
+        # Runtime skip set: the worker introspects dir(shared_object), so a shared MODULE object
+        # would still expose fork/exec/... by name -- filter them there too.
+        self.write(0, "_tsan_unsafe = frozenset(%r)" % (tuple(sorted(TSAN_UNSAFE_CALLS)),))
         # Build the shared objects: instantiate a few module classes (guarded), plus the module.
         self.write(0, "_tsan_shared = []")
         for class_name in shared_classes:
@@ -730,7 +752,7 @@ class WritePythonCode(WriteCode):
             """
             def _tsan_worker(_idx, _wid):
                 _obj = _tsan_shared[_idx]
-                _names = [n for n in dir(_obj) if not n.startswith("_")]
+                _names = [n for n in dir(_obj) if not n.startswith("_") and n not in _tsan_unsafe]
                 # one shared mutable container this worker (and its siblings on _idx) also hammers
                 _bag = _tsan_shared_args[_idx % len(_tsan_shared_args)]
                 _tsan_barrier.wait()
