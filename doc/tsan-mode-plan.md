@@ -269,8 +269,14 @@ This composes with the existing hooks — no new keep/prune plumbing, just a thi
   shared-container mutation (every sibling worker hammers one `list`/`dict`/`set`/`bytearray`).
   And **`--tsan` now implies `--no-numpy`** (the numpy plugin injected `import numpy` the TSan
   target lacks). See "Phase 3 as-built" below. **Still open (future):** per-target suppression
-  management, barrier/iteration auto-tuning, a fleet profile, and pointing it at real CPython
-  core / an FT-unsafe extension (cereggii) rather than the synthetic fixture.
+  management, barrier/iteration auto-tuning, and pointing it at real CPython core / an FT-unsafe
+  extension (cereggii) rather than the synthetic fixture.
+- **Phase 4 — fleet-triage readiness (2026-07-15).** The `cpython-tsan-findings` catalog is
+  published (`github.com/devdanzin/cpython-tsan-findings`), its `ingest.py` verified against real
+  fusil `--tsan` crash-dir stdout (it parses the race out of the full session output, not just a
+  clean report), the `fleet` preflight validates a `--tsan` fleet's TSan target + `known_races.tsv`
+  catalog, and `fleet/README.md` documents the `--tsan` fleet config + the ingest → report →
+  `gen_known_races` triage loop. Ready to point at a real target and catalog real races.
 
 ## Phase 1 as-built: the environment recipe (hard-won)
 

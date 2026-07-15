@@ -52,6 +52,20 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
         *--oom-dedup-catalog*) [ -f "$CATALOG" ] || {
             echo "  CATALOG not found but --oom-dedup-catalog is set: '$CATALOG'"; ok=0; } ;;
     esac
+    case "$FUSIL_FLAGS" in
+        *--tsan-dedup-catalog*) [ -f "$CATALOG" ] || {
+            echo "  CATALOG not found but --tsan-dedup-catalog is set: '$CATALOG'"
+            echo "    -> point CATALOG at cpython-tsan-findings/catalog/known_races.tsv"; ok=0; } ;;
+    esac
+    # A --tsan fleet needs a free-threaded + ThreadSanitizer TARGET (fusil's own preflight fails
+    # fast otherwise, wasting the instance). Check here so the whole fleet doesn't start doomed.
+    case "$FUSIL_FLAGS" in
+        *--tsan*) [ -x "$TARGET_PYTHON" ] && "$TARGET_PYTHON" -c \
+            'import sys,sysconfig; ca=sysconfig.get_config_var("CONFIG_ARGS") or ""; sys.exit(0 if (not sys._is_gil_enabled() and "thread-sanitizer" in ca) else 1)' \
+            2>/dev/null || {
+            echo "  --tsan is set but TARGET_PYTHON is not free-threaded + --with-thread-sanitizer: '$TARGET_PYTHON'"
+            echo "    -> use a builds/*-ft-*-tsan interpreter"; ok=0; } ;;
+    esac
     if [ -x "$RUNNER_PY" ] && [ -f "$FUSIL_PY" ]; then
         PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$RUNNER_PY" -c 'import fusil, ptrace' 2>/dev/null \
             || { echo "  RUNNER_PY cannot 'import fusil, ptrace': '$RUNNER_PY'"

@@ -74,6 +74,32 @@ Because systemd `enable`s them, they also come back **after a reboot**.
   it can still grow within a run; set `LOG=none` in `fleet.conf` to discard fusil's
   stdout (you still get crash dirs + `session.log` + systemd's start/stop in journald).
 
+## TSan fleets (data-race fuzzing)
+
+To hunt ThreadSanitizer data races instead of OOM crashes, point the fleet at a
+free-threaded **`--with-thread-sanitizer`** interpreter and swap the flags in `fleet.conf`:
+
+```sh
+TARGET_PYTHON=~/projects/python_build_matrix/builds/debug-ft-nojit-tsan/python
+GIL_MODES="0"                                  # --tsan requires free-threading
+CATALOG=~/projects/cpython-tsan-findings/catalog/known_races.tsv
+FUSIL_FLAGS="--tsan --tsan-dedup-prune --tsan-dedup-catalog=$CATALOG"
+```
+
+`fleet check` validates the TSan target and the catalog for you. fusil handles the rest
+(`setarch -R`, unlimited `RLIMIT_AS`, `TSAN_OPTIONS`, `DEBUGINFOD_URLS=`, implied `--no-numpy`);
+see `doc/tsan-mode-plan.md`. Crash dirs self-label `…-warning_threadsanitizer_data_race-…`
+(and their race id / `tsanNEW` / `tsanFRAME` under `--tsan-dedup-catalog`).
+
+**Triage loop** (in the sibling `cpython-tsan-findings` catalog):
+
+```sh
+FUSIL_TSAN_DEDUP=../fusil/fusil/python/tsan_dedup.py \
+  python3 scripts/ingest.py <fleet-dir>/inst-*/python/*   # bucket by race signature; NEW ones need a report
+# write reports/TSAN-NNNN-.../meta.json for each new signature, then:
+python3 scripts/gen_known_races.py                        # regenerate known_races.tsv; fleet restart picks it up
+```
+
 ## Under the hood (so it's not a black box)
 
 - **`fusil@.service.in`** — a systemd *template* unit. `%i` is the instance number;
