@@ -35,11 +35,16 @@ SEGV = re.compile(
     r"(?:.*?\baddress 0x0*([0-9a-fA-F]+))?(?:.*?\bpc 0x0*([0-9a-fA-F]+))?"
 )
 # An access stanza header: "[Previous ][Atomic ](Write|Read) of size N at 0xADDR by thread T#:".
-# TSan capitalises the FIRST access ("Write"/"Read") but lowercases the second ("Previous
-# write"/"Previous read"), so match either case. The thread-CREATION stanzas ("Thread T1 '...'
-# created by ...") do NOT match, so only the two racing data accesses feed the signature.
+# TSan capitalises the FIRST access ("Write"/"Read"/"Atomic write") but lowercases the second
+# ("Previous write"/"Previous read"/"Previous atomic write"), so match either case -- including
+# the `atomic` qualifier, which is lowercased on the second access too. Missing "Previous atomic
+# write" silently dropped the 2nd stanza, and the len(stanzas)<2 fallback below then duplicated
+# the 1st -- fabricating a symmetric "A | A" signature for exactly the non-atomic-reader-vs-
+# atomic-writer races this catalog is mostly made of (18% of fleet-03's race dirs). The
+# thread-CREATION stanzas ("Thread T1 '...' created by ...") do NOT match, so only the two racing
+# data accesses feed the signature.
 ACCESS = re.compile(
-    r"^\s*(?:Previous\s+)?(?:Atomic\s+)?(?:[Ww]rite|[Rr]ead) of size \d+ at 0x[0-9a-fA-F]+ by "
+    r"^\s*(?:Previous\s+)?(?:[Aa]tomic\s+)?(?:[Ww]rite|[Rr]ead) of size \d+ at 0x[0-9a-fA-F]+ by "
 )
 # A symbolized TSan frame: "#N func /abs/.../<CPythonDir>/file.c:line:col (module+0xoff) ...".
 # func or the location may be "<null>" (interceptors / non-CPython .so frames); those simply
@@ -89,10 +94,35 @@ PLUMBING_SKIP = frozenset(
 # here); skip by pattern.
 _STACKREF = re.compile(r"\w*StackRef\w*|_PyRun_\w*")
 
-# Thread/frame scaffolding: a race whose BOTH access sites live only here is Python's own
-# thread machinery racing under the harness spinning 8 threads up/down -- framework noise, not
-# a target finding. Labeled tsanFRAME (kept, but out of the tsanNEW bucket).
-FRAMEWORK_FILES = re.compile(r"(?:_threadmodule\.c|thread_pthread\.h)$")
+# Thread/frame scaffolding: a race whose BOTH access sites are Python's own thread-lifecycle
+# machinery (the harness spinning workers up/down) is framework noise, not a target finding.
+# Labeled tsanFRAME (kept, but out of the tsanNEW bucket).
+#
+# Match the FUNCTION, not just the file. `Modules/_threadmodule.c` also holds the PUBLIC _thread
+# API -- RLock/lock methods such as `rlock_repr` (= RLock.__repr__, a tp_repr slot) -- and a race
+# between those is a genuine finding. The old file-level `_threadmodule.c` match labeled every
+# such race as framework noise, silently burying the real RLock repr race (cf. TSAN-0028 /
+# cpython#153292). `thread_pthread.h` is pure platform bootstrap (no public API), so a file-level
+# match is still correct there.
+FRAMEWORK_FILES = re.compile(r"thread_pthread\.h$")
+# Thread-lifecycle entry points in _threadmodule.c: the create/run/bootstrap path the harness
+# exercises, never a target's own data.
+FRAMEWORK_FUNCS = frozenset(
+    {
+        "thread_run",
+        "do_start_new_thread",
+        "do_start_joinable_thread",
+        "ThreadHandle_start",
+        "thread_PyThread_start_joinable_thread",
+        "PyThread_start_joinable_thread",
+        "pythread_wrapper",
+    }
+)
+
+
+def _is_framework(site):
+    """True if this (file, func, line) site is harness thread-lifecycle scaffolding."""
+    return bool(FRAMEWORK_FILES.search(site[0])) or site[1] in FRAMEWORK_FUNCS
 
 
 def _frame_site(func, location):
@@ -203,7 +233,7 @@ def _parse_race(text):
     if all(s is None for s in sites):
         return None
     # Framework noise: every resolved site is thread/frame scaffolding.
-    framework = all(s is not None and FRAMEWORK_FILES.search(s[0]) for s in sites if s)
+    framework = all(s is not None and _is_framework(s) for s in sites if s)
     keys = sorted("%s:%s" % (s[0], s[1]) if s else "?" for s in sites)
     signature = " | ".join(keys)
     return dict(signature=signature, sites=sites, framework=framework, kind="race")
