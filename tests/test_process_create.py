@@ -135,6 +135,53 @@ class TestTerminateProcess(unittest.TestCase):
             terminateProcess(SimpleNamespace(pid=4242))
         kill.assert_called_once_with(4242, create.SIGKILL)
 
+    def test_kills_process_group_before_pid(self):
+        # A known pgid must be swept too: SIGKILLing the child alone orphans its
+        # grandchildren (multiprocessing forkserver/resource_tracker, pool workers).
+        with patch.object(create, "kill") as kill, patch.object(create, "killpg") as killpg:
+            with patch.object(create, "getpgrp", return_value=1):
+                terminateProcess(SimpleNamespace(pid=4242), pgid=4242)
+        killpg.assert_called_once_with(4242, create.SIGKILL)
+        kill.assert_called_once_with(4242, create.SIGKILL)
+
+    def test_without_pgid_only_kills_pid(self):
+        with patch.object(create, "kill") as kill, patch.object(create, "killpg") as killpg:
+            terminateProcess(SimpleNamespace(pid=4242))
+        killpg.assert_not_called()
+        kill.assert_called_once_with(4242, create.SIGKILL)
+
+
+@unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
+class TestKillProcessGroup(unittest.TestCase):
+    def test_kills_group(self):
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            self.assertTrue(create.killProcessGroup(4242))
+        killpg.assert_called_once_with(4242, create.SIGKILL)
+
+    def test_refuses_our_own_group(self):
+        # Signalling our own process group would SIGKILL fusil itself.
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=4242),
+        ):
+            self.assertFalse(create.killProcessGroup(4242))
+        killpg.assert_not_called()
+
+    def test_none_is_noop(self):
+        with patch.object(create, "killpg") as killpg:
+            self.assertFalse(create.killProcessGroup(None))
+        killpg.assert_not_called()
+
+    def test_group_already_gone_is_not_an_error(self):
+        with (
+            patch.object(create, "killpg", side_effect=ProcessLookupError),
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            self.assertFalse(create.killProcessGroup(4242))
+
 
 # =========================================================================== construction
 @unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
@@ -164,6 +211,15 @@ class TestConstruction(unittest.TestCase):
         agent, _ = _make(arguments=["python"], name="p")
         self.assertEqual(agent.popen_args["stderr"], create.STDOUT)
         self.assertTrue(agent.popen_args["close_fds"])
+
+    def test_createPopenArguments_starts_a_new_session(self):
+        # setsid() in the child gives it (and every descendant it spawns) a private pgid,
+        # which is what makes the teardown sweep in terminate() possible.
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.env.create = lambda: {}
+        agent.createStdin = lambda: None
+        agent.createStdout = lambda: SimpleNamespace(fileno=lambda: 1)
+        self.assertTrue(agent.createPopenArguments()["start_new_session"])
 
     def test_timeout_and_stdout_stored(self):
         agent, _ = _make(arguments=["python"], name="p", timeout=3.5, stdout="null")
@@ -677,9 +733,55 @@ class TestTerminate(unittest.TestCase):
     def test_underscore_terminate_calls_terminateProcess(self):
         agent, _ = _make(arguments=["python"], name="p")
         agent.process = _FakePopen(pid=321)
+        agent.process_group = 321
         with patch.object(create, "terminateProcess") as tp:
             agent._terminate()
-        tp.assert_called_once_with(agent.process)
+        tp.assert_called_once_with(agent.process, 321)
+
+    def test_already_exited_child_still_sweeps_its_process_group(self):
+        # THE leak: for a fuzzer the child usually dies on its own (it crashed), and
+        # multiprocessing's forkserver/resource_tracker only shut down via the atexit
+        # handlers of a *clean* exit -- so they survive, get reparented to init, and leak
+        # for the whole run. terminate() used to return early here and kill nothing.
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.process = _FakePopen(pid=321, poll_status=-11)  # already dead (SIGSEGV)
+        agent.process_group = 321
+        agent._killed = False
+        agent._terminate = lambda: setattr(agent, "_killed", True)
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.terminate()
+        self.assertFalse(agent._killed)  # nothing to SIGKILL: it already exited
+        killpg.assert_called_once_with(321, create.SIGKILL)  # ...but the group is swept
+        self.assertIsNone(agent.process_group)
+
+    def test_running_child_is_killed_and_group_swept(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.process = _FakePopen(pid=321, poll_status=None)
+        agent.process_group = 321
+        agent._killed = False
+        agent._terminate = lambda: setattr(agent, "_killed", True)
+        agent.waitExit = lambda: None
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.terminate()
+        self.assertTrue(agent._killed)
+        killpg.assert_called_once_with(321, create.SIGKILL)
+
+    def test_reap_process_group_is_idempotent(self):
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.process_group = 321
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.reapProcessGroup()
+            agent.reapProcessGroup()  # second sweep: pgid already consumed
+        killpg.assert_called_once_with(321, create.SIGKILL)
 
 
 # =========================================================================== waitExit

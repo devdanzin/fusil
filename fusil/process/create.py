@@ -1,5 +1,5 @@
 from errno import ENOENT
-from os import devnull, kill
+from os import devnull, getpgid, getpgrp, kill, killpg
 from os.path import basename
 from pwd import getpwuid
 from signal import SIGKILL
@@ -18,7 +18,29 @@ from fusil.project_agent import ProjectAgent
 DEFAULT_TIMEOUT = 10.0
 
 
-def terminateProcess(process):
+def killProcessGroup(pgid):
+    """SIGKILL every process in group ``pgid``. Returns True if the group still existed.
+
+    Refuses to signal our own process group: fusil would kill itself. That can only happen if
+    the child's ``setsid()`` did not take effect, in which case ``process_group`` is never set
+    (see ``CreateProcess.createProcess``) -- this is a second belt on the same braces.
+    """
+    if pgid is None or pgid == getpgrp():
+        return False
+    try:
+        killpg(pgid, SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        return False  # group already gone (or not ours to signal)
+    return True
+
+
+def terminateProcess(process, pgid=None):
+    """SIGKILL the child and, when its process group is known, every descendant with it.
+
+    SIGKILLing the child alone leaks its grandchildren: they are reparented to init and
+    survive for the lifetime of the fleet (see CreateProcess.terminate).
+    """
+    killProcessGroup(pgid)
     kill(process.pid, SIGKILL)
 
 
@@ -77,6 +99,7 @@ class CreateProcess(ProjectAgent):
     def init(self):
         self.score = None
         self.process = None
+        self.process_group = None
         self.timeout_reached = False
         self.status = None
         self.current_popen_args = None
@@ -148,6 +171,14 @@ class CreateProcess(ProjectAgent):
                 raise
         pid = self.process.pid
         self.info("Process identifier: %s" % pid)
+        # Remember the child's process group (created by start_new_session=True) so we can
+        # sweep its descendants later, even once the child itself is gone. Read it now: after
+        # the child is reaped, getpgid() no longer resolves.
+        try:
+            pgid = getpgid(pid)
+        except OSError:
+            pgid = None  # already gone; nothing to sweep
+        self.process_group = pgid if pgid != getpgrp() else None
         self.closeStreams()
         self.send("process_create", self)
 
@@ -190,6 +221,13 @@ class CreateProcess(ProjectAgent):
         self.stdout_file = self.createStdout()
         popen_args["stdout"] = self.stdout_file.fileno()
         popen_args["preexec_fn"] = self.prepareProcess
+        # Run the child in its own session/process group (setsid() before exec), so every
+        # descendant it spawns shares one pgid we can sweep on teardown. Without this we can
+        # only SIGKILL the direct child, and anything it forked (multiprocessing's forkserver
+        # and resource_tracker, pool workers, ...) is orphaned to init and leaks. It also
+        # detaches the child from our controlling terminal, so a Ctrl+C aimed at fusil no
+        # longer races us to the child -- we kill it ourselves during teardown.
+        popen_args["start_new_session"] = True
         return popen_args
 
     def createStdin(self):
@@ -282,16 +320,28 @@ class CreateProcess(ProjectAgent):
         # Check if process is still running or not
         if not self.process:
             return
-        if self.poll() is not None:
-            return
+        if self.poll() is None:
+            # Kill the process and wait for its exit status
+            self.warning("Terminate process %s" % self.process.pid)
+            self._terminate()
+            self.waitExit()
 
-        # Kill the process and wait for its exit status
-        self.warning("Terminate process %s" % self.process.pid)
-        self._terminate()
-        self.waitExit()
+        # Sweep whatever the child left behind. This must run even when the child already
+        # exited on its own -- for a fuzzer that is the COMMON case (it crashed), and it is
+        # exactly the case where nothing else kills its descendants: multiprocessing's
+        # forkserver and resource_tracker are started on demand and only shut down via the
+        # atexit handlers of a *clean* interpreter exit, so a crashed/SIGKILLed child strands
+        # them. They are then reparented to init and survive for the whole run.
+        self.reapProcessGroup()
+
+    def reapProcessGroup(self):
+        """SIGKILL any descendants of the child that outlived it (see terminate())."""
+        pgid, self.process_group = self.process_group, None
+        if killProcessGroup(pgid):
+            self.info("Killed leftover descendants in process group %s" % pgid)
 
     def _terminate(self):
-        terminateProcess(self.process)
+        terminateProcess(self.process, self.process_group)
 
     def waitExit(self):
         # Get the process exit status to avoid creation of a zombi process
