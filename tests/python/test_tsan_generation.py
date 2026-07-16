@@ -32,10 +32,14 @@ def _tsan_module():
     def execv(*a):
         return a
 
+    def abort(*a):  # a self-signalling call (os.abort -> SIGABRT); must NOT be invoked
+        return a
+
     mod.Widget = Widget
     mod.helper = helper
     mod.fork = fork
     mod.execv = execv
+    mod.abort = abort
     return mod
 
 
@@ -140,6 +144,8 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("'helper'", funcs_line)
         self.assertNotIn("'fork'", funcs_line)
         self.assertNotIn("'execv'", funcs_line)
+        # os.abort() -> SIGABRT was the pre-#205 posix-sigabrt NOPARSE self-abort; keep it out.
+        self.assertNotIn("'abort'", funcs_line)
         self.assertIn("_tsan_unsafe = frozenset(", src)
         self.assertIn("n not in _tsan_unsafe", src)
 

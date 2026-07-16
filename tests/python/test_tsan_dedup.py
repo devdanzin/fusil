@@ -51,16 +51,51 @@ REPORT_SWAPPED = "\n".join(
 )
 
 # A race whose both access sites live only in the thread machinery -> framework noise.
+# Genuine framework noise: BOTH sites are the harness's own thread-lifecycle path (spinning
+# workers up/down), not any target data.
 REPORT_FRAMEWORK = "\n".join(
     [
         "WARNING: ThreadSanitizer: data race (pid=3)",
         "  Write of size 8 at 0x7f00 by thread T1:",
-        "    #0 lock_PyThread_acquire_lock /b/./Modules/_threadmodule.c:100:1 (python+0x1)",
+        "    #0 ThreadHandle_start /b/./Modules/_threadmodule.c:475:9 (python+0x1)",
         "",
         "  Previous read of size 8 at 0x7f00 by thread T2:",
-        "    #0 lock_PyThread_release_lock /b/./Modules/_threadmodule.c:200:2 (python+0x2)",
+        "    #0 thread_run /b/./Modules/_threadmodule.c:330:2 (python+0x2)",
         "",
-        "SUMMARY: ThreadSanitizer: data race in lock_PyThread_acquire_lock",
+        "SUMMARY: ThreadSanitizer: data race in ThreadHandle_start",
+    ]
+)
+
+# NOT framework noise: Modules/_threadmodule.c also holds the PUBLIC _thread API. A race between
+# public lock/RLock methods is a genuine finding -- the old file-level `_threadmodule.c` match
+# buried the real RLock repr race (cf. cpython#153292) as scaffolding.
+REPORT_PUBLIC_THREAD_API = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=3)",
+        "  Write of size 8 at 0x7f00 by thread T1:",
+        "    #0 _thread_RLock__release_save_impl /b/./Modules/_threadmodule.c:1233:22 (python+0x1)",
+        "",
+        "  Previous read of size 8 at 0x7f00 by thread T2:",
+        "    #0 rlock_repr /b/./Modules/_threadmodule.c:1295:28 (python+0x2)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in rlock_repr",
+    ]
+)
+
+# TSan lowercases the whole SECOND access line, including the `atomic` qualifier: "Previous
+# atomic write". The reader-vs-atomic-writer shape is the single most common race class in the
+# catalog, so failing to match this header dropped the 2nd stanza and (via the len<2 fallback)
+# fabricated a symmetric "A | A" signature.
+REPORT_PREVIOUS_ATOMIC = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=4)",
+        "  Read of size 8 at 0x7f00 by thread T3:",
+        "    #0 rlock_repr /b/./Modules/_threadmodule.c:1291:41 (python+0x1)",
+        "",
+        "  Previous atomic write of size 8 at 0x7f00 by thread T1:",
+        "    #0 _Py_atomic_store_ullong_relaxed /b/./Include/cpython/pyatomic_gcc.h:518:3 (python+0x2)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in rlock_repr",
     ]
 )
 
@@ -116,6 +151,41 @@ class TestParse(unittest.TestCase):
     def test_framework_race_flagged(self):
         r = tsan_dedup.parse_report(REPORT_FRAMEWORK)
         self.assertTrue(r["framework"])
+
+    def test_public_thread_api_race_is_not_framework(self):
+        # Modules/_threadmodule.c holds the public _thread API too; a race between public
+        # RLock methods is a real finding, not harness scaffolding.
+        r = tsan_dedup.parse_report(REPORT_PUBLIC_THREAD_API)
+        self.assertFalse(r["framework"])
+        self.assertEqual(
+            r["signature"],
+            "Modules/_threadmodule.c:_thread_RLock__release_save_impl"
+            " | Modules/_threadmodule.c:rlock_repr",
+        )
+
+    def test_previous_atomic_write_stanza_parsed(self):
+        # "Previous atomic write" (lowercased `atomic`) must be recognised as the 2nd access
+        # stanza; otherwise it is dropped and the 1st stanza duplicated into "A | A".
+        r = tsan_dedup.parse_report(REPORT_PREVIOUS_ATOMIC)
+        self.assertEqual(
+            r["signature"],
+            "Include/cpython/pyatomic_gcc.h:_Py_atomic_store_ullong_relaxed"
+            " | Modules/_threadmodule.c:rlock_repr",
+        )
+        self.assertFalse(r["framework"])
+
+    def test_access_header_variants_match(self):
+        for header in (
+            "  Write of size 8 at 0x7f00 by thread T1:",
+            "  Read of size 8 at 0x7f00 by thread T1:",
+            "  Previous write of size 8 at 0x7f00 by thread T1:",
+            "  Previous read of size 8 at 0x7f00 by thread T1:",
+            "  Atomic write of size 8 at 0x7f00 by thread T1:",
+            "  Atomic read of size 8 at 0x7f00 by thread T1:",
+            "  Previous atomic write of size 8 at 0x7f00 by thread T1:",
+            "  Previous atomic read of size 8 at 0x7f00 by thread T1:",
+        ):
+            self.assertTrue(tsan_dedup.ACCESS.search(header), header)
 
 
 class TestDecide(unittest.TestCase):
