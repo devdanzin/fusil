@@ -881,28 +881,61 @@ class WritePythonCode(WriteCode):
         for src, _label, _iterable in obj_factory_specs:
             self.write(0, "_tsan_obj_factories.append(lambda: %s)" % src)
         # Slice E (opt-in): derive HOSTILE subclasses from the target's own C types and add their
-        # instances to the pool. A managed __dict__ + raising __eq__/__hash__ on top of the C
-        # base's slots means a concurrent C op on a shared instance fires a hostile Python dunder
-        # mid-operation -- the __eq__-raises-during-store class (how cereggii's bug surfaced).
-        # Reuses tricky_weird's WeirdBase metaclass when compatible; the guard drops a
-        # non-subclassable base (Py_TPFLAGS_BASETYPE) or one needing constructor args.
+        # instances to the pool. A managed __dict__ + a curated set of DELAYED, exception-diverse
+        # failure-injection dunders on top of the C base's slots means a concurrent C op on a
+        # shared instance fires a hostile Python dunder mid-operation -- the
+        # __eq__-raises-during-store class (how cereggii's bug surfaced). Reuses tricky_weird's
+        # WeirdBase metaclass when compatible; the guard drops a non-subclassable base
+        # (Py_TPFLAGS_BASETYPE) or one needing constructor args.
         if weird_subclasses and shared_classes:
             self.write_block(
                 0,
                 '''
+                # Curated arm-vs-leave: ARM comparison / hashing / formatting / index dunders
+                # (the paths the op-mix drives on a shared instance, plus comparisons that fire via
+                # sort / dict-key / method-internal use -- the __gt__ class), and LEAVE the
+                # container/iteration protocol (__iter__/__next__/__len__/__getitem__/__contains__)
+                # to the C base so op (a)/(h)/(i) still race the base's OWN slots. Lifecycle dunders
+                # stay working so construction + op-(d) setattr churn keep going.
+                _TSAN_WEIRD_ARM = ("__eq__", "__ne__", "__hash__", "__lt__", "__le__", "__gt__",
+                                   "__ge__", "__repr__", "__str__", "__format__", "__index__")
+                # A TSan-appropriate exception mix: boring + caught by the worker -- deliberately NOT
+                # MemoryError (the OOM signal) or SystemError (a crash word), so a caught weird raise
+                # never masquerades as a hit.
+                _TSAN_WEIRD_EXCS = (ValueError, TypeError, RuntimeError, KeyError, IndexError,
+                                    OverflowError, ArithmeticError)
+                def _tsan_arm_slot(_name, _base):
+                    # Delayed bomb: succeed a per-instance random number of times (delegating to the
+                    # C base's real slot so the object behaves normally + races that slot), THEN
+                    # raise a random exc -- detonating deeper in a concurrent C op than an immediate
+                    # raise would.
+                    _bslot = getattr(_base, _name, None)
+                    def _slot(self, *_a, **_k):
+                        _c = self._tsan_bomb_calls
+                        _c[_name] = _c.get(_name, 0) + 1
+                        if _c[_name] > self._tsan_bomb_delay:
+                            raise choice(_TSAN_WEIRD_EXCS)("tsan weird via " + _name)
+                        if callable(_bslot):
+                            return _bslot(self, *_a, **_k)
+                        # base has no usable slot (e.g. list.__hash__ is None): a type-correct value
+                        return id(self) if _name == "__hash__" else (
+                            0 if _name == "__index__" else NotImplemented)
+                    _slot.__name__ = _name
+                    return _slot
                 def _tsan_make_weird(_base):
-                    """A hostile subclass of a target C type: managed __dict__ + raising __eq__/
-                    __hash__ on the C base's slots. WeirdBase metaclass when compatible, else a
-                    plain subclass; a non-subclassable base raises and is dropped by the caller."""
-                    def _eq(self, other):
-                        if randint(0, 3) == 0:
-                            raise ValueError("tsan weird __eq__")
-                        return NotImplemented
-                    def _hash(self):
-                        if randint(0, 3) == 0:
-                            raise ValueError("tsan weird __hash__")
-                        return randint(0, 2 ** 61)
-                    _ns = {"__eq__": _eq, "__hash__": _hash}
+                    """A hostile subclass of a target C type: managed __dict__ + curated delayed
+                    failure-injection dunders on the C base's slots. WeirdBase metaclass when
+                    compatible, else a plain subclass; a non-subclassable base raises and is
+                    dropped by the caller."""
+                    _ns = {_n: _tsan_arm_slot(_n, _base) for _n in _TSAN_WEIRD_ARM}
+                    def _wi(self, *_a, **_k):
+                        object.__setattr__(self, "_tsan_bomb_calls", {})
+                        object.__setattr__(self, "_tsan_bomb_delay", randint(0, 3))
+                        try:
+                            _base.__init__(self, *_a, **_k)
+                        except Exception:
+                            pass
+                    _ns["__init__"] = _wi
                     try:
                         return WeirdBase("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))
                     except Exception:
