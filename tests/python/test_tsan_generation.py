@@ -139,6 +139,18 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("sorted(_bag)", src)  # concurrent sort of a shared list (binarysort)
         self.assertIn("list(_bag.items())", src)  # dict iter-vs-resize
 
+    def test_worker_roles_emitted(self):
+        # Slice A: workers take complementary reader/writer roles by _wid so a reader always
+        # races a writer on the SAME shared object / container / iterator (per-group sharing).
+        src = _generate_tsan()
+        self.assertIn("_role = _wid % 3", src)
+        self.assertIn("if _role != 1:", src)  # reader-gated ops (read-churn, iterate, length_hint)
+        self.assertIn("if _role != 0:", src)  # writer-gated ops (mutate, advance)
+        # the group shares ONE iterator (rotated per session) so roles collide on it
+        self.assertIn("_ITER_OFF =", src)
+        self.assertIn("_cell = _tsan_iters[(_idx + _ITER_OFF) % len(_tsan_iters)]", src)
+        self.assertIn("_tsan_operator.length_hint(_it, 0)", src)  # non-advancing it_index read
+
     def test_shares_objects_and_module_functions(self):
         src = _generate_tsan()
         # a module class is instantiated into the shared pool, plus the module itself.
