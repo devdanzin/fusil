@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import inspect
+import json
 import logging
 import time
 from random import choice, randint, random
@@ -105,6 +106,11 @@ class WritePythonCode(WriteCode):
         self.enable_threads = threads
         self.enable_async = _async
         self.generated_filename = filename
+        # Slice B provenance: set by _write_tsan_stress_region at generation time so the
+        # PythonSource/StatsAgent can attribute a --tsan session's shared-object composition
+        # (None outside --tsan). tsan_manifest is the full descriptor emitted into the script.
+        self.tsan_manifest: dict | None = None
+        self.tsan_shared_kind: str | None = None
 
         self.arg_generator = ArgumentGenerator(
             self.options,
@@ -710,6 +716,67 @@ class WritePythonCode(WriteCode):
         # Drop process-lifecycle calls (fork/exec/spawn/...): forking a worker crashes the child
         # under TSan and is never a useful race target (see TSAN_UNSAFE_CALLS).
         funcs = [f for f in (self.module_functions or []) if f not in TSAN_UNSAFE_CALLS][:40]
+        # Per-session rotation of which shared iterator each worker GROUP collides on. Computed
+        # once here so the SAME value feeds both the emitted `_ITER_OFF` and the provenance
+        # manifest below (Slice B attribution).
+        iter_off = randint(0, 7)
+
+        # Slice B provenance: the parent knows the full generation context, so record it (and
+        # emit it into the script) rather than mis-attributing a builtin race to whatever module
+        # this session happened to pick. shared_kind = did we share real target-module objects,
+        # or only the module itself? (feeds fusil_stats.json + fleet report).
+        shared_kind = "target-objects" if shared_classes else "module-only"
+        self.tsan_shared_kind = shared_kind
+        self.tsan_manifest = {
+            "kind": "tsan-provenance",
+            "v": 1,
+            "module": self.module_name,
+            "shared_classes": list(shared_classes),
+            "shared_kind": shared_kind,
+            "shared_args": ["list", "dict", "set", "bytearray"],
+            # iterator kinds registered into the shared-iterator pool (op h); the last two are
+            # attempted under try/except in the script (near-always present on the target).
+            "iterators": [
+                "str",
+                "bytes",
+                "list",
+                "tuple",
+                "dict",
+                "range",
+                "itertools.count",
+                "struct.iter_unpack",
+            ],
+            "iter_off": iter_off,
+            "roles": {"0": "writer", "1": "reader", "2": "both"},
+            "ops": [
+                "a:read-churn",
+                "b:method",
+                "c:module-func",
+                "d:attr-dict",
+                "e:weakref",
+                "f:container-mutate",
+                "g:gc",
+                "h:shared-iter",
+                "i:read-while-mutate",
+            ],
+            "workers_per_obj": workers_per_obj,
+            "iters": iters,
+            "func_count": len(funcs),
+        }
+        provenance_line = (
+            "[TSAN] provenance module=%s shared=%s(%dcls+module) args=list,dict,set,bytearray "
+            "iterators=8 iter_off=%d roles=r/w/both ops=a-i workers=%d iters=%d funcs=%d"
+            % (
+                self.module_name,
+                shared_kind,
+                len(shared_classes),
+                iter_off,
+                workers_per_obj,
+                iters,
+                len(funcs),
+            )
+        )
+        manifest_line = "[TSAN-MANIFEST] " + json.dumps(self.tsan_manifest, sort_keys=True)
 
         self.emptyLine()
         self.write(0, "# --- TSan concurrency-stress region (--tsan) ---")
@@ -718,6 +785,11 @@ class WritePythonCode(WriteCode):
         self.write(0, "import weakref as _tsan_weakref")
         self.write(0, "import operator as _tsan_operator")
         self.write_print_to_stderr(0, '"[TSAN] entering concurrency-stress region"')
+        # Emit provenance FIRST (before the region runs) so it is already in the crash dir's
+        # captured output no matter where a later race/abort stops the child. Human line + a
+        # machine-parseable JSON line (both literals -- no runtime json import in the script).
+        self.write_print_to_stderr(0, repr(provenance_line))
+        self.write_print_to_stderr(0, repr(manifest_line))
         # Free-threading is mandatory: without it the whole region is GIL-serialised noise.
         self.write(0, 'if getattr(sys, "_is_gil_enabled", lambda: True)():')
         with self.indented():
@@ -780,7 +852,8 @@ class WritePythonCode(WriteCode):
         # Per-session rotation of which shared iterator each worker GROUP shares, so all workers
         # on one _idx collide on the SAME iterator (roles below race it) while different sessions
         # cover different iterator kinds. Constant across workers -> sharing is preserved.
-        self.write(0, "_ITER_OFF = %d" % randint(0, 7))
+        # (iter_off computed above so it also appears in the provenance manifest.)
+        self.write(0, "_ITER_OFF = %d" % iter_off)
         self.write(0, "_tsan_total = len(_tsan_shared) * _WORKERS_PER_OBJ")
         self.write(0, "_tsan_barrier = _tsan_threading.Barrier(_tsan_total)")
         self.write_block(

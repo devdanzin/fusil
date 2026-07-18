@@ -62,11 +62,15 @@ class StatsAgent(ProjectAgent):
         success = getattr(project, "success_score", 0.5) if project else 0.5
         crash = score is not None and score >= success
         module = getattr(self.source, "module_name", None)
+        # Slice B: the --tsan shared-object composition of this session (None outside --tsan),
+        # so the sidecar/fleet report can show the target-object vs module-only distribution.
+        tsan_kind = getattr(self.source, "tsan_shared_kind", None)
         self.stats.record(
             module,
             crash=crash,
             timeout="timeout" in self._rename_parts,
             cpu_load="cpu_load" in self._rename_parts,
+            tsan_kind=tsan_kind,
         )
         self._maybe_flush()
 

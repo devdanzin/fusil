@@ -33,6 +33,9 @@ class PythonSource(ProjectAgent):
         ProjectAgent.__init__(self, project, "python_source")
         self.module: ModuleType | None = None
         self.module_name = ""
+        # Slice B: the --tsan shared-object composition of the last-generated session, read back
+        # by StatsAgent for per-session attribution (None outside --tsan). Set in on_session_start.
+        self.tsan_shared_kind: str | None = None
         self.write: WritePythonCode | None = None
         self.filename = ""
         self.options = options
@@ -198,6 +201,9 @@ class PythonSource(ProjectAgent):
         # successful loadModule this is a WritePythonCode (or an injected test double), never None.
         assert self.write is not None
         self.write.generate_fuzzing_script()
+        # Slice B: expose this session's --tsan shared-object composition for StatsAgent to
+        # attribute (None outside --tsan, where the emitter never set it).
+        self.tsan_shared_kind = getattr(self.write, "tsan_shared_kind", None)
         self.send("python_source", self.filename)
 
         # unload new modules

@@ -6,13 +6,26 @@ the single-threaded function/class/object sweeps are replaced by it. Mirrors tes
 """
 
 import ast
+import json
 import os
+import re
 import tempfile
 import unittest
 from types import ModuleType
 from unittest.mock import MagicMock
 
 from fusil.python.write_python_code import WritePythonCode
+
+
+def _extract_tsan_manifest(src):
+    """Pull the emitted `[TSAN-MANIFEST] {json}` payload back out of the generated source."""
+    for line in src.splitlines():
+        line = line.strip()
+        if "[TSAN-MANIFEST]" in line and line.startswith("print("):
+            m = re.match(r"print\((.*), file=stderr\)$", line)
+            printed = ast.literal_eval(m.group(1))  # the string literal print()s
+            return json.loads(printed[len("[TSAN-MANIFEST] ") :])
+    raise AssertionError("no [TSAN-MANIFEST] line in generated source")
 
 
 def _tsan_module():
@@ -150,6 +163,35 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("_ITER_OFF =", src)
         self.assertIn("_cell = _tsan_iters[(_idx + _ITER_OFF) % len(_tsan_iters)]", src)
         self.assertIn("_tsan_operator.length_hint(_it, 0)", src)  # non-advancing it_index read
+
+    def test_provenance_markers_emitted(self):
+        # Slice B: the region prints a human `[TSAN] provenance ...` line and a machine-parseable
+        # `[TSAN-MANIFEST] {json}` line, so a crash dir's stdout carries the real generation
+        # context (fixing the "builtin race stamped with whatever module the session picked" bug).
+        src = _generate_tsan()
+        self.assertIn("[TSAN] provenance module=tsanmod", src)
+        self.assertIn("[TSAN-MANIFEST] ", src)
+        # both markers land BEFORE the region does any work (so a later abort can't lose them):
+        self.assertLess(src.index("[TSAN-MANIFEST]"), src.index("def _tsan_worker"))
+        manifest = _extract_tsan_manifest(src)
+        self.assertEqual(manifest["kind"], "tsan-provenance")
+        self.assertEqual(manifest["module"], "tsanmod")
+        # the fixture has one class (Widget) -> a real target object is shared:
+        self.assertEqual(manifest["shared_classes"], ["Widget"])
+        self.assertEqual(manifest["shared_kind"], "target-objects")
+        self.assertEqual(manifest["roles"], {"0": "writer", "1": "reader", "2": "both"})
+        self.assertIn("h:shared-iter", manifest["ops"])
+        # fork/execv/abort are filtered out of the module-func pool -> only helper remains:
+        self.assertEqual(manifest["func_count"], 1)
+        self.assertEqual(manifest["iters"], 200)
+
+    def test_provenance_iter_off_matches_emitted(self):
+        # The manifest's iter_off must equal the emitted `_ITER_OFF` (single source, so triage can
+        # reconstruct which iterator each worker group shared).
+        src = _generate_tsan()
+        manifest = _extract_tsan_manifest(src)
+        off_line = next(ln for ln in src.splitlines() if ln.startswith("_ITER_OFF = "))
+        self.assertEqual(int(off_line.split("=")[1]), manifest["iter_off"])
 
     def test_shares_objects_and_module_functions(self):
         src = _generate_tsan()

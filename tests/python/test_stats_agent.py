@@ -81,6 +81,22 @@ class TestStatsAgentWiring(unittest.TestCase):
             agent.on_session_done(0.0)
             self.assertEqual(agent.stats.cpu_load_kills, 1)
 
+    def test_tsan_kind_recorded_from_source(self):
+        # Slice B: StatsAgent reads the --tsan shared-object composition off the PythonSource and
+        # folds it into the sidecar; absent the attribute (non-tsan runs) nothing is recorded.
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = self._agent(tmp, module="json")
+            agent.source.tsan_shared_kind = "target-objects"
+            agent.on_session_start()
+            agent.on_session_done(0.0)
+            self.assertEqual(agent.stats.tsan_kinds, {"target-objects": 1})
+
+            # a non-tsan-style source (no attribute) leaves the counter untouched.
+            other = self._agent(tmp, module="json")
+            other.on_session_start()
+            other.on_session_done(0.0)
+            self.assertEqual(other.stats.tsan_kinds, {})
+
     def test_flush_writes_sidecar(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = self._agent(tmp, module="json")
