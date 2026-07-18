@@ -458,6 +458,17 @@ class Fuzzer(Application):
             action="store_true",
             default=False,
         )
+        tsan_options.add_option(
+            "--tsan-source-root",
+            action="append",
+            dest="tsan_source_roots",
+            metavar="DIR",
+            help="Source-tree root of a fuzzed C EXTENSION (repeatable). A race frame under this "
+            "dir (that is not CPython source) is keyed by its path relative to the root, so the "
+            "extension's own races dedupe instead of dropping to noparse. Default: none "
+            "(CPython-only signatures, unchanged).",
+            default=None,
+        )
 
         options = (
             input_options,
@@ -758,14 +769,16 @@ class Fuzzer(Application):
                 keep=self.options.tsan_dedup_keep,
                 prune=self.options.tsan_dedup_prune,
                 suppressions_path=self.options.tsan_suppressions,
+                source_roots=self.options.tsan_source_roots,
             )
             self.session_keep_policy = self._tsan_keep_policy
             project.error(
-                "TSan dedupe enabled: %s (keep=%d, prune=%s)"
+                "TSan dedupe enabled: %s (keep=%d, prune=%s, source_roots=%s)"
                 % (
                     self.options.tsan_dedup_catalog,
                     self.options.tsan_dedup_keep,
                     self.options.tsan_dedup_prune,
+                    self.options.tsan_source_roots or "none",
                 )
             )
 
