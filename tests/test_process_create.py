@@ -630,6 +630,36 @@ class TestPoll(unittest.TestCase):
         self.assertEqual(agent.status, 5)
         self.assertIsNone(agent.process)
 
+    def test_self_exit_reaps_process_group(self):
+        # THE leak: a child that exits on its own is reaped by poll() -> processExited, which
+        # nulls self.process. The group sweep must happen HERE, because terminate()/deinit() both
+        # gate on `if self.process` and would otherwise skip it -- so a self-exiting session (the
+        # common case) would never reap its descendants (multiprocessing forkserver/workers).
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.process = _FakePopen(pid=1, poll_status=0)
+        agent.process_group = 321
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.poll()  # -> processExited -> reapProcessGroup
+        killpg.assert_called_once_with(321, create.SIGKILL)
+        self.assertIsNone(agent.process_group)  # consumed
+        self.assertIsNone(agent.process)
+
+    def test_deinit_after_self_exit_does_not_double_kill(self):
+        # After a self-exit already swept the group, deinit()'s backstop must be a no-op.
+        agent, _ = _make(arguments=["python"], name="p")
+        agent.process = _FakePopen(pid=1, poll_status=0)
+        agent.process_group = 321
+        with (
+            patch.object(create, "killpg") as killpg,
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.poll()  # self-exit -> reap (killpg once, process_group consumed)
+            agent.deinit()  # backstop -> reapProcessGroup is a no-op now
+        killpg.assert_called_once_with(321, create.SIGKILL)
+
 
 # =========================================================================== closeStreams
 @unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")

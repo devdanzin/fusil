@@ -274,6 +274,15 @@ class CreateProcess(ProjectAgent):
             self.renameSession(status)
             self.send("process_exit", self, status)
         self.status = status
+        # The child is gone. Sweep its process group NOW, while we still have it: a child that
+        # exits (or crashes) on its own is the common case, and it is exactly the case where
+        # nothing else kills the descendants it spawned (multiprocessing forkserver/resource_tracker,
+        # Pool / ProcessPoolExecutor workers), which only shut down via a *clean* interpreter exit.
+        # Doing it here rather than only in terminate() matters because clearProcess() below nulls
+        # self.process, after which terminate()/deinit()'s `if self.process` guards would skip the
+        # sweep entirely -- so without this, the group is only ever reaped for fusil-killed (timeout)
+        # sessions, and every self-exiting session leaks.
+        self.reapProcessGroup()
         self.clearProcess()
 
     def closeStreams(self):
@@ -383,6 +392,11 @@ class CreateProcess(ProjectAgent):
         if self.process:
             self.terminate()
             self.process = None
+        else:
+            # Child already exited on its own (processExited nulled self.process). That path
+            # already reaps the group, but sweep again as a backstop in case the exit was
+            # observed somewhere that did not -- reapProcessGroup is a no-op once consumed.
+            self.reapProcessGroup()
 
     def getScore(self):
         return self.score
