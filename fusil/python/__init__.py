@@ -568,6 +568,14 @@ class Fuzzer(Application):
             target_cmd,
             timeout=self.options.timeout,
         )
+        # Keep CPython's bytecode cache OUT of the target build tree. The target interpreter is
+        # often a venv that shares a matrix build's Lib/, so without this it writes .pyc into
+        # builds/*/Lib/**/__pycache__ owned by whoever runs the child -- which then blocks the
+        # build owner from rm/rebuilding the matrix (root-owned .pyc need sudo to remove). Redirect
+        # to a disposable /tmp prefix for every mode. The root main-process (module discovery) and
+        # the build preflight use a DISTINCT prefix (see main() and the preflight below) so a
+        # root-created cache dir never blocks a fusil-user write under a shared prefix.
+        process.env.set("PYTHONPYCACHEPREFIX", "/tmp/fusil-pycache")
         # ThreadSanitizer reserves more virtual address space than any finite RLIMIT_AS allows and
         # re-execs itself to raise the cap; a finite hard cap makes that re-exec fail (setrlimit
         # EINVAL) and TSan then runs DEGRADED, detecting nothing. So leave the cap OFF under --tsan
@@ -626,7 +634,13 @@ class Fuzzer(Application):
                     capture_output=True,
                     text=True,
                     timeout=60,
-                    env={**os.environ, "PYTHON_GIL": "0"},
+                    # This runs the TARGET interpreter as root during setup; redirect its .pyc out
+                    # of the build tree too (root phase -> distinct prefix from the fusil children).
+                    env={
+                        **os.environ,
+                        "PYTHON_GIL": "0",
+                        "PYTHONPYCACHEPREFIX": "/tmp/fusil-pycache-root",
+                    },
                 ).stdout.split()
             except (OSError, subprocess.SubprocessError, ValueError):
                 out = []
@@ -929,4 +943,14 @@ class PythonProcess(CreateProcess):
 
 def main() -> None:
     """Console-script entry point for ``fusil-python-threaded``."""
+    # Redirect the MAIN process's own bytecode cache out of the target build tree. Module
+    # discovery imports target modules (often the stdlib of a venv that shares a matrix build's
+    # Lib/) in this process while it is still root, so CPython would write root-owned .pyc into
+    # builds/*/Lib/**/__pycache__ -- which then blocks the build owner from rm/rebuilding the
+    # matrix. The child processes get PYTHONPYCACHEPREFIX via their env (setupProject), but that
+    # cannot retarget this already-started interpreter, so set sys.pycache_prefix directly. Honour
+    # an existing setting (a user-set PYTHONPYCACHEPREFIX already populated sys.pycache_prefix);
+    # the root phase uses a distinct prefix from the fusil children to avoid cross-user friction.
+    if sys.pycache_prefix is None:
+        sys.pycache_prefix = "/tmp/fusil-pycache-root"
     Fuzzer().main()
