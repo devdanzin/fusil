@@ -264,8 +264,11 @@ class TestTSanGeneration(unittest.TestCase):
         src = _generate_tsan(weird_subclasses=True)
         ast.parse(src)  # still valid Python
         self.assertIn("def _tsan_make_weird(_base):", src)
-        self.assertIn('raise ValueError("tsan weird __eq__")', src)
-        self.assertIn('raise ValueError("tsan weird __hash__")', src)
+        # curated, DELAYED, exception-diverse failure-injection dunders (the bomb pattern)
+        self.assertIn("def _tsan_arm_slot(_name, _base):", src)
+        self.assertIn("_tsan_bomb_delay", src)  # delay: succeed then detonate
+        self.assertIn("_TSAN_WEIRD_EXCS = (", src)  # exception diversity
+        self.assertIn('raise choice(_TSAN_WEIRD_EXCS)("tsan weird via " + _name)', src)
         # reuses tricky_weird's WeirdBase metaclass, with a plain-subclass fallback
         self.assertIn('WeirdBase("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))', src)
         self.assertIn('type("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))', src)
@@ -278,6 +281,24 @@ class TestTSanGeneration(unittest.TestCase):
         manifest = _extract_tsan_manifest(src)
         self.assertEqual(manifest["weird_subclasses"], ["Widget"])
         self.assertIn("weird=1", src)
+
+    def test_weird_subclasses_curated_arm_list(self):
+        # The arm-vs-leave contract: ARM comparison/hash/eq/repr/index; LEAVE the container /
+        # iteration protocol to the C base (so op a/h/i still race its OWN slots), and keep the
+        # exception mix free of the OOM (MemoryError) / crash (SystemError) signal words.
+        src = _generate_tsan(weird_subclasses=True)
+        # extract the full (possibly multi-line) armed-dunder tuple text
+        start = src.index("_TSAN_WEIRD_ARM = (")
+        arm_text = src[start : src.index(")", start)]
+        for armed in ("__eq__", "__hash__", "__lt__", "__gt__", "__repr__", "__index__"):
+            self.assertIn(armed, arm_text, armed)
+        for left in ("__iter__", "__next__", "__len__", "__getitem__", "__contains__"):
+            self.assertNotIn(left, arm_text, left)  # left to the C base
+        exc_start = src.index("_TSAN_WEIRD_EXCS = (")
+        exc_text = src[exc_start : src.index(")", exc_start)]
+        self.assertIn("ValueError", exc_text)
+        self.assertNotIn("MemoryError", exc_text)  # OOM signal
+        self.assertNotIn("SystemError", exc_text)  # crash word
 
     def test_weird_base_boilerplate_available(self):
         # The hostile subclasses rely on tricky_weird's WeirdBase being spliced into the script.
