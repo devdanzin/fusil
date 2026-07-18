@@ -345,12 +345,16 @@ _BT_SKIP = re.compile(
     r"|hook_fmalloc|hook_fcalloc|hook_frealloc|hook_ffree"
     r"|PyMem_Free|PyMem_RawFree|PyObject_Free|PyMem_Realloc|PyMem_RawRealloc|PyObject_Realloc"
     r"|tracemalloc_(raw_)?(alloc|calloc|realloc|free)"
-    # Inlined GC-bits readers (pycore_gc.h): when a bad/NULL object's ob_gc_bits is read they
-    # show as the innermost frame, masking the real .c caller (e.g. copy_lock_held_untracked =
-    # OOM-0044, a NULL-deref in the empty-dict copy assert under OOM). Analog of the
-    # refcount.h/object.h header skips below. NOT _PyObject_GC_TRACK/_UNTRACK (real sites, e.g.
-    # the OOM-0006 untrack), only the pure readers. Lockstep with catalog ingest.py NATIVE_SKIP.
-    r"|_PyObject_HAS_GC_BITS|_PyObject_GC_IS_TRACKED)$"
+    # Inlined GC helpers (pycore_gc.h): the ob_gc_bits READERS (_HAS_GC_BITS/_GC_IS_TRACKED)
+    # AND the TRACK/UNTRACK actions all show as the innermost frame when a bad/NULL or never-
+    # tracked object is processed under OOM, masking the real .c caller. Skip them all so the
+    # chain resolves to the actual site: copy_lock_held_untracked = OOM-0044 (empty-dict copy
+    # NULL-deref, via the readers); dictiter_dealloc = OOM-0006 (a never-tracked dict_itemiterator
+    # untracked on its constructor's OOM error path, via _PyObject_GC_UNTRACK). The catalog keys
+    # the real .c caller, never the inlined pycore_gc.h frame, so skipping the untrack is what
+    # lets OOM-0006's dictiter_dealloc func-key match instead of the crash reading as oomNEW.
+    # Analog of the refcount.h/object.h header skips below. Lockstep w/ catalog ingest.py NATIVE_SKIP.
+    r"|_PyObject_HAS_GC_BITS|_PyObject_GC_IS_TRACKED|_PyObject_GC_TRACK|_PyObject_GC_UNTRACK)$"
 )
 # Inlined refcount/atomic helpers live in these headers and show up as the innermost frame
 # of a "DECREF a freed object" segv -- skip them so the site is the real .c caller (e.g.

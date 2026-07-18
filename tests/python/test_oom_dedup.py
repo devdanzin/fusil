@@ -501,6 +501,34 @@ ASAN_SEGV = "\n".join(
 )
 
 
+# A real OOM-0006 ABORT as captured in stdout: dictiter_new's OOM error path untracks a
+# never-tracked dict_itemiterator. The inlined _PyObject_GC_UNTRACK (pycore_gc.h) is the
+# innermost real frame and MASKS the true .c site dictiter_dealloc one frame down -- so unless
+# the untrack is skipped, the crash reads as oomNEW instead of folding to OOM-0006 (which the
+# catalog keys on dictiter_dealloc). Line numbers differ from the snapshot's (5620 vs 5532):
+# the cloud binary is a different commit, so the func-name match must carry it, not the line.
+ASAN_ABORT_OOM0006 = "\n".join(
+    [
+        "Objects/dictobject.c:5620: _PyObject_GC_UNTRACK: Assertion "
+        '"_PyObject_GC_IS_TRACKED(((PyObject*)(op)))" failed: object not tracked by the '
+        "garbage collector",
+        "Fatal Python error: _PyObject_AssertFailed: _PyObject_AssertFailed",
+        "    #8 0x615b242f9838 in _PyObject_AssertFailed "
+        "/home/danzin/projects/upstream_cpython/Objects/object.c:3278:5",
+        "    #9 0x615b242b59e8 in _PyObject_GC_UNTRACK "
+        "/home/danzin/projects/upstream_cpython/Include/internal/pycore_gc.h:254:5",
+        "    #10 0x615b242ba087 in dictiter_dealloc "
+        "/home/danzin/projects/upstream_cpython/Objects/dictobject.c:5620:5",
+        "    #11 0x615b242f8573 in _Py_Dealloc "
+        "/home/danzin/projects/upstream_cpython/Objects/object.c:3319:5",
+        "    #14 0x615b242b9982 in dictiter_new "
+        "/home/danzin/projects/upstream_cpython/Objects/dictobject.c:5604:5",
+        "    #16 0x615b241e8bc2 in PyObject_GetIter "
+        "/home/danzin/projects/upstream_cpython/Objects/abstract.c:2825:12",
+    ]
+)
+
+
 class TestNativeBacktrace(unittest.TestCase):
     """The fix: resolve a SEGV from the native backtrace ALREADY in stdout (ASan debug
     build), with no gdb re-run -- so a crash whose source.py would not reproduce under a
@@ -521,6 +549,20 @@ class TestNativeBacktrace(unittest.TestCase):
     def test_asan_segv_matches_known_without_gdb(self):
         # OOM-0006 is keyed on dictiter_dealloc in the snapshot; no resolver provided.
         keep, label = self._deduper().decide(ASAN_SEGV, source_path=None)
+        self.assertTrue(keep)
+        self.assertEqual(label, "OOM-0006")
+
+    def test_extract_native_skips_gc_untrack_returns_dictiter(self):
+        # The inlined _PyObject_GC_UNTRACK (pycore_gc.h) must be skipped so the innermost
+        # resolved site is the real .c caller dictiter_dealloc, not the untrack helper.
+        sites = oom_dedup.extract_native_sites(ASAN_ABORT_OOM0006)
+        self.assertEqual(sites[0], "dictiter_dealloc@Objects/dictobject.c:5620")
+        self.assertNotIn("_PyObject_GC_UNTRACK", " ".join(sites))
+
+    def test_asan_abort_untrack_folds_to_oom0006_not_new(self):
+        # Whole-crash: an OOM-0006 abort whose innermost frame is _PyObject_GC_UNTRACK folds to
+        # OOM-0006 (via dictiter_dealloc), not oomNEW -- the 321-vehicle oom_cloud dedup gap.
+        keep, label = self._deduper().decide(ASAN_ABORT_OOM0006, source_path=None)
         self.assertTrue(keep)
         self.assertEqual(label, "OOM-0006")
 
