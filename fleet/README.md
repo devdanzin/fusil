@@ -95,7 +95,11 @@ see `doc/tsan-mode-plan.md`. Crash dirs self-label `…-warning_threadsanitizer_
 
 ```sh
 FUSIL_TSAN_DEDUP=../fusil/fusil/python/tsan_dedup.py \
-  python3 scripts/ingest.py <fleet-dir>/inst-*/python/*   # bucket by race signature; NEW ones need a report
+  python3 scripts/ingest.py '<fleet-dir>/inst-*/python*/*'  # bucket by race signature; NEW ones need a report
+# NB: `python*`, not `python` -- a restarted instance gets a FRESH project dir (python-2, python-3,
+# ...) beside the first one, so `inst-*/python/*` silently ingests only the pre-restart run. On one
+# restarted fleet that glob covered 155 of 1585 dirs (10%). Quote the pattern so ingest.py globs it
+# itself rather than the shell.
 # write reports/TSAN-NNNN-.../meta.json for each new signature, then:
 python3 scripts/gen_known_races.py                        # regenerate known_races.tsv; fleet restart picks it up
 ```
