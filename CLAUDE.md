@@ -10,18 +10,24 @@ fuzzing path is actively developed and tested** — `fuzzers/fusil-python-thread
 `fusil-php`, `fusil-mplayer`, etc.) and non-Python subsystems (`fusil.network`,
 `fusil.linux`, file/process mangling) are legacy: they may not work and are out of scope
 unless explicitly being worked on. The current focus is finding crashes in CPython itself,
-C extension modules, and out-of-memory (allocation-failure) error paths via `--oom-fuzz`
-(see the OOM section). **JIT fuzzing has moved out of fusil entirely** — the
+C extension modules, out-of-memory (allocation-failure) error paths via `--oom-fuzz`
+(see the OOM section), and free-threading **data races** via `--tsan` (see the TSan section).
+**JIT fuzzing has moved out of fusil entirely** — the
 `fusil/python/jit/` subsystem was removed once the `lafleur` project took it over natively
 (see *JIT fuzzing → moved to lafleur* below).
 
 ## Environment & dependencies
 
-- Active virtualenv: `/home/danzin/venvs/fusil_venv` (use its `python`).
+- Dev/test venvs (the old `~/venvs/fusil_venv` is **gone**): use `~/venvs/fusil_np_verify`
+  (CPython 3.14, GIL) for the test suite and non-FT verification, and
+  `~/venvs/matrix_venvs/fusil_debug-ft-nojit_venv` (CPython 3.16 **free-threaded**) for
+  `--tsan` / free-threaded runs — it's the fleet runner venv (a FT runner is required because
+  `PYTHON_GIL=0` is inherited by the runner too). Both have `python-ptrace` + fusil installed.
 - `python-ptrace` is a hard runtime dependency — `fusil.application` imports it at module
-  load, so the fuzzer cannot start without it. It **is installed** in the dev venv
-  (`python-ptrace` 0.9.9), so the runtime stack imports and tests that touch it run. (A real
-  fuzzing run still wants the dedicated `fusil` user / `--unsafe`; see Commands.)
+  load, so the fuzzer cannot start without it. It **is installed** in both dev venvs above
+  (`python-ptrace` 0.9.9); the pure-engine tests (`tsan_dedup` / `oom_dedup` / generation) don't
+  need the runtime stack. (A real fuzzing run still wants the dedicated `fusil` user /
+  `--unsafe`; see Commands.)
 - `numpy` and `h5py` support now live in **external plugins** (`fusil_numpy_plugin` /
   `fusil_h5py_plugin`), not in core — install the plugin + the library to get it, uninstall to
   remove it (see the Plugin section + `doc/plugins.md`). The numpy plugin injects tricky arrays
@@ -209,6 +215,43 @@ via an injectable `segv_resolver`).
 `HANDOFF.md` + `CLAUDE.md` hold the campaign state, the commit/disclosure conventions, and
 how the maintainer and Claude work together. Read them before any outward-facing
 (issue / gist / PR) step.
+
+### ThreadSanitizer data-race fuzzing — `--tsan`
+
+The free-threading **data-race** analogue of `--oom-fuzz`. Instead of the single-threaded OOM
+sweep, `--tsan` emits a **concurrency-stress region** (`WritePythonCode._write_tsan_stress_region`):
+a few SHARED objects hammered by many barrier-released worker threads running an op-mix
+(`--tsan-iterations` times each), so concurrent C-level access to one object's state trips a data
+race under ThreadSanitizer. Targets a free-threaded **`--with-thread-sanitizer`** CPython
+(`~/projects/python_build_matrix/builds/debug-ft-nojit-tsan/python`); fusil sets the required env
+itself (`setarch -R`, unlimited `RLIMIT_AS`, `PYTHON_GIL=0`, `TSAN_OPTIONS=halt_on_error=1:…`,
+**`DEBUGINFOD_URLS=`** to dodge the llvm-symbolizer hang, and implied `--no-numpy`). exit 66 = a
+race. The op-mix (ops a–i) exercises the FT-race-rich classes: attribute-dict churn, concurrent
+`gc.collect`, weakref churn, shared-container mutation, **shared-iterator races** (one iterator
+advanced by every worker + `repr()` — this found the bytes-iterator race TSAN-0037 / the str one is
+cpython#153928), and **read-while-mutate** (iterate/sort/copy a shared container while siblings
+mutate it). Options in `createFuzzerOptions`: `--tsan-threads` / `--tsan-iterations` /
+`--tsan-shared-objects` / `--tsan-suppressions`. Design + phase history: **`doc/tsan-mode-plan.md`**.
+
+**In-loop dedup** (`fusil/python/tsan_dedup.py`, mirroring `oom_dedup.py`): `parse_report(stdout)` →
+a sorted `"file:func | file:func"` race **signature**; `--tsan-dedup-catalog <known_races.tsv>`
+self-labels each crash dir with its race id (`TSAN-00NN` / `tsanNEW` / `tsanFRAME`), and
+`--tsan-dedup-prune` drops known duplicates past `--tsan-dedup-keep` (default 5). A `Suppressor`
+applies TSan-style suppressions (`--tsan-suppressions` / the catalog's `suppressions.txt`) for
+framework noise, glibc/OpenSSL false positives, and subinterpreter machinery. Pure-Python,
+unit-tested in `tests/python/test_tsan_dedup.py`; the emitter is tested in `test_tsan_generation.py`
+and **gated behind `--tsan`**, so non-`--tsan` output/goldens are unchanged.
+
+**Sibling catalog (coupled — read before editing the parser).** Triage/reporting lives in the
+sibling **`cpython-tsan-findings`** repo (`github.com/devdanzin/cpython-tsan-findings`), the TSan
+analogue of `cpython-oom-findings`. Its `scripts/ingest.py` **imports this repo's `tsan_dedup.py`**
+(via `FUSIL_TSAN_DEDUP=…`), so the signature format `parse_report` emits is a **cross-repo
+contract**: changing it can silently break matching against `catalog/known_races.tsv` (regenerated
+by `gen_known_races.py` from `reports/*/meta.json`). After any `tsan_dedup.py` change, run
+`test_tsan_dedup.py` **and** re-ingest a fleet. Don't file FT-**subinterpreter** races upstream
+(cpython#143232 — they're suppressed, not cataloged). Fleets run via `fleet/` at
+`/home/fusil/runs/fusil-tsan_fleet_NN/inst-*/python*/*` (ingest with the `python*` glob — a
+restarted instance creates `python-2/…`).
 
 ### Regex hit suppression — `--suppress-hit-regex` / `--suppress-hit-file`
 
