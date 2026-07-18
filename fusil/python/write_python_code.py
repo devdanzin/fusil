@@ -694,6 +694,23 @@ class WritePythonCode(WriteCode):
         )
         self.emptyLine()
 
+    def _tsan_ctor_argexpr(self) -> str:
+        """A pure-expression constructor-arg string (0-2 simple args) for a --tsan class factory.
+
+        Returns ``""`` when no usable args were produced. Only single-line simple-argument
+        expressions are kept, so the result stays valid inside a ``lambda:`` factory; a runtime
+        guard drops wrong-arity/type instantiations (Slice C).
+        """
+        parts: list[str] = []
+        for _ in range(randint(0, 2)):
+            try:
+                lines = self.arg_generator.create_simple_argument()
+            except Exception:
+                continue
+            if len(lines) == 1 and lines[0].strip():
+                parts.append(lines[0].strip())
+        return ", ".join(parts)
+
     def _write_tsan_stress_region(self) -> None:
         """Emit the --tsan concurrency-stress region.
 
@@ -716,6 +733,40 @@ class WritePythonCode(WriteCode):
         # Drop process-lifecycle calls (fork/exec/spawn/...): forking a worker crashes the child
         # under TSan and is never a useful race target (see TSAN_UNSAFE_CALLS).
         funcs = [f for f in (self.module_functions or []) if f not in TSAN_UNSAFE_CALLS][:40]
+
+        # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
+        # iterable) -- real target objects rather than only bare Class() instances. The same
+        # factories seed the shared pool AND (for iterables) point op (h) at the target's own
+        # tp_iternext. Sources: discovered module-level objects, class instances (w/ & w/o
+        # ArgumentGenerator args), and plugin-contributed objects (e.g. cereggii AtomicDict()).
+        objects = self.module_objects or []
+        shared_objects = sample(objects, min(n_shared, len(objects))) if objects else []
+        obj_factory_specs: list[tuple[str, str, bool]] = []
+        for name in shared_objects:
+            obj_factory_specs.append(
+                ("getattr(fuzz_target_module, %r)" % name, "obj:%s" % name, True)
+            )
+        for name in shared_classes:
+            obj_factory_specs.append(
+                ("getattr(fuzz_target_module, %r)()" % name, "cls:%s" % name, True)
+            )
+            argexpr = self._tsan_ctor_argexpr()
+            if argexpr:
+                obj_factory_specs.append(
+                    (
+                        "getattr(fuzz_target_module, %r)(%s)" % (name, argexpr),
+                        "cls:%s/args" % name,
+                        True,
+                    )
+                )
+        plugin_factories = (
+            self.plugin_manager.get_tsan_shared_factories(self.options, self.module_name)
+            if self.plugin_manager
+            else []
+        )
+        for src, label, iterable in plugin_factories:
+            obj_factory_specs.append((src, label, bool(iterable)))
+
         # Per-session rotation of which shared iterator each worker GROUP collides on. Computed
         # once here so the SAME value feeds both the emitted `_ITER_OFF` and the provenance
         # manifest below (Slice B attribution).
@@ -725,16 +776,23 @@ class WritePythonCode(WriteCode):
         # emit it into the script) rather than mis-attributing a builtin race to whatever module
         # this session happened to pick. shared_kind = did we share real target-module objects,
         # or only the module itself? (feeds fusil_stats.json + fleet report).
-        shared_kind = "target-objects" if shared_classes else "module-only"
+        shared_kind = (
+            "target-objects"
+            if (shared_objects or shared_classes or plugin_factories)
+            else "module-only"
+        )
+        ext_iterators = sum(1 for _s, _l, it in obj_factory_specs if it)
         self.tsan_shared_kind = shared_kind
         self.tsan_manifest = {
             "kind": "tsan-provenance",
             "v": 1,
             "module": self.module_name,
+            "shared_objects": list(shared_objects),
             "shared_classes": list(shared_classes),
+            "plugin_factories": [label for _s, label, _i in plugin_factories],
             "shared_kind": shared_kind,
             "shared_args": ["list", "dict", "set", "bytearray"],
-            # iterator kinds registered into the shared-iterator pool (op h); the last two are
+            # builtin iterator kinds always in the shared-iterator pool (op h); the last two are
             # attempted under try/except in the script (near-always present on the target).
             "iterators": [
                 "str",
@@ -746,6 +804,8 @@ class WritePythonCode(WriteCode):
                 "itertools.count",
                 "struct.iter_unpack",
             ],
+            # extension-object iterators (iter(factory())) folded into op (h) on top of builtins.
+            "ext_iterators": ext_iterators,
             "iter_off": iter_off,
             "roles": {"0": "writer", "1": "reader", "2": "both"},
             "ops": [
@@ -764,12 +824,16 @@ class WritePythonCode(WriteCode):
             "func_count": len(funcs),
         }
         provenance_line = (
-            "[TSAN] provenance module=%s shared=%s(%dcls+module) args=list,dict,set,bytearray "
-            "iterators=8 iter_off=%d roles=r/w/both ops=a-i workers=%d iters=%d funcs=%d"
+            "[TSAN] provenance module=%s shared=%s(%dobj+%dcls+%dplugin+module) "
+            "args=list,dict,set,bytearray iterators=8+%dext iter_off=%d roles=r/w/both "
+            "ops=a-i workers=%d iters=%d funcs=%d"
             % (
                 self.module_name,
                 shared_kind,
+                len(shared_objects),
                 len(shared_classes),
+                len(plugin_factories),
+                ext_iterators,
                 iter_off,
                 workers_per_obj,
                 iters,
@@ -803,19 +867,30 @@ class WritePythonCode(WriteCode):
         # Runtime skip set: the worker introspects dir(shared_object), so a shared MODULE object
         # would still expose fork/exec/... by name -- filter them there too.
         self.write(0, "_tsan_unsafe = frozenset(%r)" % (tuple(sorted(TSAN_UNSAFE_CALLS)),))
-        # Build the shared objects: instantiate a few module classes (guarded), plus the module.
-        self.write(0, "_tsan_shared = []")
-        for class_name in shared_classes:
-            self.write(0, "try:")
-            with self.indented():
-                self.write(0, "_tsan_shared.append(getattr(fuzz_target_module, %r)())" % class_name)
-            self.write(0, "except Exception:")
-            with self.indented():
-                self.write(0, "pass")
-        self.write(0, "_tsan_shared.append(fuzz_target_module)")
-        self.write(0, "if not _tsan_shared:")
-        with self.indented():
-            self.write(0, "_tsan_shared = [fuzz_target_module]")
+        # Build the shared objects from the guarded factories (Slice C): a few real target
+        # objects (module-level instances, class instances w/ & w/o args, plugin objects),
+        # capped for CONCENTRATION (few objects, many workers = what trips a race), plus the
+        # module itself (exposes module funcs to op c). The same factories feed op (h) below.
+        self.write(0, "_tsan_obj_factories = []")
+        for src, _label, _iterable in obj_factory_specs:
+            self.write(0, "_tsan_obj_factories.append(lambda: %s)" % src)
+        self.write(0, "_TSAN_MAX_SHARED = %d" % max(2, n_shared))
+        self.write_block(
+            0,
+            """
+            _tsan_shared = []
+            for _of in _tsan_obj_factories:
+                if len(_tsan_shared) >= _TSAN_MAX_SHARED:
+                    break
+                try:
+                    _tsan_shared.append(_of())
+                except Exception:
+                    pass
+            _tsan_shared.append(fuzz_target_module)
+            if not _tsan_shared:
+                _tsan_shared = [fuzz_target_module]
+            """,
+        )
         # Shared ITERATORS: one live iterator per kind, held in a 1-element cell and shared BY
         # REFERENCE so sibling workers advance the SAME cursor. Concurrent next()/repr() on one
         # iterator is the shared-iterator-state race class -- str/bytes/list/tuple/dict/range
@@ -844,7 +919,27 @@ class WritePythonCode(WriteCode):
                     lambda: _tsan_struct.Struct("i").iter_unpack(bytes(4 * 4096)))
             except Exception:
                 pass
-            _tsan_iters = [[_f()] for _f in _tsan_iter_factories]
+            """,
+        )
+        # Extension-object iterators (Slice C): fold iter(factory()) for each iterable shared-obj
+        # factory into the pool, pointing op (h) at the TARGET's own tp_iternext on top of the
+        # builtins above. Guarded build below drops non-iterables (a Widget() etc.) so the
+        # factory/iters lists stay length-aligned for the worker's StopIteration refresh.
+        for src, _label, iterable in obj_factory_specs:
+            if iterable:
+                self.write(0, "_tsan_iter_factories.append(lambda: iter(%s))" % src)
+        self.write_block(
+            0,
+            """
+            _tsan_iters = []
+            _tsan_iter_ok = []
+            for _f in _tsan_iter_factories:
+                try:
+                    _tsan_iters.append([_f()])
+                    _tsan_iter_ok.append(_f)
+                except Exception:
+                    pass
+            _tsan_iter_factories = _tsan_iter_ok
             """,
         )
         self.write(0, "_WORKERS_PER_OBJ = %d" % workers_per_obj)

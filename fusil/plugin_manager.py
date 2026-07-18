@@ -104,6 +104,24 @@ class SuppressionEntry:
 
 
 @dataclass
+class TSanSharedFactory:
+    """A --tsan shared-object factory contributed by a plugin (Phase 4 Slice C).
+
+    ``source`` is a Python EXPRESSION spliced into the generated script (which runs out of
+    process), evaluated to yield a target object the concurrency-stress region hammers from
+    many threads -- e.g. ``"__import__('cereggii').AtomicDict()"``. ``label`` names it in the
+    provenance manifest (defaults to ``source``). ``iterable`` also folds ``iter(source)``
+    into the shared-iterator op (op h) so the extension's own ``tp_iternext`` is raced.
+    ``condition(config, module_name) -> bool`` gates when the factory is active.
+    """
+
+    source: str
+    label: str | None = None
+    iterable: bool = True
+    condition: Callable[[Any, str], bool] = lambda cfg, mod: True
+
+
+@dataclass
 class PluginMetadata:
     """Metadata about a loaded plugin."""
 
@@ -131,6 +149,7 @@ class PluginManager:
         self.blacklist_entries: list[NameFilterEntry] = []
         self.whitelist_entries: list[NameFilterEntry] = []
         self.suppression_entries: list[SuppressionEntry] = []
+        self.tsan_shared_factories: list[TSanSharedFactory] = []
         self.stdout_ignore_regexes: list[str] = []
         self.hooks: dict[str, list[Callable]] = {
             "startup": [],
@@ -309,6 +328,32 @@ class PluginManager:
         """
         self.suppression_entries.append(SuppressionEntry(pattern=pattern, reason=reason))
 
+    def add_tsan_shared_factory(
+        self,
+        source: str,
+        *,
+        label: str | None = None,
+        iterable: bool = True,
+        condition: Callable[[Any, str], bool] = lambda cfg, mod: True,
+    ) -> None:
+        """Contribute a target-specific shared object to the --tsan stress region (Slice C).
+
+        Lets a plugin point the concurrency-stress region at the extension's own objects
+        (e.g. cereggii's ``AtomicDict()``) instead of only generic ``Class()`` instances, so
+        the FT-race-rich C paths that motivated this campaign are exercised directly.
+
+        Args:
+            source: a Python EXPRESSION evaluated in the generated (out-of-process) script to
+                build one shared object, e.g. ``"__import__('cereggii').AtomicDict()"``.
+            label: name shown in the provenance manifest (defaults to ``source``).
+            iterable: also fold ``iter(source)`` into the shared-iterator op so the object's
+                own ``tp_iternext`` is raced (guarded -- a non-iterable just drops).
+            condition: ``(config, module_name) -> bool`` gating when the factory is active.
+        """
+        self.tsan_shared_factories.append(
+            TSanSharedFactory(source=source, label=label, iterable=iterable, condition=condition)
+        )
+
     def add_stdout_ignore_regex(self, pattern: str) -> None:
         """Register a regex whose matching stdout lines are IGNORED by crash detection.
 
@@ -433,6 +478,16 @@ class PluginManager:
     def get_stdout_ignore_regexes(self) -> list[str]:
         """Return plugin-registered crash-detection ignore regexes (see add_stdout_ignore_regex)."""
         return list(self.stdout_ignore_regexes)
+
+    def get_tsan_shared_factories(
+        self, config: Any, module_name: str
+    ) -> list[tuple[str, str, bool]]:
+        """Return active --tsan shared-object factories as ``(source, label, iterable)`` (Slice C)."""
+        out = []
+        for reg in self.tsan_shared_factories:
+            if reg.condition(config, module_name):
+                out.append((reg.source, reg.label or reg.source, reg.iterable))
+        return out
 
     def get_active_mode(self, config: Any) -> FuzzingMode | None:
         """

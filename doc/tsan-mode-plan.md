@@ -430,7 +430,13 @@ so the entire "concurrent `next()` on one iterator" surface was unreachable:
 Tests: `test_tsan_generation.py::{test_shared_iterator_op_emitted,test_read_while_mutate_op_emitted}`.
 Emitter still gated (non-`--tsan` output unchanged).
 
-## Phase 4 (planned): target-object coverage + provenance + extension dedup
+## Phase 4: target-object coverage + provenance + extension dedup
+
+**Status (2026-07-18):** Slices **A** (worker roles, PR #213), **B** (provenance/attribution,
+PR #214), and **C** (target-object factories + extension-object iterators + the
+`add_tsan_shared_factory` plugin hook) are **implemented**; slices **D** (external source roots)
+and **E** (weird-subclasses-of-extension) remain planned. The slice descriptions below are the
+as-designed intent; see the commit history / the memory note for exact as-built details.
 
 **Motivation.** Phase 3.1 proved the op-mix finds *builtin* races (TSAN-0037, the bytes iterator)
 because the shared pool is mostly builtin containers + bare `Class()` instances. The campaign's

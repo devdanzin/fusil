@@ -94,6 +94,7 @@ by" column is where the core reads it back, so you can see exactly what each hoo
 | `add_blacklist_entry(kind, pattern, pattern_type="exact")` | Skip a discovered name. `kind` ∈ `module`/`class`/`function`/`object`/`method`; `pattern_type` `exact` or `glob`. | name filtering in `WritePythonCode` |
 | `add_whitelist_entry(kind, pattern, pattern_type="exact")` | Keep a name normally skipped (honoured for `method`, e.g. `__del__`). | method filtering in `WritePythonCode` |
 | `add_suppression_entry(pattern, reason=None)` | A regex `re.search`ed against a crash's stdout to drop known/uninteresting **hits** (see `--suppress-hit-regex`, issue #53). | `Fuzzer._suppression_keep_policy` |
+| `add_tsan_shared_factory(source, label=None, iterable=True, condition=…)` | A Python **expression** (e.g. `"__import__('cereggii').AtomicDict()"`) spliced into the `--tsan` concurrency-stress region as a shared object hammered from many threads; `iterable=True` also folds `iter(source)` into the shared-iterator op (points op *h* at the target's own `tp_iternext`); `condition(config, module)` gates it. | `WritePythonCode._write_tsan_stress_region` |
 | `add_hook(name, func)` | Lifecycle hook; `name` ∈ `startup`/`shutdown`. `startup(config)` runs after option parsing; `shutdown()` at exit. | `Application.setup` / `Application.exit` |
 | `declare_dependency(name, required_version=None)` | Advertise a required package/plugin. | `check_dependencies` at startup |
 | `declare_incompatibility(name)` | Advertise a conflicting plugin. | `check_dependencies` at startup |
