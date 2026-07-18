@@ -432,14 +432,15 @@ Emitter still gated (non-`--tsan` output unchanged).
 
 ## Phase 4: target-object coverage + provenance + extension dedup
 
-**Status (2026-07-18):** Slices **A** (worker roles, PR #213), **B** (provenance/attribution,
-PR #214), **C** (target-object factories + extension-object iterators + the
-`add_tsan_shared_factory` plugin hook, PR #215), and **D** (external C-extension source roots for
-`tsan_dedup` via `--tsan-source-root`) are **implemented**; slice **E**
-(weird-subclasses-of-extension) remains planned. The slice descriptions below are the as-designed
-intent; see the commit history / the memory note for exact as-built details. Slice D preserved the
-cross-repo signature contract: re-ingesting fleet-06 with the new parser and no roots reproduced
-all 119 CPython signatures byte-for-byte.
+**Status (2026-07-18):** all five slices are **implemented** — **A** (worker roles, PR #213),
+**B** (provenance/attribution, PR #214), **C** (target-object factories + extension-object
+iterators + the `add_tsan_shared_factory` plugin hook, PR #215), **D** (external C-extension
+source roots for `tsan_dedup` via `--tsan-source-root`, PR #216), and **E** (hostile subclasses of
+the target's own C types, **opt-in** via `--tsan-weird-subclasses`). Operation *profiles* remain
+deliberately PARKED. The slice descriptions below are the as-designed intent; see the commit
+history / the memory note for exact as-built details. Slice D preserved the cross-repo signature
+contract: re-ingesting fleet-06 with the new parser and no roots reproduced all 119 CPython
+signatures byte-for-byte.
 
 **Motivation.** Phase 3.1 proved the op-mix finds *builtin* races (TSAN-0037, the bytes iterator)
 because the shared pool is mostly builtin containers + bare `Class()` instances. The campaign's

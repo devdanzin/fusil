@@ -469,6 +469,16 @@ class Fuzzer(Application):
             "(CPython-only signatures, unchanged).",
             default=None,
         )
+        tsan_options.add_option(
+            "--tsan-weird-subclasses",
+            action="store_true",
+            help="Also share HOSTILE subclasses of the target's own (sub-classable) C types in "
+            "the stress region -- a managed __dict__ + raising __eq__/__hash__ layered on the C "
+            "base's slots, so a concurrent C op on a shared instance fires a hostile dunder "
+            "mid-operation (the __eq__-raises-during-store race class). Opt-in (default off): it "
+            "can surface the subclass's own races as noise. (Slice E.)",
+            default=False,
+        )
 
         options = (
             input_options,

@@ -733,6 +733,8 @@ class WritePythonCode(WriteCode):
         # Drop process-lifecycle calls (fork/exec/spawn/...): forking a worker crashes the child
         # under TSan and is never a useful race target (see TSAN_UNSAFE_CALLS).
         funcs = [f for f in (self.module_functions or []) if f not in TSAN_UNSAFE_CALLS][:40]
+        # Slice E (opt-in): also share hostile subclasses of the target's own C types.
+        weird_subclasses = bool(getattr(self.options, "tsan_weird_subclasses", False))
 
         # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
         # iterable) -- real target objects rather than only bare Class() instances. The same
@@ -806,6 +808,9 @@ class WritePythonCode(WriteCode):
             ],
             # extension-object iterators (iter(factory())) folded into op (h) on top of builtins.
             "ext_iterators": ext_iterators,
+            # hostile subclasses of these target C types shared too (Slice E, opt-in; guarded so
+            # non-subclassable bases drop at runtime).
+            "weird_subclasses": list(shared_classes) if weird_subclasses else [],
             "iter_off": iter_off,
             "roles": {"0": "writer", "1": "reader", "2": "both"},
             "ops": [
@@ -824,7 +829,7 @@ class WritePythonCode(WriteCode):
             "func_count": len(funcs),
         }
         provenance_line = (
-            "[TSAN] provenance module=%s shared=%s(%dobj+%dcls+%dplugin+module) "
+            "[TSAN] provenance module=%s shared=%s(%dobj+%dcls+%dplugin+module) weird=%d "
             "args=list,dict,set,bytearray iterators=8+%dext iter_off=%d roles=r/w/both "
             "ops=a-i workers=%d iters=%d funcs=%d"
             % (
@@ -833,6 +838,7 @@ class WritePythonCode(WriteCode):
                 len(shared_objects),
                 len(shared_classes),
                 len(plugin_factories),
+                len(shared_classes) if weird_subclasses else 0,
                 ext_iterators,
                 iter_off,
                 workers_per_obj,
@@ -874,6 +880,54 @@ class WritePythonCode(WriteCode):
         self.write(0, "_tsan_obj_factories = []")
         for src, _label, _iterable in obj_factory_specs:
             self.write(0, "_tsan_obj_factories.append(lambda: %s)" % src)
+        # Slice E (opt-in): derive HOSTILE subclasses from the target's own C types and add their
+        # instances to the pool. A managed __dict__ + raising __eq__/__hash__ on top of the C
+        # base's slots means a concurrent C op on a shared instance fires a hostile Python dunder
+        # mid-operation -- the __eq__-raises-during-store class (how cereggii's bug surfaced).
+        # Reuses tricky_weird's WeirdBase metaclass when compatible; the guard drops a
+        # non-subclassable base (Py_TPFLAGS_BASETYPE) or one needing constructor args.
+        if weird_subclasses and shared_classes:
+            self.write_block(
+                0,
+                '''
+                def _tsan_make_weird(_base):
+                    """A hostile subclass of a target C type: managed __dict__ + raising __eq__/
+                    __hash__ on the C base's slots. WeirdBase metaclass when compatible, else a
+                    plain subclass; a non-subclassable base raises and is dropped by the caller."""
+                    def _eq(self, other):
+                        if randint(0, 3) == 0:
+                            raise ValueError("tsan weird __eq__")
+                        return NotImplemented
+                    def _hash(self):
+                        if randint(0, 3) == 0:
+                            raise ValueError("tsan weird __hash__")
+                        return randint(0, 2 ** 61)
+                    _ns = {"__eq__": _eq, "__hash__": _hash}
+                    try:
+                        return WeirdBase("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))
+                    except Exception:
+                        return type("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))
+                _tsan_weird_classes = []
+                ''',
+            )
+            for name in shared_classes:
+                self.write(0, "try:")
+                with self.indented():
+                    self.write(
+                        0,
+                        "_tsan_weird_classes.append("
+                        "_tsan_make_weird(getattr(fuzz_target_module, %r)))" % name,
+                    )
+                self.write(0, "except Exception:")
+                with self.indented():
+                    self.write(0, "pass")
+            self.write_block(
+                0,
+                """
+                for _wb in _tsan_weird_classes:
+                    _tsan_obj_factories.append((lambda _wb=_wb: _wb()))
+                """,
+            )
         self.write(0, "_TSAN_MAX_SHARED = %d" % max(2, n_shared))
         self.write_block(
             0,
@@ -928,6 +982,16 @@ class WritePythonCode(WriteCode):
         for src, _label, iterable in obj_factory_specs:
             if iterable:
                 self.write(0, "_tsan_iter_factories.append(lambda: iter(%s))" % src)
+        # Slice E: point op (h) at the hostile subclasses' iterators too (the C base's tp_iternext
+        # under a Python subclass); guarded build below drops non-iterable ones.
+        if weird_subclasses and shared_classes:
+            self.write_block(
+                0,
+                """
+                for _wb in _tsan_weird_classes:
+                    _tsan_iter_factories.append((lambda _wb=_wb: iter(_wb())))
+                """,
+            )
         self.write_block(
             0,
             """
