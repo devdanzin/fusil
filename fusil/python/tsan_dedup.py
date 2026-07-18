@@ -18,6 +18,16 @@ across builds, so the signature is function-level; the exact lines are kept for 
 
 The catalog snapshot (``known_races.tsv``, produced by the sibling cpython-tsan-findings
 catalog) maps each known signature to a race id. Matching is exact on the signature.
+
+``parse_report`` optionally takes ``source_roots`` (Slice D): a list of ``--tsan-source-root``
+directories. A frame that is NOT CPython source but whose file lives under one of those roots is
+normalised to its path relative to the root (``/build/cereggii/src/atomic_dict.c`` ->
+``src/atomic_dict.c``), so an out-of-tree extension's own races get a specific, dedupable
+signature instead of falling into ``noparse``. CPython frames are always matched first, so the
+default (no roots) is byte-for-byte identical to the CPython-only behaviour. This signature
+format is a **cross-repo contract** -- the sibling catalog's ``scripts/ingest.py`` imports this
+module by path, so a change here must keep every existing CPython signature unchanged (see the
+re-ingest guardrail in the Slice D notes).
 """
 
 import collections
@@ -54,6 +64,45 @@ FRAME = re.compile(r"^\s*#\d+\s+(\S+)\s+(.+?)\s+\(")
 CPY_SRC = re.compile(
     r"(?:^|/)((?:Objects|Python|Modules|Include|Parser|Programs)/[\w./+-]+\.(?:c|h)):(\d+)"
 )
+# Slice D: with `--tsan-source-root` roots, a frame whose source file is NOT in CPython but lives
+# under one of those roots is normalised to its path RELATIVE to the root (e.g. root
+# `/build/cereggii` + `/build/cereggii/src/atomic_dict.c:12` -> `src/atomic_dict.c`), so an
+# extension `.so`'s own races get a specific, dedupable signature instead of dropping to
+# `noparse`. Default (no roots) leaves CPython-only behaviour byte-for-byte unchanged -- CPython
+# is always matched FIRST, so roots only ever rescue a frame CPY_SRC didn't already claim.
+_EXT_SRC = re.compile(r"([\w./+-]+\.(?:c|h|cc|cpp|cxx|hpp|hh|pyx|pxd|pxi)):(\d+)")
+
+
+def _relative_to_root(path, root):
+    """``path`` normalised relative to ``root`` (a --tsan-source-root dir), or None if not under
+    it. Matches either an absolute-path prefix or the root's basename as a ``/name/`` anchor (the
+    build-time source path baked into the `.so` can differ from the local root path)."""
+    root = root.rstrip("/")
+    if not root:
+        return None
+    if path == root:
+        return os.path.basename(path)
+    if path.startswith(root + "/"):
+        return path[len(root) + 1 :]
+    anchor = "/" + os.path.basename(root) + "/"
+    idx = path.find(anchor)
+    if idx != -1:
+        return path[idx + len(anchor) :]
+    return None
+
+
+def _ext_frame_site(func, location, source_roots):
+    """(relpath, func, line) if this frame's source file is under a source root, else None."""
+    m = _EXT_SRC.search(location)
+    if not m:
+        return None
+    path, line = m.group(1), int(m.group(2))
+    for root in source_roots:
+        rel = _relative_to_root(path, root)
+        if rel is not None:
+            return (rel, func, line)
+    return None
+
 
 # Generic call/vectorcall/eval dispatch + interpreter-startup frames: always on the stack, never
 # the racing DATA site, so skip them to reach the real racing function (mirrors
@@ -125,53 +174,64 @@ def _is_framework(site):
     return bool(FRAMEWORK_FILES.search(site[0])) or site[1] in FRAMEWORK_FUNCS
 
 
-def _frame_site(func, location):
-    """Return (file, func, line) if this frame is a CPython source frame, else None."""
+def _frame_site(func, location, source_roots=None):
+    """Return (file, func, line) if this frame resolves to a source site we key on, else None.
+
+    A CPython source frame is matched first (unchanged). With ``source_roots`` (Slice D), a
+    non-CPython frame whose file is under one of those roots is normalised relative to it; without
+    roots the behaviour is exactly the old CPython-only match."""
     if func == "<null>":
         return None
     m = CPY_SRC.search(location)
-    if not m:
-        return None
-    return (m.group(1), func, int(m.group(2)))
+    if m:
+        return (m.group(1), func, int(m.group(2)))
+    if source_roots:
+        return _ext_frame_site(func, location, source_roots)
+    return None
 
 
 def _is_plumbing(func):
     return func in PLUMBING_SKIP or bool(_STACKREF.fullmatch(func))
 
 
-def _top_site(frames):
+def _top_site(frames, source_roots=None):
     """Given a stanza's frames (innermost first) as (func, location), return the top real
-    racing site (file, func, line): the innermost CPython frame whose func isn't plumbing.
-    Falls back to the innermost CPython frame if all are plumbing; None if no CPython frame."""
-    cpython = []
+    racing site (file, func, line): the innermost resolved frame whose func isn't plumbing.
+    Falls back to the innermost resolved frame if all are plumbing; None if none resolve.
+    ``source_roots`` (Slice D) additionally resolves extension frames under those roots."""
+    real = []
     for func, location in frames:
-        site = _frame_site(func, location)
+        site = _frame_site(func, location, source_roots)
         if site is not None:
-            cpython.append(site)
-    if not cpython:
+            real.append(site)
+    if not real:
         return None
-    for site in cpython:
+    for site in real:
         if not _is_plumbing(site[1]):
             return site
-    return cpython[0]  # all plumbing -> innermost CPython frame anyway
+    return real[0]  # all plumbing -> innermost resolved frame anyway
 
 
-def parse_report(text):
+def parse_report(text, source_roots=None):
     """Parse the first ThreadSanitizer report in ``text``.
 
     Returns a dict {signature, sites, framework, kind} where kind is "race" (a data race, two
     access sites) or "segv" (a SEGV/UAF/deadlock, one crash site), or None if there is no TSan
     report (or it can't be reduced to any signature).
+
+    ``source_roots`` (Slice D, default None) is an optional list of ``--tsan-source-root`` dirs
+    that lets non-CPython (extension) frames under those roots contribute a signature instead of
+    dropping out. With the default (None) the result is byte-for-byte the CPython-only behaviour.
     """
     if WARNING.search(text):
-        return _parse_race(text)
+        return _parse_race(text, source_roots)
     m = SEGV.search(text)
     if m:
-        return _parse_segv(text, m)
+        return _parse_segv(text, m, source_roots)
     return None
 
 
-def _parse_segv(text, m):
+def _parse_segv(text, m, source_roots=None):
     """Parse a non-race TSan report (SEGV/UAF/deadlock): one crash stack. Signature is the top
     real crash site if TSan symbolized it, else the fault address + pc (deterministic under the
     fixed load address `setarch -R` gives; build-specific -- regenerate the catalog per build)."""
@@ -188,7 +248,7 @@ def _parse_segv(text, m):
             frames.append((fm.group(1), fm.group(2)))
         elif frames:
             break  # crash stack ended
-    site = _top_site(frames)
+    site = _top_site(frames, source_roots)
     if site:
         signature = "%s %s:%s" % (kind_word, site[0], site[1])
         sites = [site]
@@ -198,7 +258,7 @@ def _parse_segv(text, m):
     return dict(signature=signature, sites=sites, framework=False, kind="segv")
 
 
-def _parse_race(text):
+def _parse_race(text, source_roots=None):
     lines = text.splitlines()
     stanzas = []  # list of frame-lists, one per access stanza (in order)
     i = 0
@@ -229,7 +289,7 @@ def _parse_race(text):
         if not stanzas:
             return None
         stanzas.append(stanzas[0])
-    sites = [_top_site(fr) for fr in stanzas[:2]]
+    sites = [_top_site(fr, source_roots) for fr in stanzas[:2]]
     if all(s is None for s in sites):
         return None
     # Framework noise: every resolved site is thread/frame scaffolding.
@@ -346,17 +406,27 @@ class TSanDeduper:
     always kept.
     """
 
-    def __init__(self, catalog_path=None, keep=5, prune=False, suppressions_path=None):
+    def __init__(
+        self,
+        catalog_path=None,
+        keep=5,
+        prune=False,
+        suppressions_path=None,
+        source_roots=None,
+    ):
         self.snap = load_catalog_file(catalog_path) if catalog_path else {}
         self.keep_cap = keep
         self.prune = prune
         self.suppressor = Suppressor.from_file(suppressions_path)
+        # Slice D: optional --tsan-source-root dirs so extension-`.so` frames get a signature
+        # instead of dropping to noparse. None (the default) -> CPython-only, unchanged.
+        self.source_roots = list(source_roots) if source_roots else None
         self.seen = collections.Counter()
         self.kept = collections.Counter()
 
     def decide(self, stdout_text):
         """Return (keep: bool, label: str) for one crashing session."""
-        report = parse_report(stdout_text)
+        report = parse_report(stdout_text, source_roots=self.source_roots)
         if report is None:
             # A kept --tsan session with no parseable race: keep it, unlabelled-ish, for a look.
             self.seen["noparse"] += 1

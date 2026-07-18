@@ -111,6 +111,38 @@ REPORT_SEGV_NOFRAMES = "\n".join(
     ]
 )
 
+# Slice D: a race whose BOTH real sites live in an out-of-tree C extension (cereggii). The only
+# CPython-ish frames are the <null> interceptor, so WITHOUT --tsan-source-root the report reduces
+# to nothing (noparse); WITH the extension's root it resolves to root-relative sites.
+REPORT_EXT_VS_EXT = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=7)",
+        "  Write of size 8 at 0x7f00 by thread T1:",
+        "    #0 memset <null> (cereggii.so+0x1) (BuildId: bb)",
+        "    #1 AtomicDict_SetItem /build/cereggii/src/atomic_dict.c:412:9 (cereggii.so+0x2)",
+        "",
+        "  Previous read of size 8 at 0x7f00 by thread T2:",
+        "    #0 AtomicDict_GetItem /build/cereggii/src/atomic_dict.c:355:5 (cereggii.so+0x3)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in AtomicDict_SetItem",
+    ]
+)
+
+# Slice D: a race across the boundary -- one CPython site, one extension site. The CPython side
+# always resolves; the extension side is "?" without a root and resolves with one.
+REPORT_EXT_VS_CPYTHON = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=8)",
+        "  Write of size 8 at 0x7f00 by thread T1:",
+        "    #0 AtomicRef_Set /build/cereggii/src/atomic_ref.c:88:3 (cereggii.so+0x1)",
+        "",
+        "  Previous read of size 8 at 0x7f00 by thread T2:",
+        "    #0 list_extend /b/Objects/listobject.c:850:9 (python+0x5) (BuildId: aa)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in AtomicRef_Set",
+    ]
+)
+
 # A use-after-free with a symbolized crash stack -> signature is the top real site.
 REPORT_UAF_FRAMES = "\n".join(
     [
@@ -260,6 +292,77 @@ class TestSegv(unittest.TestCase):
         d = tsan_dedup.TSanDeduper()
         d.suppressor = tsan_dedup.Suppressor.from_lines(["dictiter_dealloc"])
         self.assertEqual(d.decide(REPORT_UAF_FRAMES), (False, None))
+
+
+class TestSourceRoots(unittest.TestCase):
+    """Slice D: external C-extension source roots. The mandatory invariant is that the DEFAULT
+    (no roots) is byte-for-byte the CPython-only behaviour -- the cross-repo signature contract."""
+
+    CEREGGII = "/build/cereggii"
+
+    def test_default_is_unchanged_cpython_only(self):
+        # No roots -> identical to the pre-Slice-D signature.
+        r = tsan_dedup.parse_report(REPORT_TWO_SITES)
+        self.assertEqual(
+            r["signature"],
+            "Objects/listobject.c:list_append | Objects/listobject.c:list_extend",
+        )
+
+    def test_cpython_matched_first_even_when_a_root_would_match(self):
+        # Passing a broad root that also contains the CPython build dir must NOT change a CPython
+        # frame's signature -- CPython is always resolved first.
+        r = tsan_dedup.parse_report(REPORT_TWO_SITES, source_roots=["/b"])
+        self.assertEqual(
+            r["signature"],
+            "Objects/listobject.c:list_append | Objects/listobject.c:list_extend",
+        )
+
+    def test_ext_vs_ext_is_noparse_without_roots(self):
+        self.assertIsNone(tsan_dedup.parse_report(REPORT_EXT_VS_EXT))
+
+    def test_ext_vs_ext_resolves_with_root(self):
+        r = tsan_dedup.parse_report(REPORT_EXT_VS_EXT, source_roots=[self.CEREGGII])
+        self.assertEqual(
+            r["signature"],
+            "src/atomic_dict.c:AtomicDict_GetItem | src/atomic_dict.c:AtomicDict_SetItem",
+        )
+
+    def test_ext_vs_cpython_resolves_both_sides_with_root(self):
+        r = tsan_dedup.parse_report(REPORT_EXT_VS_CPYTHON, source_roots=[self.CEREGGII])
+        self.assertEqual(
+            r["signature"],
+            "Objects/listobject.c:list_extend | src/atomic_ref.c:AtomicRef_Set",
+        )
+
+    def test_ext_vs_cpython_degrades_to_question_without_root(self):
+        # Without a root the extension side is unresolved ("?"), but the CPython side still keys.
+        r = tsan_dedup.parse_report(REPORT_EXT_VS_CPYTHON)
+        self.assertEqual(r["signature"], "? | Objects/listobject.c:list_extend")
+
+    def test_relative_to_root_absolute_prefix(self):
+        self.assertEqual(
+            tsan_dedup._relative_to_root("/build/cereggii/src/atomic_dict.c", "/build/cereggii"),
+            "src/atomic_dict.c",
+        )
+
+    def test_relative_to_root_basename_anchor_when_build_path_differs(self):
+        # The path baked into the .so can differ from the local root; fall back to the /name/ anchor.
+        self.assertEqual(
+            tsan_dedup._relative_to_root(
+                "/somewhere/else/cereggii/src/atomic_dict.c", "/home/me/cereggii"
+            ),
+            "src/atomic_dict.c",
+        )
+
+    def test_relative_to_root_not_under_root(self):
+        self.assertIsNone(tsan_dedup._relative_to_root("/other/pkg/foo.c", "/build/cereggii"))
+
+    def test_deduper_resolves_ext_race_with_source_roots(self):
+        # End-to-end: an ext-vs-ext race that would be noparse is a real tsanNEW with a root.
+        d_default = tsan_dedup.TSanDeduper()
+        self.assertEqual(d_default.decide(REPORT_EXT_VS_EXT), (True, "tsanNOPARSE"))
+        d_roots = tsan_dedup.TSanDeduper(source_roots=[self.CEREGGII])
+        self.assertEqual(d_roots.decide(REPORT_EXT_VS_EXT), (True, "tsanNEW"))
 
 
 class TestReadStdout(unittest.TestCase):
