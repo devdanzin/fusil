@@ -27,6 +27,16 @@ if [ -z "${HOME:-}" ]; then
 fi
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
 export PYTHON_GIL="$gil"
+# Keep CPython's bytecode cache out of the target build tree. systemd runs fusil as root, and the
+# target is usually a venv sharing a matrix build's Lib/, so RUNNER_PY (fusil's main process) would
+# write ROOT-owned .pyc into builds/*/Lib/**/__pycache__ -- which then blocks the matrix owner from
+# rm/rebuilding without sudo. fusil already redirects its own module-discovery imports and its
+# downgraded fusil-user children (to /tmp/fusil-pycache) in-process, but PYTHONPYCACHEPREFIX is only
+# read at interpreter STARTUP, so the main interpreter's own startup imports can ONLY be redirected
+# from the environment -- which is here (systemd gives the service a clean env; a shell export
+# before `fleet up` never reaches it). Disposable /tmp prefix, root phase distinct from the fusil
+# children's; honour an override.
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/tmp/fusil-pycache-root}"
 # systemd runs with a clean environment (no venv activation); add the fusil repo root so
 # `import fusil` works whether or not fusil is pip-installed in RUNNER_PY's environment.
 export PYTHONPATH="$(dirname "$(dirname "$FUSIL_PY")")${PYTHONPATH:+:$PYTHONPATH}"
