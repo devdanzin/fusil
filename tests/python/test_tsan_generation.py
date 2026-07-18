@@ -56,7 +56,7 @@ def _tsan_module():
     return mod
 
 
-def _make_tsan_options(threads=4, iterations=200, shared_objects=3):
+def _make_tsan_options(threads=4, iterations=200, shared_objects=3, weird_subclasses=False):
     o = MagicMock()
     o.tsan = True
     o.tsan_threads = threads
@@ -77,6 +77,7 @@ def _make_tsan_options(threads=4, iterations=200, shared_objects=3):
     o.classes_number = 0
     o.objects_number = 0
     o.methods_number = 2
+    o.tsan_weird_subclasses = weird_subclasses  # Slice E, opt-in
     return o
 
 
@@ -249,6 +250,39 @@ class TestTSanGeneration(unittest.TestCase):
         src = _generate_tsan(plugin_manager=pm)
         self.assertIn("_tsan_obj_factories.append(lambda: object())", src)
         self.assertNotIn("_tsan_iter_factories.append(lambda: iter(object()))", src)
+
+    def test_weird_subclasses_off_by_default(self):
+        # Slice E is opt-in: default output has no hostile-subclass machinery (so the flag-gated
+        # emitter leaves the default --tsan script unchanged).
+        src = _generate_tsan()
+        self.assertNotIn("_tsan_make_weird", src)
+        self.assertEqual(_extract_tsan_manifest(src)["weird_subclasses"], [])
+
+    def test_weird_subclasses_emitted_when_enabled(self):
+        # With --tsan-weird-subclasses, hostile subclasses of the discovered C types are built
+        # (guarded on subclassability) and their instances join the shared + iterator pools.
+        src = _generate_tsan(weird_subclasses=True)
+        ast.parse(src)  # still valid Python
+        self.assertIn("def _tsan_make_weird(_base):", src)
+        self.assertIn('raise ValueError("tsan weird __eq__")', src)
+        self.assertIn('raise ValueError("tsan weird __hash__")', src)
+        # reuses tricky_weird's WeirdBase metaclass, with a plain-subclass fallback
+        self.assertIn('WeirdBase("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))', src)
+        self.assertIn('type("_TsanWeird_" + _base.__name__, (_base,), dict(_ns))', src)
+        # the Widget C base is fed to the weird-class builder (guarded)
+        self.assertIn("_tsan_make_weird(getattr(fuzz_target_module, 'Widget'))", src)
+        # instances + iterators of the weird classes join the pools
+        self.assertIn("_tsan_obj_factories.append((lambda _wb=_wb: _wb()))", src)
+        self.assertIn("_tsan_iter_factories.append((lambda _wb=_wb: iter(_wb())))", src)
+        # provenance records the count
+        manifest = _extract_tsan_manifest(src)
+        self.assertEqual(manifest["weird_subclasses"], ["Widget"])
+        self.assertIn("weird=1", src)
+
+    def test_weird_base_boilerplate_available(self):
+        # The hostile subclasses rely on tricky_weird's WeirdBase being spliced into the script.
+        src = _generate_tsan(weird_subclasses=True)
+        self.assertIn("class WeirdBase", src)
 
     def test_knobs_are_parameterised(self):
         src = _generate_tsan(threads=7, iterations=42)
