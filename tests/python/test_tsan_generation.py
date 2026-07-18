@@ -80,7 +80,7 @@ def _make_tsan_options(threads=4, iterations=200, shared_objects=3):
     return o
 
 
-def _generate_tsan(**opt_overrides):
+def _generate_tsan(plugin_manager=None, **opt_overrides):
     parent = MagicMock()
     parent.options = _make_tsan_options(**opt_overrides)
     parent.filenames = ["/bin/sh"]
@@ -94,7 +94,7 @@ def _generate_tsan(**opt_overrides):
             "tsanmod",
             threads=False,
             _async=False,
-            plugin_manager=None,
+            plugin_manager=plugin_manager,
         )
         writer.generate_fuzzing_script()
         with open(path) as fp:
@@ -139,7 +139,7 @@ class TestTSanGeneration(unittest.TestCase):
         # repr() reading its state -- the class behind cpython#153928/#154013/#153981.
         src = _generate_tsan()
         self.assertIn("_tsan_iter_factories", src)
-        self.assertIn("_tsan_iters = [[_f()] for _f in _tsan_iter_factories]", src)
+        self.assertIn("_tsan_iters.append([_f()])", src)  # guarded, length-aligned build (Slice C)
         self.assertIn("next(_it)", src)  # concurrent cursor advance on the shared iterator
         self.assertIn("repr(_it)", src)  # state read racing the concurrent next()
         # covers the builtin iterator family + the stdlib C iterators from the linked issues
@@ -195,12 +195,60 @@ class TestTSanGeneration(unittest.TestCase):
 
     def test_shares_objects_and_module_functions(self):
         src = _generate_tsan()
-        # a module class is instantiated into the shared pool, plus the module itself.
-        self.assertIn("_tsan_shared.append(getattr(fuzz_target_module, 'Widget')())", src)
+        # a module class is instantiated as a guarded FACTORY into the shared pool (Slice C),
+        # and the module itself is always appended.
+        self.assertIn(
+            "_tsan_obj_factories.append(lambda: getattr(fuzz_target_module, 'Widget')())", src
+        )
         self.assertIn("_tsan_shared.append(fuzz_target_module)", src)
+        # the pool is capped for concentration, then built from the factories under a guard.
+        self.assertIn("_TSAN_MAX_SHARED = ", src)
+        self.assertIn("_tsan_shared.append(_of())", src)
         # module functions are called concurrently with the shared object as an argument.
         self.assertIn("'helper'", src)
         self.assertIn("_tsan_shared_args", src)
+
+    def test_extension_object_iterators_folded(self):
+        # Slice C: each iterable shared-object factory also seeds an iter(factory()) into op (h),
+        # pointing the shared-iterator machinery at the target's own tp_iternext.
+        src = _generate_tsan()
+        self.assertIn(
+            "_tsan_iter_factories.append(lambda: iter(getattr(fuzz_target_module, 'Widget')()))",
+            src,
+        )
+        manifest = _extract_tsan_manifest(src)
+        self.assertGreaterEqual(manifest["ext_iterators"], 1)  # >=1 (Widget); 2 if args built
+
+    def test_plugin_shared_factory_spliced(self):
+        # Slice C: a plugin-contributed target object is spliced into the shared pool + iterator
+        # pool, and its label lands in the provenance manifest.
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        pm.add_tsan_shared_factory(
+            "__import__('collections').OrderedDict()", label="cereggii:AtomicDict", iterable=True
+        )
+        src = _generate_tsan(plugin_manager=pm)
+        self.assertIn(
+            "_tsan_obj_factories.append(lambda: __import__('collections').OrderedDict())", src
+        )
+        self.assertIn(
+            "_tsan_iter_factories.append(lambda: iter(__import__('collections').OrderedDict()))",
+            src,
+        )
+        manifest = _extract_tsan_manifest(src)
+        self.assertIn("cereggii:AtomicDict", manifest["plugin_factories"])
+        self.assertEqual(manifest["shared_kind"], "target-objects")
+
+    def test_non_iterable_plugin_factory_not_folded(self):
+        # iterable=False -> spliced into the shared pool but NOT the iterator pool.
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        pm.add_tsan_shared_factory("object()", label="opaque", iterable=False)
+        src = _generate_tsan(plugin_manager=pm)
+        self.assertIn("_tsan_obj_factories.append(lambda: object())", src)
+        self.assertNotIn("_tsan_iter_factories.append(lambda: iter(object()))", src)
 
     def test_knobs_are_parameterised(self):
         src = _generate_tsan(threads=7, iterations=42)

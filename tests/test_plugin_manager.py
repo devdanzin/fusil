@@ -84,6 +84,39 @@ class TestSuppressionEntries(unittest.TestCase):
         self.assertEqual(PluginManager().get_suppression_entries(), [])
 
 
+class TestTSanSharedFactories(unittest.TestCase):
+    def test_register_and_get_active(self):
+        m = PluginManager()
+        m.add_tsan_shared_factory("AtomicDict()", label="cereggii:AtomicDict")
+        m.add_tsan_shared_factory("Counter()")  # label defaults to source, iterable defaults True
+        self.assertEqual(
+            m.get_tsan_shared_factories(config=None, module_name="cereggii"),
+            [
+                ("AtomicDict()", "cereggii:AtomicDict", True),
+                ("Counter()", "Counter()", True),
+            ],
+        )
+
+    def test_condition_gates_activation(self):
+        m = PluginManager()
+        m.add_tsan_shared_factory("AtomicDict()", condition=lambda cfg, mod: mod == "cereggii")
+        self.assertEqual(m.get_tsan_shared_factories(None, "json"), [])
+        self.assertEqual(
+            m.get_tsan_shared_factories(None, "cereggii"),
+            [("AtomicDict()", "AtomicDict()", True)],
+        )
+
+    def test_iterable_flag_preserved(self):
+        m = PluginManager()
+        m.add_tsan_shared_factory("File('x')", label="h5py:File", iterable=False)
+        self.assertEqual(
+            m.get_tsan_shared_factories(None, "h5py"), [("File('x')", "h5py:File", False)]
+        )
+
+    def test_empty_manager_has_no_factories(self):
+        self.assertEqual(PluginManager().get_tsan_shared_factories(None, "m"), [])
+
+
 class TestStdoutIgnoreRegexes(unittest.TestCase):
     def test_register_and_get(self):
         m = PluginManager()
