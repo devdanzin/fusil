@@ -430,6 +430,84 @@ so the entire "concurrent `next()` on one iterator" surface was unreachable:
 Tests: `test_tsan_generation.py::{test_shared_iterator_op_emitted,test_read_while_mutate_op_emitted}`.
 Emitter still gated (non-`--tsan` output unchanged).
 
+## Phase 4 (planned): target-object coverage + provenance + extension dedup
+
+**Motivation.** Phase 3.1 proved the op-mix finds *builtin* races (TSAN-0037, the bytes iterator)
+because the shared pool is mostly builtin containers + bare `Class()` instances. The campaign's
+actual value is races in the *target C extension* (cereggii/h5py/…). Phase 4 points the same
+machinery at the extension's own objects, attributes races correctly, and makes extension-source
+races dedupable. Derived from a Codex review (2026-07-18); **operation *profiles* are deliberately
+excluded** (parked — see Open questions) — Phase 4 keeps the single always-on op-mix and enriches
+it in place.
+
+### Slice A — complementary worker roles (in-place, no profiles)
+
+Today every `_tsan_worker` runs the identical op-mix; identical workers under-produce the
+reader-vs-writer overlap the interesting races need (next-vs-repr found the `count` bug #153981;
+mutate-vs-iterate is the whole read-while-mutate class). Assign a **role by `_wid`** so siblings
+sharing one `_idx`/resource do *complementary* ops: iterator group → some `next()` (advance),
+others `repr()`/`len()`/`list()` (read cursor); container group → some mutate, others sort/iterate/
+copy; object group → some read-churn, others attr-dict/weakref/GC mutation. Keep the single start
+barrier (round-level re-sync noted as an optional knob, not built). File: `write_python_code.py`
+only. Tests: role markers emitted + `compile()` + FT smoke-run. Risk: low (emitter-only, gated).
+
+### Slice B — provenance / attribution
+
+Fixes the real misattribution: a builtin race gets stamped with whatever module the session picked.
+The parent knows the full context at generation time → emit a stdout marker into the generated
+script (`[TSAN] provenance module=… shared=<factory-descriptors> roles=<map> ops=<…> seed=<N>` +
+a `[TSAN-MANIFEST] {json}` line) so it lands in every crash dir's stdout, and record the op-family /
+shared-object *kind* per session in `fusil_stats.json` (`stats_agent.py`) so `fleet report` shows
+iterator-race vs target-object-race distribution. Files: `write_python_code.py`, `stats_agent.py`,
+a thread-through in `python_source.py`. Risk: low (additive output + one stats field).
+
+### Slice C — better target objects (+ extension-object iterators)
+
+Replace the `_tsan_shared` builder (currently `sample(module_classes)` instances + module) with a
+set of **guarded factories**, recording which succeed (feeds Slice B):
+1. splice the already-discovered-but-unused `self.module_objects` into the pool;
+2. instantiate `module_classes` with args from the existing `ArgumentGenerator` (guarded), not just
+   `Class()`;
+3. a new `PluginManager` hook (`add_tsan_shared_factory` / `get_tsan_shared_factories`) so
+   cereggii/h5py plugins contribute target-specific shared objects (e.g. `AtomicDict()`);
+4. module fallback (keep).
+
+**Extension-object iterators (folded in):** for each object factory, also register wrapped variants
+`lambda: iter(factory())` (and `lambda: iter(factory(range(X)))` where a sequence-ish arg fits) into
+the op-(h) iterator pool — pointing the shared-iterator machinery at the extension's own
+`tp_iternext`. Everything guarded, so non-iterable/failed factories drop out. Files:
+`write_python_code.py`, `plugin_manager.py`, `doc/plugins.md`. Using the hook from the sibling
+plugins is a follow-up. Risk: medium — keep factories guarded; `--tsan` gate intact.
+
+### Slice D — external C-extension source roots (strictly additive; contract-touching)
+
+Without it, extension `.so` frames are dropped (`CPY_SRC` only matches CPython dirs) → `noparse`.
+Add an **optional** `source_roots=None` param to `parse_report`/`_frame_site` (`tsan_dedup.py`):
+default → current behavior byte-for-byte (CPython matched first, all 119 catalog sigs unchanged);
+otherwise normalize a non-CPython frame to its path relative to a matching root (`/…/cereggii` →
+`src/atomic_dict.c:func`). New repeatable `--tsan-source-root` feeds the in-loop dedup. Sibling
+catalog `ingest.py` reads roots from env/config and passes them through, plus CPython-vs-ext /
+ext-vs-ext signature tests. **Guardrail (mandatory):** `test_tsan_dedup` + re-ingest fleet-06 →
+119 CPython sigs identical. Risk: medium (the cross-repo contract) — additive-only + the re-ingest
+check.
+
+### Slice E — weird subclasses derived from extension classes (later / optional)
+
+Wire the `tricky_weird` weird-class machinery to derive hostile subclasses from *discovered
+extension bases* and share instances — the hostile-dunder-under-concurrency angle that turned up
+cereggii's `__eq__`-raises-during-concurrent-store bug. **Deferred** because: subclassing is gated on
+`Py_TPFLAGS_BASETYPE` (only a subset of C types allow it — guarded, lower/target-dependent yield);
+it's a bigger integration than a factory variant; and it can surface the weird class's *own*
+Python-level races (noise). Gate on subclassability; do after A–D land and lean on Slice B/D to keep
+its output attributable and dedupable.
+
+### Order & verification
+
+**A → B → C → D** (A/B low-risk quick wins; C is the payoff; D independent but needs the catalog in
+lockstep), E later. After each slice: full suite, `test_tsan_generation` + `test_tsan_dedup`,
+non-`--tsan` golden check (untouched), `ruff check` + `ruff format --check`; for C/D a real
+emitted-script smoke run + a fleet re-ingest showing **0 unexpected new signatures**.
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden

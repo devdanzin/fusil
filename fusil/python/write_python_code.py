@@ -699,7 +699,7 @@ class WritePythonCode(WriteCode):
         a race. The worker is type-agnostic (introspects `dir(obj)` at runtime) so one emitted
         body drives any shared object.
         """
-        from random import sample
+        from random import randint, sample
 
         workers_per_obj = max(2, self.options.tsan_threads)
         iters = max(1, self.options.tsan_iterations)
@@ -716,6 +716,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "import threading as _tsan_threading")
         self.write(0, "import gc as _tsan_gc")
         self.write(0, "import weakref as _tsan_weakref")
+        self.write(0, "import operator as _tsan_operator")
         self.write_print_to_stderr(0, '"[TSAN] entering concurrency-stress region"')
         # Free-threading is mandatory: without it the whole region is GIL-serialised noise.
         self.write(0, 'if getattr(sys, "_is_gil_enabled", lambda: True)():')
@@ -776,6 +777,10 @@ class WritePythonCode(WriteCode):
         )
         self.write(0, "_WORKERS_PER_OBJ = %d" % workers_per_obj)
         self.write(0, "_ITERS = %d" % iters)
+        # Per-session rotation of which shared iterator each worker GROUP shares, so all workers
+        # on one _idx collide on the SAME iterator (roles below race it) while different sessions
+        # cover different iterator kinds. Constant across workers -> sharing is preserved.
+        self.write(0, "_ITER_OFF = %d" % randint(0, 7))
         self.write(0, "_tsan_total = len(_tsan_shared) * _WORKERS_PER_OBJ")
         self.write(0, "_tsan_barrier = _tsan_threading.Barrier(_tsan_total)")
         self.write_block(
@@ -784,98 +789,113 @@ class WritePythonCode(WriteCode):
             def _tsan_worker(_idx, _wid):
                 _obj = _tsan_shared[_idx]
                 _names = [n for n in dir(_obj) if not n.startswith("_") and n not in _tsan_unsafe]
-                # one shared mutable container this worker (and its siblings on _idx) also hammers
+                # This worker's GROUP (every _wid on this _idx) shares ONE container and ONE
+                # iterator, so the complementary roles below race the SAME resource.
                 _bag = _tsan_shared_args[_idx % len(_tsan_shared_args)]
+                _cell = _tsan_iters[(_idx + _ITER_OFF) % len(_tsan_iters)]
+                # Role by _wid: readers (_role != 1) inspect/iterate/read; writers (_role != 0)
+                # mutate/advance; _role == 2 does both. With >=2 workers per object both sides are
+                # present, so a reader always races a writer on the object / container / iterator.
+                _role = _wid % 3
                 _tsan_barrier.wait()
                 for _i in range(_ITERS):
-                    # (a) dunder / read churn on the shared object
-                    for _op in (repr, hash, list, len, bool, iter, str):
-                        try:
-                            _op(_obj)
-                        except Exception:
-                            pass
-                    # (b) a method call with shared (mutable) arguments
-                    if _names:
+                    if _role != 1:
+                        # (a) reader: dunder / read churn on the shared object
+                        for _op in (repr, hash, list, len, bool, iter, str):
+                            try:
+                                _op(_obj)
+                            except Exception:
+                                pass
+                    if _role != 0 and _names:
+                        # (b) writer: a method call with shared (mutable) arguments
                         try:
                             _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
                             if callable(_m):
                                 _m(*_tsan_shared_args[: (_i % 3)])
                         except Exception:
                             pass
-                    # (c) a module function with the shared object as an argument
-                    if _tsan_funcs:
+                    if _role != 0 and _tsan_funcs:
+                        # (c) writer: a module function with the shared object as an argument
                         try:
                             getattr(fuzz_target_module,
                                     _tsan_funcs[(_wid + _i) % len(_tsan_funcs)])(_obj)
                         except Exception:
                             pass
-                    # (d) attribute-dict churn: concurrent __dict__ materialise/mutate on one
-                    # shared instance (the managed-dict race class -- e.g. OOM-0023/set_keys,
-                    # the deferred-refcount corruption dpdani's cereggii hit).
+                    # (d) attribute-dict race: writers setattr/delattr, readers getattr -- concurrent
+                    # __dict__ materialise/mutate vs read (managed-dict class: OOM-0023/set_keys, the
+                    # deferred-refcount corruption dpdani's cereggii hit).
                     try:
-                        setattr(_obj, "_tsan_a%d" % (_i % 4), _i)
-                        getattr(_obj, "_tsan_a%d" % (_wid % 4), None)
-                        if _i % 8 == 0:
-                            delattr(_obj, "_tsan_a%d" % (_i % 4))
+                        if _role != 0:
+                            setattr(_obj, "_tsan_a%d" % (_i % 4), _i)
+                            if _i % 8 == 0:
+                                delattr(_obj, "_tsan_a%d" % (_i % 4))
+                        if _role != 1:
+                            getattr(_obj, "_tsan_a%d" % (_wid % 4), None)
                     except Exception:
                         pass
-                    # (e) weakref churn: concurrent weakref creation/clear on the shared object
+                    # (e) weakref churn: concurrent weakref creation on the shared object (all roles).
                     try:
                         _tsan_weakref.ref(_obj)
                     except Exception:
                         pass
-                    # (f) shared-container mutation: hammer ONE container from every sibling worker
-                    try:
-                        if isinstance(_bag, list):
-                            _bag.append(_i)
-                            _bag[:1]
-                        elif isinstance(_bag, dict):
-                            _bag[_wid] = _i
-                            _bag.get(_i)
-                        elif isinstance(_bag, set):
-                            _bag.add(_wid)
-                            _bag.discard(_i)
-                        elif isinstance(_bag, bytearray):
-                            _bag.append(_i & 0xFF)
-                    except Exception:
-                        pass
-                    # (g) concurrent GC while all the above churns refcounts + containers
-                    # (concurrent collection is itself a rich FT-race surface).
-                    if _i % 16 == 0:
+                    if _role != 0:
+                        # (f) writer: hammer ONE shared container from every writer in the group
+                        try:
+                            if isinstance(_bag, list):
+                                _bag.append(_i)
+                                _bag[:1]
+                            elif isinstance(_bag, dict):
+                                _bag[_wid] = _i
+                                _bag.get(_i)
+                            elif isinstance(_bag, set):
+                                _bag.add(_wid)
+                                _bag.discard(_i)
+                            elif isinstance(_bag, bytearray):
+                                _bag.append(_i & 0xFF)
+                        except Exception:
+                            pass
+                    if _role != 1 and _i % 16 == 0:
+                        # (g) reader-side concurrent GC while writers churn refcounts + containers.
                         try:
                             _tsan_gc.collect()
                         except Exception:
                             pass
-                    # (h) shared-iterator races: advance ONE shared iterator's cursor from every
-                    # sibling worker (non-atomic it_index / iternext state) and repr() it while
-                    # others advance it (state read racing next()). Targets the whole builtin/
-                    # stdlib iterator family -- cpython#153928 / #154013 / #153981 (count slow mode).
-                    _cell = _tsan_iters[(_wid + _idx) % len(_tsan_iters)]
+                    # (h) shared-iterator race: writers advance the group's ONE iterator (next),
+                    # readers read its cursor state (repr for count slow-mode; length_hint reads
+                    # it_index) while it is advanced -- non-atomic it_index / iternext / it_seq
+                    # (cpython#153928 bytes/str, #154013 struct, #153981 count).
                     try:
                         _it = _cell[0]
-                        for _ in range(4):
-                            next(_it)
-                        if _i % 8 == 0:
+                        if _role != 0:
+                            for _ in range(4):
+                                next(_it)
+                        if _role != 1:
                             repr(_it)
+                            try:
+                                _tsan_operator.length_hint(_it, 0)
+                            except Exception:
+                                pass
                     except StopIteration:
-                        _cell[0] = _tsan_iter_factories[(_wid + _idx) % len(_tsan_iter_factories)]()
+                        _cell[0] = _tsan_iter_factories[
+                            (_idx + _ITER_OFF) % len(_tsan_iter_factories)]()
                     except Exception:
                         pass
-                    # (i) read-while-mutate on the shared container: iterate / copy / sort it while
-                    # sibling workers mutate it in (f) -- the non-atomic reader-vs-writer class
-                    # (list Py_SIZE + binarysort/list.sort, bytes_join, dict/odict/set iter-vs-resize).
-                    try:
-                        if isinstance(_bag, list):
-                            sorted(_bag)
-                            _bag[:]
-                        elif isinstance(_bag, dict):
-                            list(_bag.items())
-                        elif isinstance(_bag, set):
-                            list(_bag)
-                        elif isinstance(_bag, bytearray):
-                            bytes(_bag)
-                    except Exception:
-                        pass
+                    if _role != 1:
+                        # (i) reader: iterate / copy / sort the shared container while writers
+                        # mutate it in (f) -- the non-atomic reader-vs-writer class (list Py_SIZE +
+                        # binarysort/list.sort, bytes_join, dict/odict/set iter-vs-resize).
+                        try:
+                            if isinstance(_bag, list):
+                                sorted(_bag)
+                                _bag[:]
+                            elif isinstance(_bag, dict):
+                                list(_bag.items())
+                            elif isinstance(_bag, set):
+                                list(_bag)
+                            elif isinstance(_bag, bytearray):
+                                bytes(_bag)
+                        except Exception:
+                            pass
             """,
         )
         self.write_block(
