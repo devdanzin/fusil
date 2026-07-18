@@ -221,6 +221,7 @@ def collect_instance(inst_dir: str, *, now=None, systemd=True) -> dict:
         "by_kind": by_kind,
         "by_module_crash": by_module_crash,
         "modules": merged.get("modules", {}),
+        "tsan_kinds": merged.get("tsan_kinds", {}),
         "failed_imports": failed_imports,
         "mem_current": _int_or_none(sysd.get("MemoryCurrent")),
         "mem_peak": _int_or_none(sysd.get("MemoryPeak")),
@@ -271,6 +272,7 @@ def aggregate_campaign(reports: list[dict], *, now=None) -> dict:
         "by_kind": {},
         "by_module_crash": {},
         "modules": {},  # summed per-module {hits,crashes,timeouts} across instances
+        "tsan_kinds": {},  # summed --tsan shared-object composition across instances
         "started_at": None,
     }
     for r in reports:
@@ -278,6 +280,7 @@ def aggregate_campaign(reports: list[dict], *, now=None) -> dict:
             (r["by_label"], agg["by_label"]),
             (r["by_kind"], agg["by_kind"]),
             (r["by_module_crash"], agg["by_module_crash"]),
+            (r.get("tsan_kinds", {}), agg["tsan_kinds"]),
         ):
             for key, val in src.items():
                 dst[key] = dst.get(key, 0) + val
@@ -398,6 +401,8 @@ def render_instance(r: dict) -> str:
         % (", ".join("%s(%d)" % (m, c) for m, c in _top(r["by_module_crash"], 8)) or "(none)")
     )
     L.append("crash-rate (c/hits): %s" % _rate_str(r["modules"]))
+    if r.get("tsan_kinds"):
+        L.append("tsan shared-obj    : %s" % _taxo(r["tsan_kinds"]))
     if r["failed_imports"]:
         L.append(
             "failed imports     : %s"
@@ -474,6 +479,8 @@ def render_campaign(reports: list[dict], agg: dict, flags: list[tuple[int, str]]
         % (", ".join("%s(%d)" % (m, c) for m, c in _top(agg["by_module_crash"], 10)) or "(none)")
     )
     L.append("highest crash-rate    : %s" % _rate_str(agg.get("modules", {})))
+    if agg.get("tsan_kinds"):
+        L.append("tsan shared-obj       : %s" % _taxo(agg["tsan_kinds"]))
     L.append("-" * 84)
     if flags:
         L.append("HEALTH: %d flag(s)" % len(flags))

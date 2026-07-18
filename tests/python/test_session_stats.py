@@ -34,6 +34,16 @@ class TestRecord(unittest.TestCase):
         self.assertEqual(s.modules["json"], {"hits": 3, "crashes": 2, "timeouts": 0})
         self.assertEqual(s.modules["sqlite3"], {"hits": 1, "crashes": 0, "timeouts": 1})
 
+    def test_tsan_kinds_counted(self):
+        # Slice B: --tsan sessions record their shared-object composition; non-tsan sessions
+        # (tsan_kind=None) never touch the counter.
+        s = self._stats()
+        s.record("m", tsan_kind="target-objects")
+        s.record("m", tsan_kind="target-objects", crash=True)
+        s.record("m", tsan_kind="module-only")
+        s.record("m")  # no tsan_kind -> not counted
+        self.assertEqual(s.tsan_kinds, {"target-objects": 2, "module-only": 1})
+
     def test_none_module_bucketed_as_question(self):
         s = self._stats()
         s.record(None)

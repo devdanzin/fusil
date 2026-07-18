@@ -23,6 +23,10 @@ Sidecar schema (v1)::
       "modules": {                # per-target-module breakdown
         "_blake2": {"hits": 15, "crashes": 3, "timeouts": 0},
         ...
+      },
+      "tsan_kinds": {             # --tsan sessions by shared-object composition (Slice B)
+        "target-objects": 900,   # shared real target-module instances
+        "module-only": 100       # only the module object was shareable
       }
     }
 """
@@ -64,6 +68,8 @@ class SessionStats:
         self.cpu_load_kills = 0
         # module name -> {"hits": int, "crashes": int, "timeouts": int}
         self.modules: dict[str, dict[str, int]] = {}
+        # --tsan shared-object composition -> count (Slice B). Empty for non-tsan runs.
+        self.tsan_kinds: dict[str, int] = {}
 
     def record(
         self,
@@ -72,6 +78,7 @@ class SessionStats:
         crash: bool = False,
         timeout: bool = False,
         cpu_load: bool = False,
+        tsan_kind: str | None = None,
     ) -> None:
         """Fold one finished session into the counters."""
         self.sessions += 1
@@ -81,6 +88,8 @@ class SessionStats:
             self.timeouts += 1
         if cpu_load:
             self.cpu_load_kills += 1
+        if tsan_kind:
+            self.tsan_kinds[tsan_kind] = self.tsan_kinds.get(tsan_kind, 0) + 1
         # ``module`` can legitimately be None very early (before the first module loads);
         # bucket those under "?" rather than dropping the session from the module view.
         key = module or "?"
@@ -108,6 +117,7 @@ class SessionStats:
             "timeouts": self.timeouts,
             "cpu_load_kills": self.cpu_load_kills,
             "modules": self.modules,
+            "tsan_kinds": self.tsan_kinds,
         }
 
     def write(self, path: str) -> None:
@@ -137,6 +147,7 @@ class SessionStats:
             "timeouts": 0,
             "cpu_load_kills": 0,
             "modules": {},
+            "tsan_kinds": {},
             "started_at": None,
             "updated_at": None,
             "runs": 0,
@@ -151,6 +162,8 @@ class SessionStats:
                 acc = out["modules"].setdefault(name, {"hits": 0, "crashes": 0, "timeouts": 0})
                 for field in ("hits", "crashes", "timeouts"):
                     acc[field] += int(bucket.get(field, 0) or 0)
+            for kind, count in (d.get("tsan_kinds") or {}).items():
+                out["tsan_kinds"][kind] = out["tsan_kinds"].get(kind, 0) + int(count or 0)
             started = d.get("started_at")
             if started is not None and (out["started_at"] is None or started < out["started_at"]):
                 out["started_at"] = started

@@ -126,6 +126,24 @@ class TestCollectAndAggregate(unittest.TestCase):
             insts = fr.discover_instances(os.path.join(tmp, "inst-01"))
             self.assertEqual(len(insts), 1)
 
+    def test_tsan_kinds_flow_through_and_render(self):
+        # Slice B: the --tsan shared-object distribution rides the sidecar through
+        # collect_instance -> aggregate_campaign and is rendered in both report views.
+        with tempfile.TemporaryDirectory() as tmp:
+            r1 = os.path.join(tmp, "inst-01", "python")
+            os.makedirs(r1)
+            _sidecar(
+                os.path.join(r1, "fusil_stats.json"),
+                sessions=50,
+                tsan_kinds={"target-objects": 40, "module-only": 10},
+            )
+            r = fr.collect_instance(os.path.join(tmp, "inst-01"), now=2000.0, systemd=False)
+            self.assertEqual(r["tsan_kinds"], {"target-objects": 40, "module-only": 10})
+            report = fr.build_report(tmp, None, systemd=False, now=2000.0)
+            self.assertEqual(report["campaign"]["tsan_kinds"]["target-objects"], 40)
+            self.assertIn("tsan shared-obj", fr.render(report, 1))  # instance view
+            self.assertIn("target-objects", fr.render(report, None))  # campaign view
+
     def test_live_session_dirs_not_counted_as_crashes(self):
         # A still-named "session-N" dir holds a source.py while it runs, but it's a live
         # session, not a kept crash (kept crashes are renamed <module>-<kind>-<label>).
