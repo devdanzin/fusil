@@ -110,7 +110,13 @@ python3 scripts/gen_known_races.py                        # regenerate known_rac
   `fleet up` fills in the paths/limits and installs it. `systemctl start fusil@3` ⇒ runs
   instance 3.
 - **`fleet-run N`** — what each unit actually runs: makes `inst-NN/`, picks the GIL mode
-  for instance N, `exec`s fusil there so systemd supervises fusil directly.
+  for instance N, `exec`s fusil there so systemd supervises fusil directly. It also exports
+  `PYTHONPYCACHEPREFIX=/tmp/fusil-pycache-root` so the (root) runner interpreter never writes
+  `.pyc` into the target build's shared `Lib/` — systemd gives the service a clean env, so a
+  shell export before `fleet up` would never reach it, and the interpreter reads the var only at
+  startup. (fusil redirects its own module-discovery imports and its downgraded fusil-user
+  children to `/tmp/fusil-pycache` in-process.) Keeps the matrix tree free of root-owned `.pyc`
+  that would otherwise block `rm`/rebuild.
 - **`fleet`** — a thin wrapper over `systemctl` + reads the result dirs for `status`/`finds`.
 
 To see raw systemd state at any time: `systemctl status 'fusil@*'`,
