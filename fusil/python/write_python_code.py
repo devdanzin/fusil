@@ -743,6 +743,37 @@ class WritePythonCode(WriteCode):
         self.write(0, "if not _tsan_shared:")
         with self.indented():
             self.write(0, "_tsan_shared = [fuzz_target_module]")
+        # Shared ITERATORS: one live iterator per kind, held in a 1-element cell and shared BY
+        # REFERENCE so sibling workers advance the SAME cursor. Concurrent next()/repr() on one
+        # iterator is the shared-iterator-state race class -- str/bytes/list/tuple/dict/range
+        # iterators (unicode_ascii_iter_next it_index/it_seq, cpython#153928), struct.iter_unpack
+        # (cpython#154013), and itertools.count in big-int "slow mode" (cpython#153981). The
+        # factories rebuild an exhausted iterator (the finite ones); count() never exhausts.
+        self.write_block(
+            0,
+            """
+            _tsan_iter_factories = [
+                lambda: iter("A" * 4096),
+                lambda: iter(b"A" * 4096),
+                lambda: iter(list(range(4096))),
+                lambda: iter(tuple(range(4096))),
+                lambda: iter({_k: _k for _k in range(2048)}),
+                lambda: iter(range(4096)),
+            ]
+            try:
+                import itertools as _tsan_itertools
+                _tsan_iter_factories.append(lambda: _tsan_itertools.count(10 ** 18, 2))
+            except Exception:
+                pass
+            try:
+                import struct as _tsan_struct
+                _tsan_iter_factories.append(
+                    lambda: _tsan_struct.Struct("i").iter_unpack(bytes(4 * 4096)))
+            except Exception:
+                pass
+            _tsan_iters = [[_f()] for _f in _tsan_iter_factories]
+            """,
+        )
         self.write(0, "_WORKERS_PER_OBJ = %d" % workers_per_obj)
         self.write(0, "_ITERS = %d" % iters)
         self.write(0, "_tsan_total = len(_tsan_shared) * _WORKERS_PER_OBJ")
@@ -815,6 +846,36 @@ class WritePythonCode(WriteCode):
                             _tsan_gc.collect()
                         except Exception:
                             pass
+                    # (h) shared-iterator races: advance ONE shared iterator's cursor from every
+                    # sibling worker (non-atomic it_index / iternext state) and repr() it while
+                    # others advance it (state read racing next()). Targets the whole builtin/
+                    # stdlib iterator family -- cpython#153928 / #154013 / #153981 (count slow mode).
+                    _cell = _tsan_iters[(_wid + _idx) % len(_tsan_iters)]
+                    try:
+                        _it = _cell[0]
+                        for _ in range(4):
+                            next(_it)
+                        if _i % 8 == 0:
+                            repr(_it)
+                    except StopIteration:
+                        _cell[0] = _tsan_iter_factories[(_wid + _idx) % len(_tsan_iter_factories)]()
+                    except Exception:
+                        pass
+                    # (i) read-while-mutate on the shared container: iterate / copy / sort it while
+                    # sibling workers mutate it in (f) -- the non-atomic reader-vs-writer class
+                    # (list Py_SIZE + binarysort/list.sort, bytes_join, dict/odict/set iter-vs-resize).
+                    try:
+                        if isinstance(_bag, list):
+                            sorted(_bag)
+                            _bag[:]
+                        elif isinstance(_bag, dict):
+                            list(_bag.items())
+                        elif isinstance(_bag, set):
+                            list(_bag)
+                        elif isinstance(_bag, bytearray):
+                            bytes(_bag)
+                    except Exception:
+                        pass
             """,
         )
         self.write_block(

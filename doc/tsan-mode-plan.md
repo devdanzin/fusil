@@ -408,6 +408,28 @@ and the user didn't already pass it), logged as `TSan: forcing --no-numpy`. Veri
 a run with **no** `--no-numpy` flag now auto-suppresses numpy and still detects + labels the race.
 Test: `test_tsan_generation.py::test_enriched_op_mix_emitted`. Goldens unchanged (emitter gated).
 
+### Phase 3.1: shared-iterator + read-while-mutate ops (2026-07-18)
+
+Two op classes added after the `unicode_ascii_iter_next` find (cpython#153928) showed the op-mix
+never *shared an iterator across threads* — it built iterators (`iter(_obj)`) but discarded them,
+so the entire "concurrent `next()` on one iterator" surface was unreachable:
+
+- **(h) Shared-iterator races** — a pool of one live iterator per kind, each held in a 1-element
+  cell and shared *by reference* so every sibling worker advances the **same** cursor. Each
+  iteration does a few `next()`s and a periodic `repr()` (state read racing the concurrent
+  `next()`s). Covers the builtin iterator family (`str`/`bytes`/`list`/`tuple`/`dict`/`range` —
+  the non-atomic `it_index`/`it_seq` class) plus the stdlib C iterators from the sibling reports:
+  `struct.Struct.iter_unpack` (cpython#154013) and `itertools.count(10**18, 2)` in **big-int
+  "slow mode"** (cpython#153981). Finite iterators are rebuilt from their factory on
+  `StopIteration`; `count()` never exhausts.
+- **(i) Read-while-mutate on the shared container** — iterate/copy/sort the shared
+  `list`/`dict`/`set`/`bytearray` while sibling workers mutate it in (f): the non-atomic
+  reader-vs-writer class (`list` `Py_SIZE` + `binarysort`/`list.sort` = TSAN-0013/0014,
+  `bytes_join`, dict/odict/set iter-vs-resize = TSAN-0015/0026).
+
+Tests: `test_tsan_generation.py::{test_shared_iterator_op_emitted,test_read_while_mutate_op_emitted}`.
+Emitter still gated (non-`--tsan` output unchanged).
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden

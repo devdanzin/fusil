@@ -121,6 +121,24 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("setattr(_obj,", src)  # managed-dict / attribute churn
         self.assertIn("isinstance(_bag,", src)  # shared-container mutation
 
+    def test_shared_iterator_op_emitted(self):
+        # (h) shared-iterator races: one iterator advanced by every sibling worker, plus a
+        # repr() reading its state -- the class behind cpython#153928/#154013/#153981.
+        src = _generate_tsan()
+        self.assertIn("_tsan_iter_factories", src)
+        self.assertIn("_tsan_iters = [[_f()] for _f in _tsan_iter_factories]", src)
+        self.assertIn("next(_it)", src)  # concurrent cursor advance on the shared iterator
+        self.assertIn("repr(_it)", src)  # state read racing the concurrent next()
+        # covers the builtin iterator family + the stdlib C iterators from the linked issues
+        self.assertIn("iter_unpack", src)  # struct (cpython#154013)
+        self.assertIn("_tsan_itertools.count(10 ** 18, 2)", src)  # count slow mode (cpython#153981)
+
+    def test_read_while_mutate_op_emitted(self):
+        # (i) iterate / copy / sort the shared container while siblings mutate it in (f).
+        src = _generate_tsan()
+        self.assertIn("sorted(_bag)", src)  # concurrent sort of a shared list (binarysort)
+        self.assertIn("list(_bag.items())", src)  # dict iter-vs-resize
+
     def test_shares_objects_and_module_functions(self):
         src = _generate_tsan()
         # a module class is instantiated into the shared pool, plus the module itself.
