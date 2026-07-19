@@ -115,9 +115,18 @@ rare crashers — run a **dedicated** fleet that suppresses the gateways at the 
 `--tsan-suppressions`:
 
 ```sh
-GATEWAY=~/projects/cpython-tsan-findings/catalog/gateway_suppressions.txt
-FUSIL_FLAGS="--tsan --tsan-no-halt --tsan-dedup-catalog=$CATALOG --tsan-suppressions=$GATEWAY"
+# Use an ABSOLUTE path -- the fleet runs as root under systemd, so `~` / a $VAR set from your
+# login shell expands to /root, not your home, and TSan aborts every session with
+# "failed to read suppressions file" (silent: the target never runs, so the fleet finds nothing).
+FUSIL_FLAGS="--tsan --tsan-no-halt --tsan-dedup-catalog=$CATALOG \
+  --tsan-suppressions=/home/YOU/projects/cpython-tsan-findings/catalog/gateway_suppressions.txt"
 ```
+
+Root can read a file under your home as long as your home is traversable (`chmod o+x ~`) and the
+file is world-readable (it is). If TSan can't open the file it prints
+`ThreadSanitizer: failed to read suppressions file '…'` and the child exits without running --
+so a suddenly-silent un-masking fleet almost always means a wrong suppressions path; grep an
+instance's `fusil.out`/a session `stdout` for that line first.
 
 fusil feeds the file to both `TSAN_OPTIONS=suppressions=…` (so TSan never reports the gateways) and
 the in-loop deduper. Sessions whose only races are gateways then exit clean and aren't kept, so the
