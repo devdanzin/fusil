@@ -55,13 +55,24 @@ class PythonSource(ProjectAgent):
         if hasattr(project.application(), "plugin_manager"):
             self.plugin_manager = project.application().plugin_manager
 
-        if self.options.modules != "*":
+        modules_file = getattr(self.options, "modules_file", None)
+        if self.options.modules != "*" or modules_file:
+            # Explicit module set: --modules literal and/or --modules-file, bypassing
+            # discovery/blacklists. Unioned so a curated file can be augmented on the CLI.
             self.modules = set()
-            for module in self.options.modules.split(","):
-                module = module.strip()
-                if not len(module):
-                    continue
-                self.modules.add(module)
+            if self.options.modules != "*":
+                for module in self.options.modules.split(","):
+                    module = module.strip()
+                    if not len(module):
+                        continue
+                    self.modules.add(module)
+            if modules_file:
+                with open(modules_file) as module_file_handle:
+                    for line in module_file_handle:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        self.modules.add(line)
         else:
             self.error("Search all Python modules...")
             self.modules = lister_factory(
@@ -154,11 +165,14 @@ class PythonSource(ProjectAgent):
             self.filename,
             self.module,
             self.module_name,
-            # --tsan replaces the per-call one-thread-per-callsite wrappers with a concentrated
-            # concurrency-stress region (WritePythonCode._write_tsan_stress_region), so disable
-            # them here -- otherwise they would dilute the stress and double-run every call.
-            threads=(not self.options.no_threads) and not self.options.tsan,
-            _async=(not self.options.no_async) and not self.options.tsan,
+            # --tsan / --concurrency-stress replace the per-call one-thread-per-callsite wrappers
+            # with a concentrated concurrency-stress region (WritePythonCode.
+            # _write_tsan_stress_region), so disable them here -- otherwise they would dilute the
+            # stress and double-run every call.
+            threads=(not self.options.no_threads)
+            and not (self.options.tsan or getattr(self.options, "concurrency_stress", False)),
+            _async=(not self.options.no_async)
+            and not (self.options.tsan or getattr(self.options, "concurrency_stress", False)),
             plugin_manager=self.plugin_manager,
         )
 

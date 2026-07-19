@@ -50,6 +50,17 @@ class Fuzzer(Application):
             default="*",
         )
         input_options.add_option(
+            "--modules-file",
+            help="Read tested module names from FILE (one per line; '#' comments and blank "
+            "lines ignored), bypassing discovery/blacklists. Unions with --modules. Lets a "
+            "curated set (e.g. RustPython's Rust-implemented modules, or an unwrap_scan result) "
+            "drive the fleet at the crash-rich surface instead of all discovered modules "
+            "(default: none)",
+            type="str",
+            dest="modules_file",
+            default=None,
+        )
+        input_options.add_option(
             "--packages",
             help="Tested Python packages names separated by commas (default: test all packages)",
             type="str",
@@ -490,12 +501,65 @@ class Fuzzer(Application):
             default=False,
         )
 
+        # Generic hostile modes that help any alternative interpreter (RustPython, PyPy, ...),
+        # not just a TSan-instrumented CPython. Kept in core (mirrors the OOM/TSan split); the
+        # RustPython packaging (curated module set, known-panic suppression) lives in the
+        # separate fusil_rustpython_plugin.
+        altinterp_options = OptionGroup(parser, "Alt-interpreter / generic hostile modes")
+        altinterp_options.add_option(
+            "--concurrency-stress",
+            help="Emit the concurrency-stress region (the same shared-object/many-thread hammer "
+            "as --tsan) WITHOUT requiring a TSan-instrumented target: surfaces threading "
+            "deadlocks, re-entrancy panics, and teardown crashes in any interpreter (found the "
+            "RustPython _thread RefCell double-borrow). Reuses --tsan-threads/-iterations/"
+            "-shared-objects. No setarch/TSan preflight/env. Default: False",
+            action="store_true",
+            default=False,
+        )
+        altinterp_options.add_option(
+            "--new-uninit",
+            help="Emit the uninitialized-native-object region: for each type T discovered in the "
+            "session's module(s), build obj = T.__new__(T) (bypassing __init__) and hammer its "
+            "PROTOCOL slots (subscript, iter, call, number, repr, hash, len, ...) with hostile "
+            "args -- protocol slots that touch payload without re-validating segfault a "
+            "type-confused instance (found the RustPython re.Match subscript segv). Default: False",
+            action="store_true",
+            default=False,
+        )
+        altinterp_options.add_option(
+            "--rustpython-dedup-catalog",
+            help="Path to a known_panics.tsv snapshot (from the rustpython-findings catalog). "
+            "In-loop dedupe: each crash is reduced to its panic-site signature "
+            "(crates/<path>.rs:<line>), labelled with its bug id (or rustpyNEW / rustpySEGV), "
+            "and -- with --rustpython-dedup-prune -- known duplicates past --rustpython-dedup-keep "
+            "are dropped. Default: none (label-only, keep all)",
+            type="str",
+            dest="rustpython_dedup_catalog",
+            default=None,
+        )
+        altinterp_options.add_option(
+            "--rustpython-dedup-keep",
+            help="With --rustpython-dedup-prune, keep at most N dirs per known panic (default: 5)",
+            type="int",
+            dest="rustpython_dedup_keep",
+            default=5,
+        )
+        altinterp_options.add_option(
+            "--rustpython-dedup-prune",
+            help="Drop known-panic duplicate crash dirs past --rustpython-dedup-keep "
+            "(default: False)",
+            action="store_true",
+            dest="rustpython_dedup_prune",
+            default=False,
+        )
+
         options = (
             input_options,
             running_options,
             fuzzing_options,
             oom_options,
             tsan_options,
+            altinterp_options,
         )
         for option in options:
             parser.add_option_group(option)
@@ -586,6 +650,10 @@ class Fuzzer(Application):
         # the build preflight use a DISTINCT prefix (see main() and the preflight below) so a
         # root-created cache dir never blocks a fusil-user write under a shared prefix.
         process.env.set("PYTHONPYCACHEPREFIX", "/tmp/fusil-pycache")
+        # Ask a Rust-based target (RustPython, or any PyO3 extension) to print a backtrace on
+        # panic, so the crash dir captures the panicking `crates/<path>.rs:<line>` frame (better
+        # dedup + reports). Harmless no-op for CPython/PyPy, which ignore the variable.
+        process.env.set("RUST_BACKTRACE", "1")
         # ThreadSanitizer reserves more virtual address space than any finite RLIMIT_AS allows and
         # re-execs itself to raise the cap; a finite hard cap makes that re-exec fail (setrlimit
         # EINVAL) and TSan then runs DEGRADED, detecting nothing. So leave the cap OFF under --tsan
@@ -819,6 +887,39 @@ class Fuzzer(Application):
                 )
             )
 
+        # RustPython crash dedupe: reduce each crash to its Rust panic-site signature
+        # (crates/<path>.rs:<line>), label the crash dir with its bug id (or rustpyNEW /
+        # rustpySEGV), and optionally prune known duplicates past the sample cap. Independent of
+        # the fuzzing mode (works with plain, --concurrency-stress, or --new-uninit runs against a
+        # RustPython target); installed after the OOM/TSan dedupers so it wins if both were set
+        # (they target different interpreters, so they never really coexist).
+        self._rustpython_deduper = None
+        if self.options.rustpython_dedup_catalog:
+            from fusil.python.rustpython_dedup import RustPyDeduper
+
+            self._rustpython_deduper = RustPyDeduper(
+                self.options.rustpython_dedup_catalog,
+                keep=self.options.rustpython_dedup_keep,
+                prune=self.options.rustpython_dedup_prune,
+                python_bin=self.options.python,
+                gdb_timeout=self.options.oom_dedup_gdb_timeout,
+                resolve_segv=self.options.oom_dedup_resolve_segv,
+                # Never replay a fuzzed source.py as root: drop the gdb segv re-run to the same
+                # unprivileged user the fuzzing children use.
+                drop_uid=self.config.process_uid,
+                drop_gid=self.config.process_gid,
+            )
+            self.session_keep_policy = self._rustpython_keep_policy
+            project.error(
+                "RustPython dedupe enabled: %s (keep=%d, prune=%s, resolve_segv=%s)"
+                % (
+                    self.options.rustpython_dedup_catalog,
+                    self.options.rustpython_dedup_keep,
+                    self.options.rustpython_dedup_prune,
+                    self.options.oom_dedup_resolve_segv,
+                )
+            )
+
         # Regex hit suppression (issue #53): drop known/uninteresting crashing-session hits
         # whose stdout matches a user- or plugin-supplied regex -- the general/non-OOM analogue
         # of the OOM-catalog dedupe above. Composes with it: suppression runs first (a matched
@@ -946,6 +1047,28 @@ class Fuzzer(Application):
             self.error("TSan keep-policy failed (%s); keeping crash dir unlabelled" % err)
             return True, None
 
+    def _rustpython_keep_policy(self, session):
+        """Return (keep, label) for a crashed RustPython session from its captured stdout: reduce
+        the Rust panic (or a resolved segfault) to a site signature, then label / prune via the
+        catalog.
+
+        Consulted synchronously by SessionDirectory.checkKeepDirectory (stdout is complete).
+        Returns (True, None) on any error so a crash is never lost to a dedupe failure.
+        """
+        import os
+
+        session_dir = session.directory.directory
+        try:
+            from fusil.python.rustpython_dedup import read_crash_stdout
+
+            text = read_crash_stdout(os.path.join(session_dir, "stdout"))
+            return self._rustpython_deduper.decide(
+                text, source_path=os.path.join(session_dir, "source.py")
+            )
+        except Exception as err:
+            self.error("RustPython keep-policy failed (%s); keeping crash dir unlabelled" % err)
+            return True, None
+
     def exit(self, keep_log: bool = True) -> None:
         """Clean up and exit the fuzzer, printing runtime statistics."""
         super().exit(keep_log=keep_log)
@@ -953,6 +1076,8 @@ class Fuzzer(Application):
             self.error(self._deduper.report())
         if getattr(self, "_tsan_deduper", None):
             self.error(self._tsan_deduper.report())
+        if getattr(self, "_rustpython_deduper", None):
+            self.error(self._rustpython_deduper.report())
         if getattr(self, "_hit_suppressor", None):
             self.error(self._hit_suppressor.report())
         self.error(print_running_time(time_start))

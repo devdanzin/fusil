@@ -656,11 +656,19 @@ class WritePythonCode(WriteCode):
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self._write_fuzzing_logic_preamble()
 
-        # TSan mode: skip the single-threaded function/class/object sweeps and emit only the
-        # concurrency-stress region -- it instantiates its own shared objects and hammers them
-        # from many threads, which is the whole point (and keeps the instrumented script small).
-        if self.options.tsan:
+        # TSan / --concurrency-stress mode: skip the single-threaded function/class/object sweeps
+        # and emit only the concurrency-stress region -- it instantiates its own shared objects and
+        # hammers them from many threads, which is the whole point (and keeps the script small).
+        # --concurrency-stress reuses the same region without any TSan build (see the flag).
+        if self.options.tsan or getattr(self.options, "concurrency_stress", False):
             self._write_tsan_stress_region()
+            return
+
+        # --new-uninit mode: build T.__new__(T) for every discovered type and hammer its protocol
+        # slots -- a type-confused (uninitialized) instance whose protocol touches payload without
+        # re-validating can segfault an alternative interpreter (the RustPython re.Match seam).
+        if getattr(self.options, "new_uninit", False):
+            self._write_new_uninit_region()
             return
 
         self._write_function_fuzzing_loop()
@@ -721,6 +729,162 @@ class WritePythonCode(WriteCode):
             if len(lines) == 1 and lines[0].strip():
                 parts.append(lines[0].strip())
         return ", ".join(parts)
+
+    def _write_new_uninit_region(self) -> None:
+        """Emit the --new-uninit uninitialized-native-object region.
+
+        For every type T discovered in the session's module namespace -- including hidden
+        RESULT types reached via a light call sweep (e.g. ``type(re.match('a','a'))`` is never a
+        module attribute; the RUSTPY-0008 re.Match seam) -- build ``obj = T.__new__(T)`` to get a
+        type-confused instance whose payload was never initialised, then hammer its PROTOCOL slots
+        (subscript, iter/next, call, number, comparison, buffer, context-manager) plus every
+        ``dir(obj)`` method with hostile args. On CPython these downcast-guard into clean
+        exceptions; on an alternative interpreter a protocol slot that dereferences payload
+        without re-validating can segfault (the whole point of the mode). All operations are
+        wrapped so one bad slot never stops the sweep; budgets bound the runtime.
+        """
+        self.emptyLine()
+        self.write(0, "# --- Uninitialized-native-object region (--new-uninit) ---")
+        self.write(0, "import operator as _nu_operator")
+        # Skip process-lifecycle calls in the discovery sweep (forking/execing the harness is
+        # never a useful target and would kill the child) -- same set the TSan region filters.
+        self.write(0, "_NU_UNSAFE = frozenset(%r)" % (tuple(sorted(TSAN_UNSAFE_CALLS)),))
+        self.write_print_to_stderr(0, '"[NEW-UNINIT] entering uninitialized-object region"')
+        self.write_block(
+            0,
+            """
+            # 1) Collect candidate types: every `type` reachable from the target module namespace,
+            #    the types of its module-level objects, and -- via a bounded call sweep -- the
+            #    types of objects its callables RETURN (reaches hidden result types like re.Match
+            #    that are never exposed as a module attribute).
+            _nu_types = {}
+            def _nu_add(_t):
+                try:
+                    if isinstance(_t, type):
+                        _nu_types.setdefault(getattr(_t, "__qualname__", None) or repr(_t), _t)
+                except BaseException:
+                    pass
+
+            _nu_bomb = SuperBomb()
+            _nu_arg_combos = [
+                (), ("a",), ("a", "a"), (0,), (0, 0), (b"a",), (b"a", b"a"),
+                ([],), ({},), (_nu_bomb,), (1, 2, 3),
+            ]
+            _nu_budget = [3000]  # global cap on discovery-sweep calls (list = mutable in closures)
+
+            for _name in list(dir(fuzz_target_module)):
+                try:
+                    _attr = getattr(fuzz_target_module, _name)
+                except BaseException:
+                    continue
+                _nu_add(_attr)          # the attribute itself may be a type
+                _nu_add(type(_attr))    # the type of a module-level instance
+                if _name in _NU_UNSAFE or _name.startswith("_") or not callable(_attr):
+                    continue
+                for _combo in _nu_arg_combos:
+                    if _nu_budget[0] <= 0:
+                        break
+                    _nu_budget[0] -= 1
+                    try:
+                        _res = _attr(*_combo)
+                    except BaseException:
+                        continue
+                    _nu_add(type(_res))
+                    try:
+                        _res.close()   # be a good citizen if it opened something
+                    except BaseException:
+                        pass
+
+            _nu_types_items = list(_nu_types.items())[:200]
+            """,
+        )
+        self.write_print_to_stderr(
+            0, '"[NEW-UNINIT] discovered %d candidate types" % len(_nu_types)'
+        )
+        self.write_block(
+            0,
+            """
+            # 2) For each type, build an UNINITIALIZED instance (bypass __init__) and poke it.
+            def _nu_poke(_obj):
+                for _f in (repr, str, ascii, hash, len, bool, iter, dir, bytes, hex, oct,
+                           int, float, complex, abs, round):
+                    try:
+                        _f(_obj)
+                    except BaseException:
+                        pass
+                # subscript / mapping / sequence (the Match seam) -- read, write, delete
+                for _k in (0, -1, _nu_bomb, "x", slice(None), (0, 0)):
+                    try:
+                        _obj[_k]
+                    except BaseException:
+                        pass
+                    try:
+                        _obj[_k] = 1
+                    except BaseException:
+                        pass
+                    try:
+                        del _obj[_k]
+                    except BaseException:
+                        pass
+                # iteration / next
+                try:
+                    next(_obj)
+                except BaseException:
+                    pass
+                try:
+                    for _i, _x in enumerate(_obj):
+                        if _i > 3:
+                            break
+                except BaseException:
+                    pass
+                # call
+                for _combo in ((), (_nu_bomb,), (0,)):
+                    try:
+                        _obj(*_combo)
+                    except BaseException:
+                        pass
+                # binary / comparison ops against hostile operands
+                for _other in (1, _nu_bomb, _obj, "x", b"x"):
+                    for _op in (_nu_operator.add, _nu_operator.sub, _nu_operator.mul,
+                                _nu_operator.and_, _nu_operator.or_, _nu_operator.lt,
+                                _nu_operator.eq, _nu_operator.contains):
+                        try:
+                            _op(_obj, _other)
+                        except BaseException:
+                            pass
+                # context manager
+                try:
+                    with _obj:
+                        pass
+                except BaseException:
+                    pass
+                # every attribute/method called with hostile args
+                for _an in dir(_obj):
+                    try:
+                        _av = getattr(_obj, _an)
+                    except BaseException:
+                        continue
+                    if callable(_av):
+                        for _combo in ((), (_nu_bomb,), (0,), ("a",)):
+                            try:
+                                _av(*_combo)
+                            except BaseException:
+                                pass
+
+            for _tname, _t in _nu_types_items:
+                try:
+                    _obj = _t.__new__(_t)
+                except BaseException:
+                    continue
+                print("[NEW-UNINIT] poking " + _tname, file=stderr)
+                try:
+                    _nu_poke(_obj)
+                except BaseException:
+                    pass
+            """,
+        )
+        self.write_print_to_stderr(0, '"[NEW-UNINIT] region complete"')
+        self.emptyLine()
 
     def _write_tsan_stress_region(self) -> None:
         """Emit the --tsan concurrency-stress region.
@@ -871,13 +1035,23 @@ class WritePythonCode(WriteCode):
         # machine-parseable JSON line (both literals -- no runtime json import in the script).
         self.write_print_to_stderr(0, repr(provenance_line))
         self.write_print_to_stderr(0, repr(manifest_line))
-        # Free-threading is mandatory: without it the whole region is GIL-serialised noise.
+        # Under --tsan, free-threading is MANDATORY: with the GIL on, ThreadSanitizer sees a
+        # serialised run and detects nothing, so bail loudly. Under --concurrency-stress (no TSan)
+        # the region is still useful GIL-on -- threading teardown / re-entrancy bugs (RUSTPY-0001)
+        # surface via context switches, not just true parallelism -- so only WARN and continue.
         self.write(0, 'if getattr(sys, "_is_gil_enabled", lambda: True)():')
         with self.indented():
-            self.write_print_to_stderr(
-                0, '"[TSAN] FATAL: GIL enabled; need PYTHON_GIL=0 + a --disable-gil build"'
-            )
-            self.write(0, "raise SystemExit(3)")
+            if self.options.tsan:
+                self.write_print_to_stderr(
+                    0, '"[TSAN] FATAL: GIL enabled; need PYTHON_GIL=0 + a --disable-gil build"'
+                )
+                self.write(0, "raise SystemExit(3)")
+            else:
+                self.write_print_to_stderr(
+                    0,
+                    '"[CSTRESS] note: GIL enabled; running serialised (concurrency-stress '
+                    'still exercises threading teardown/re-entrancy)"',
+                )
         # Mutable containers shared BY REFERENCE across every worker (shared-argument races).
         self.write(0, '_tsan_shared_args = [[1, 2, 3], {"k": 1}, {1, 2, 3}, bytearray(b"fusil")]')
         self.write(0, "_tsan_funcs = %r" % (funcs,))
