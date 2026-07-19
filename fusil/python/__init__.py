@@ -13,6 +13,7 @@ with warnings.catch_warnings():
     from fusil.application import Application
     from fusil.process.create import CreateProcess
     from fusil.process.stdout import WatchStdout
+    from fusil.process.tools import target_is_asan
     from fusil.process.watch import WatchProcess
     from fusil.project import Project
     from fusil.python.python_source import PythonSource
@@ -116,6 +117,18 @@ class Fuzzer(Application):
             "reservation is incompatible with RLIMIT_AS (default: False)",
             action="store_true",
             default=False,
+        )
+        running_options.add_option(
+            "--child-memory-limit-mb",
+            help="Hard per-child address-space cap (RLIMIT_AS) in MiB. A runaway allocation in "
+            "the target then aborts at the cap instead of ballooning until the OS/cgroup OOM-kills "
+            "it or swap fills -- e.g. RustPython can grow ~400 MiB/s to 15+ GiB on hostile input. "
+            "0 (default) keeps the legacy ~4 PiB cap (effectively unbounded; the external cgroup "
+            "cap is then the only limit). Non-ASan, non-TSan targets only (both need the huge "
+            "reservation). Suggested for RustPython: 2048",
+            type="int",
+            dest="child_memory_limit_mb",
+            default=0,
         )
         running_options.add_option(
             "--record-timeouts",
@@ -661,6 +674,15 @@ class Fuzzer(Application):
         # unlimited. (This ~4 PiB cap is fine for ASan, which fits within it.)
         if not self.options.tsan:
             process.max_memory = 4000 * 1024 * 1024 * 1024 * 1024
+            # A real per-child cap on request (--child-memory-limit-mb): a runaway allocation then
+            # aborts at the cap instead of ballooning until the cgroup/OS OOM-kills it or swap fills
+            # (RustPython can grow ~400 MiB/s to 15+ GiB on hostile input -- see the memory-balloon
+            # investigation). NOT applied to ASan targets, whose ~20 TiB shadow reservation must fit
+            # within RLIMIT_AS; --no-memory-limit still disables it (max_memory already 0 by then).
+            limit_mb = getattr(self.options, "child_memory_limit_mb", 0)
+            if limit_mb and process.max_memory and not target_is_asan(self.options.python):
+                process.max_memory = limit_mb * 1024 * 1024
+                self.error("Child memory cap: RLIMIT_AS = %d MiB (abort-on-exceed)" % limit_mb)
 
         # Foreign-allocator OOM: preload the malloc-failure shim so the generated harness can
         # inject failures at the C malloc() layer (reaching foreign C libraries). Fail fast if
