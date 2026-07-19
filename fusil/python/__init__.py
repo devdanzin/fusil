@@ -479,6 +479,16 @@ class Fuzzer(Application):
             "can surface the subclass's own races as noise. (Slice E.)",
             default=False,
         )
+        tsan_options.add_option(
+            "--tsan-no-halt",
+            action="store_true",
+            help="Run TSan with halt_on_error=0 (report-and-continue) instead of stopping at the "
+            "first race, so ONE session can surface many distinct races (the op-mix keeps running "
+            "the full iteration count). Detection is textual, so races still score. Caveat: after "
+            "a memory-corrupting race (UAF/SEGV) later reports may be corruption artifacts -- the "
+            "first race is the trustworthy one. Default off (halt at first race).",
+            default=False,
+        )
 
         options = (
             input_options,
@@ -658,8 +668,11 @@ class Fuzzer(Application):
             # shell) and blocks ~forever on that currently-blackholed endpoint. With it cleared in
             # the child (below), symbolization returns in ~0.3s with full file:line frames -- worth
             # having in-loop, since the racing site then lands in the crash dir for triage/dedup.
-            # halt_on_error=1/exitcode=66: stop at the first race with a clean exit.
-            tsan_opts = ["halt_on_error=1", "symbolize=1", "exitcode=66", "history_size=4"]
+            # halt_on_error=1/exitcode=66: stop at the first race with a clean exit. With
+            # --tsan-no-halt, report-and-continue (0) so one session surfaces many races; exit is
+            # still 66 (TSan's exitcode fires at exit if any error was reported).
+            halt = "0" if self.options.tsan_no_halt else "1"
+            tsan_opts = ["halt_on_error=%s" % halt, "symbolize=1", "exitcode=66", "history_size=4"]
             if self.options.tsan_suppressions:
                 tsan_opts.append("suppressions=%s" % self.options.tsan_suppressions)
             process.env.set("TSAN_OPTIONS", ":".join(tsan_opts))

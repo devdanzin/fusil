@@ -231,6 +231,37 @@ def parse_report(text, source_roots=None):
     return None
 
 
+# The start of one TSan report: `WARNING: ThreadSanitizer: ...` or `==PID==ERROR: ThreadSanitizer:
+# ...` at line start. Deliberately NOT `SUMMARY: ThreadSanitizer:` (that ends a report). Used to
+# split a report-and-continue (halt_on_error=0) stdout into per-report chunks for parse_all_reports.
+_REPORT_START = re.compile(r"^(?:={2,}\d+={2,})?\s*(?:WARNING|ERROR): ThreadSanitizer: ", re.M)
+
+
+def parse_all_reports(text, source_roots=None):
+    """Parse EVERY ThreadSanitizer report in ``text`` (halt_on_error=0 emits many), in order,
+    de-duplicated by signature. Returns a list of report dicts of the same shape as
+    ``parse_report`` (each carrying an extra ``order`` index = its position in the stream, so a
+    caller can flag reports that FOLLOW a UAF/SEGV as possible corruption artifacts).
+
+    ``parse_report`` stays first-report-only -- this is purely additive, so the sibling catalog's
+    signature contract (which uses ``parse_report``) is unchanged.
+    """
+    starts = [m.start() for m in _REPORT_START.finditer(text)]
+    if not starts:
+        return []
+    out = []
+    seen = set()
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        rep = parse_report(text[start:end], source_roots)  # each chunk holds exactly one report
+        if not rep or not rep.get("signature") or rep["signature"] in seen:
+            continue
+        seen.add(rep["signature"])
+        rep = dict(rep, order=len(out))
+        out.append(rep)
+    return out
+
+
 def _parse_segv(text, m, source_roots=None):
     """Parse a non-race TSan report (SEGV/UAF/deadlock): one crash stack. Signature is the top
     real crash site if TSan symbolized it, else the fault address + pc (deterministic under the
