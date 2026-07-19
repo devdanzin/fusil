@@ -384,6 +384,61 @@ if tricky_list_with_cycle[0] and tricky_list_with_cycle[0][0] is tricky_list_wit
     tricky_list_with_cycle[0][0].append(tricky_list_with_cycle)
 
 
+# --- Recursion-shape probes: map the unguarded-native-recursion crash class (RustPython #2796).
+# Each object re-enters a protocol on a PARTNER object, so the recursion crosses object boundaries
+# (mutual recursion, harder to short-circuit than plain self-recursion). CPython raises
+# RecursionError on the protocol call; an interpreter without a recursion guard on that native
+# path overflows its C/Rust stack -> segfault. Construction is cheap -- the recursion fires only
+# when the fuzzer exercises the named protocol (hash/eq/getitem/iter/repr/call) on the object.
+class _TrickyRecur:
+    def __init__(self, name):
+        self.name = name
+        self.partner = self  # rebound to a partner below for mutual recursion
+
+    def __hash__(self):
+        return hash(self.partner)
+
+    def __eq__(self, other):
+        return self.partner == other
+
+    def __getitem__(self, key):
+        return self.partner[key]
+
+    def __iter__(self):
+        return iter(self.partner)
+
+    def __repr__(self):
+        return repr(self.partner)
+
+    def __call__(self, *args, **kwargs):
+        return self.partner(*args, **kwargs)
+
+
+tricky_recur_a = _TrickyRecur("a")
+tricky_recur_b = _TrickyRecur("b")
+tricky_recur_a.partner = tricky_recur_b
+tricky_recur_b.partner = tricky_recur_a
+
+# Deep generic-alias nesting list[list[...list[T]...]] bottomed on a TypeVar so the parameter walk
+# actually recurses to collect it -- exercises the genericalias parameter-walk native path
+# (RustPython segfaulted in genericalias::make_parameters_from_slice). Bounded depth so construction
+# + a CPython repr stay well under the recursion limit; the native walk (and __getitem__
+# substitution) is the target. Falls back to a plain nested alias if TypeVar is unavailable.
+try:
+    from typing import TypeVar as _TrickyTypeVar
+
+    _TrickyGAT = _TrickyTypeVar("_TrickyGAT")
+    _tricky_ga = _TrickyGAT
+except Exception:
+    _tricky_ga = list
+try:
+    for _ in range(80):
+        _tricky_ga = list[_tricky_ga]
+    tricky_deep_genericalias = _tricky_ga
+except Exception:
+    tricky_deep_genericalias = None
+
+
 """Exception-bomb objects: the protocol-level analogue of the OOM (allocation-failure) mode.
 
 The OOM allocator hook makes *allocations* fail deterministically; a bomb object makes a
@@ -609,6 +664,36 @@ _SUPERBOMB_DUNDERS = (
     "__xor__",
     "__lshift__",
     "__rshift__",
+    # reflected binary ops (right-hand operand) -- reached when the LEFT operand returns
+    # NotImplemented, a callback an alternative interpreter may .unwrap() unguarded.
+    "__rmod__",
+    "__rdivmod__",
+    "__rpow__",
+    "__rtruediv__",
+    "__rfloordiv__",
+    "__rmatmul__",
+    "__rand__",
+    "__ror__",
+    "__rxor__",
+    "__rlshift__",
+    "__rrshift__",
+    # in-place ops (augmented assignment) -- a distinct set of number-protocol slots.
+    "__imul__",
+    "__isub__",
+    "__imod__",
+    "__ipow__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imatmul__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+    # buffer protocol (PEP 688) -- a raising __buffer__ detonates a native buffer acquisition
+    # (memoryview(...), struct/array/C-level readbuffer), an error path C code often skips.
+    "__buffer__",
+    "__release_buffer__",
     "__enter__",
     "__exit__",
     "__get__",

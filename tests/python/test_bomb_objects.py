@@ -55,8 +55,12 @@ class TestSpecialBombs(unittest.TestCase):
         self.assertEqual(list(ll), [1, 2, 3])  # but yields few
 
     def test_failing_iterator_raises_during_iteration(self):
-        with self.assertRaises(BaseException):
-            list(B.FailingIterator(max_items=2))
+        # Force a concrete exception via exc=: with the default (a random pick from the bomb
+        # pool) StopIteration is ~8% likely, and `raise StopIteration` in a plain iterator's
+        # __next__ ends list() CLEANLY (no exception escapes) -- a real ~8% flake this asserts
+        # away by pinning a non-terminating exception.
+        with self.assertRaises(ValueError):
+            list(B.FailingIterator(max_items=2, exc=ValueError))
 
 
 class TestSuperBomb(unittest.TestCase):
