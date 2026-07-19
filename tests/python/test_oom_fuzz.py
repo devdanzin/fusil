@@ -47,6 +47,9 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.oom_foreign_pythonmalloc = False
     # TSan mode OFF (explicit: a bare MagicMock attr would be truthy and divert generation).
     o.tsan = False
+    # Alt-interpreter generic modes OFF too (same MagicMock-is-truthy divert hazard as tsan).
+    o.concurrency_stress = False
+    o.new_uninit = False
     o.test_private = False
     o.no_numpy = True
     o.no_tstrings = True
