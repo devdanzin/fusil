@@ -456,12 +456,20 @@ class TSanDeduper:
         self.kept = collections.Counter()
 
     def decide(self, stdout_text):
-        """Return (keep: bool, label: str) for one crashing session."""
+        """Return (keep: bool, label: str) for one crashing session (first race only)."""
         report = parse_report(stdout_text, source_roots=self.source_roots)
         if report is None:
             # A kept --tsan session with no parseable race: keep it, unlabelled-ish, for a look.
             self.seen["noparse"] += 1
             return True, "tsanNOPARSE"
+        return self._classify_report(report)
+
+    def _classify_report(self, report):
+        """Classify one already-parsed race report into (keep, label), updating the seen/kept
+        counters and honouring suppressions, framework noise, and the catalog + prune cap.
+
+        Shared by ``decide`` (first race) and ``decide_all`` (every race under halt_on_error=0),
+        so both paths tally and prune identically."""
         if self.suppressor.suppresses(report):
             self.seen["suppressed"] += 1
             return False, None
@@ -480,8 +488,110 @@ class TSanDeduper:
         self.seen[("NEW-SEGV:" if is_segv else "NEW:") + report["signature"]] += 1
         return True, "tsanSEGV" if is_segv else "tsanNEW"
 
+    def decide_all(self, stdout_text):
+        """Multi-race decision for a report-and-continue (``--tsan-no-halt``) session.
+
+        Returns ``(keep, headline_label, races)`` where ``races`` is a list of per-race dicts
+        (``signature``, ``label``, ``kind``, ``order``, ``keep``, ``after_fault``), one per
+        DISTINCT race in the stream -- suitable for a ``tsan_races.tsv`` sidecar. ``keep`` is True
+        if ANY race is worth keeping (new / framework / known-under-cap / unparseable); the dir is
+        pruned only when EVERY race is a known-over-cap duplicate or suppressed. ``headline_label``
+        is the first NEW finding's label, else the first kept race's label (for the dir name).
+        ``after_fault`` marks a race reported AFTER a SEGV/UAF in the same stream -- possibly a
+        corruption artifact of the first fault rather than an independent race.
+
+        For 0 or 1 parseable reports this delegates to ``decide`` (so the default halt_on_error=1
+        single-race path -- accounting, label, and the noparse case -- is byte-for-byte unchanged),
+        returning a 0- or 1-element ``races`` list.
+        """
+        reports = parse_all_reports(stdout_text, source_roots=self.source_roots)
+        if len(reports) <= 1:
+            keep, label = self.decide(stdout_text)
+            races = []
+            if reports:
+                rep = reports[0]
+                races.append(
+                    {
+                        "signature": rep["signature"],
+                        "label": label,
+                        "kind": rep["kind"],
+                        "order": 0,
+                        "keep": keep,
+                        "after_fault": False,
+                    }
+                )
+            return keep, label, races
+        races = []
+        fault_seen = False
+        for rep in reports:
+            keep, label = self._classify_report(rep)
+            races.append(
+                {
+                    "signature": rep["signature"],
+                    "label": label,
+                    "kind": rep["kind"],
+                    "order": rep["order"],
+                    "keep": keep,
+                    "after_fault": fault_seen,
+                }
+            )
+            if rep["kind"] == "segv":
+                fault_seen = True  # races reported AFTER a fault may be corruption artifacts
+        keep_any = any(r["keep"] for r in races)
+        return keep_any, _headline_label(races), races
+
     def report(self):
         lines = ["TSan dedupe summary (seen / kept):"]
         for key, n in self.seen.most_common():
             lines.append("  %-40s seen=%-5d kept=%d" % (key, n, self.kept.get(key, n)))
         return "\n".join(lines)
+
+
+# ---- multi-race helpers (decide_all + the tsan_races.tsv sidecar) ----
+# A "new finding" label ranks above a known/framework one for the crash dir's HEADLINE name.
+_NEW_LABELS = ("tsanNEW", "tsanSEGV")
+
+
+def _headline_label(races):
+    """Pick the crash dir's headline label from a decided race list: the first NEW finding
+    (``tsanNEW`` / ``tsanSEGV``), else the first kept & labelled race (a known id or
+    ``tsanFRAME``), else the first labelled race at all, else None."""
+    for r in races:
+        if r["label"] in _NEW_LABELS:
+            return r["label"]
+    for r in races:
+        if r["keep"] and r["label"]:
+            return r["label"]
+    for r in races:
+        if r["label"]:
+            return r["label"]
+    return None
+
+
+# Sidecar column order; `signature` stays LAST because it is the only field that contains spaces
+# (never a tab), so a naive `line.split("\t")` recovers every column intact.
+RACES_TSV_HEADER = "order\tlabel\tkind\tafter_fault\tsignature"
+
+
+def format_races_tsv(races):
+    """Render a decided race list (from ``decide_all``) as a ``tsan_races.tsv`` sidecar string:
+    one tab-separated row per distinct race, a suppressed race's empty label rendered as
+    ``suppressed``. Pure formatting, so it unit-tests without touching the filesystem; the
+    keep-policy writes the returned string into the kept crash dir, and the sibling catalog's
+    ``ingest.py`` reads it back (a cross-repo consumer -- keep the columns stable)."""
+    lines = [
+        "# fusil tsan_races.tsv: distinct races in one session (--tsan-no-halt multi-race capture)",
+        "# " + RACES_TSV_HEADER,
+    ]
+    for r in races:
+        lines.append(
+            "%d\t%s\t%s\t%d\t%s"
+            % (
+                r["order"],
+                r["label"] or "suppressed",
+                r["kind"],
+                1 if r["after_fault"] else 0,
+                r["signature"],
+            )
+        )
+    return "\n".join(lines) + "\n"
