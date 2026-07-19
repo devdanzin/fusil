@@ -299,6 +299,128 @@ class TestDecide(unittest.TestCase):
         self.assertEqual(self._deduper().decide(NO_RACE), (True, "tsanNOPARSE"))
 
 
+class TestDecideAll(unittest.TestCase):
+    """decide_all: classify EVERY distinct race in a --tsan-no-halt session, keep-if-any-new,
+    prune-if-all-known/suppressed, headline label, after_fault flag, and the tsan_races.tsv."""
+
+    def _deduper(self, catalog_rows=(), keep=5, prune=False, supp_lines=None):
+        d = tsan_dedup.TSanDeduper(keep=keep, prune=prune)
+        d.snap = tsan_dedup.load_catalog(list(catalog_rows))
+        if supp_lines is not None:
+            d.suppressor = tsan_dedup.Suppressor.from_lines(supp_lines)
+        return d
+
+    def test_all_new_kept_with_per_race_rows(self):
+        text = "\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC, REPORT_SEGV_NOFRAMES])
+        keep, headline, races = self._deduper().decide_all(text)
+        self.assertTrue(keep)
+        self.assertEqual(headline, "tsanNEW")  # first new finding wins the dir name
+        self.assertEqual([r["label"] for r in races], ["tsanNEW", "tsanNEW", "tsanSEGV"])
+        self.assertEqual([r["order"] for r in races], [0, 1, 2])
+        self.assertTrue(all(r["keep"] for r in races))
+
+    def test_after_fault_flag_set_for_races_following_a_segv(self):
+        # SEGV in the MIDDLE: the race reported after it is flagged as a possible artifact.
+        text = "\n".join([REPORT_TWO_SITES, REPORT_SEGV_NOFRAMES, REPORT_PREVIOUS_ATOMIC])
+        _keep, _headline, races = self._deduper().decide_all(text)
+        self.assertEqual([r["kind"] for r in races], ["race", "segv", "race"])
+        self.assertEqual([r["after_fault"] for r in races], [False, False, True])
+
+    def test_keep_if_any_new_even_when_one_race_is_known_over_cap(self):
+        sig = tsan_dedup.parse_report(REPORT_TWO_SITES)["signature"]
+        d = self._deduper(catalog_rows=["TSAN-0001\t%s" % sig], keep=1, prune=True)
+        d.decide(REPORT_TWO_SITES)  # take TSAN-0001 to its cap
+        keep, headline, races = d.decide_all("\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC]))
+        self.assertTrue(keep)  # the new race keeps the dir alive
+        self.assertEqual(headline, "tsanNEW")
+        self.assertEqual(
+            [(r["label"], r["keep"]) for r in races], [("TSAN-0001", False), ("tsanNEW", True)]
+        )
+
+    def test_prune_only_when_all_races_known_over_cap(self):
+        s1 = tsan_dedup.parse_report(REPORT_TWO_SITES)["signature"]
+        s2 = tsan_dedup.parse_report(REPORT_PREVIOUS_ATOMIC)["signature"]
+        d = self._deduper(
+            catalog_rows=["TSAN-0001\t%s" % s1, "TSAN-0002\t%s" % s2], keep=1, prune=True
+        )
+        d.decide(REPORT_TWO_SITES)  # both to cap
+        d.decide(REPORT_PREVIOUS_ATOMIC)
+        keep, headline, races = d.decide_all("\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC]))
+        self.assertFalse(keep)  # every race is a known-over-cap duplicate -> prune
+        self.assertEqual(headline, "TSAN-0001")  # else-first-known for the (pruned) label
+        self.assertFalse(any(r["keep"] for r in races))
+
+    def test_single_report_delegates_to_decide(self):
+        keep_all, label_all, races = self._deduper().decide_all(REPORT_TWO_SITES)
+        keep_one, label_one = self._deduper().decide(REPORT_TWO_SITES)
+        self.assertEqual((keep_all, label_all), (keep_one, label_one))
+        self.assertEqual(len(races), 1)
+        self.assertEqual(races[0]["order"], 0)
+
+    def test_duplicate_reports_collapse_then_fall_back_to_single(self):
+        # the same race twice (swapped form) dedups to one -> single-race delegate path.
+        keep, label, races = self._deduper().decide_all(
+            "\n".join([REPORT_TWO_SITES, REPORT_SWAPPED])
+        )
+        self.assertEqual((keep, label), (True, "tsanNEW"))
+        self.assertEqual(len(races), 1)
+
+    def test_noparse_delegates_and_has_empty_race_list(self):
+        self.assertEqual(self._deduper().decide_all(NO_RACE), (True, "tsanNOPARSE", []))
+
+    def test_suppressed_race_alongside_new_keeps_and_records_suppressed(self):
+        d = self._deduper(supp_lines=["race:list_append"])  # suppresses the TWO_SITES race
+        keep, headline, races = d.decide_all("\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC]))
+        self.assertTrue(keep)
+        self.assertEqual(headline, "tsanNEW")
+        self.assertEqual(
+            [(r["label"], r["keep"]) for r in races], [(None, False), ("tsanNEW", True)]
+        )
+
+
+class TestFormatRacesTsv(unittest.TestCase):
+    def test_render_rows_header_and_suppressed_and_after_fault(self):
+        races = [
+            {
+                "order": 0,
+                "label": "tsanNEW",
+                "kind": "race",
+                "keep": True,
+                "after_fault": False,
+                "signature": "A:f | B:g",
+            },
+            {
+                "order": 1,
+                "label": None,
+                "kind": "race",
+                "keep": False,
+                "after_fault": True,
+                "signature": "C:h | D:i",
+            },
+        ]
+        out = tsan_dedup.format_races_tsv(races)
+        lines = out.splitlines()
+        self.assertTrue(lines[0].startswith("#"))
+        self.assertEqual(lines[1], "# " + tsan_dedup.RACES_TSV_HEADER)
+        self.assertEqual(lines[2], "0\ttsanNEW\trace\t0\tA:f | B:g")
+        self.assertEqual(lines[3], "1\tsuppressed\trace\t1\tC:h | D:i")  # None -> suppressed
+        self.assertTrue(out.endswith("\n"))
+
+    def test_roundtrips_through_naive_tab_split(self):
+        # signature is LAST so a plain split recovers every column (signature has spaces, no tabs).
+        _keep, _headline, races = tsan_dedup.TSanDeduper().decide_all(
+            "\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC])
+        )
+        rows = [
+            ln.split("\t")
+            for ln in tsan_dedup.format_races_tsv(races).splitlines()
+            if not ln.startswith("#")
+        ]
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(len(cols) == 5 for cols in rows))
+        self.assertEqual([cols[4] for cols in rows], [r["signature"] for r in races])
+
+
 class TestSegv(unittest.TestCase):
     def test_segv_no_frames_keyed_on_addr_and_pc(self):
         r = tsan_dedup.parse_report(REPORT_SEGV_NOFRAMES)

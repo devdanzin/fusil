@@ -911,19 +911,37 @@ class Fuzzer(Application):
 
     def _tsan_keep_policy(self, session):
         """Return (keep, label) for a crashed --tsan session from its captured stdout: reduce the
-        ThreadSanitizer report to its race signature, then label / prune via the catalog.
+        ThreadSanitizer report(s) to race signatures, then label / prune via the catalog.
 
-        Consulted synchronously by SessionDirectory.checkKeepDirectory (stdout is complete).
+        Under ``--tsan-no-halt`` a single session can carry MANY races (halt_on_error=0); this
+        uses ``decide_all`` to classify every distinct race, keep the dir if ANY is worth keeping,
+        label the dir with the headline (first new) race, and drop a ``tsan_races.tsv`` sidecar
+        recording the full per-race breakdown for the sibling catalog's ingest. With the default
+        halt_on_error=1 (one race per session) ``decide_all`` degrades to the single-race
+        ``decide`` and no sidecar is written, so behaviour is unchanged.
+
+        Consulted synchronously by SessionDirectory.checkKeepDirectory (stdout is complete, and
+        the dir has not yet been renamed -- a sidecar written here is carried along by the rename).
         Returns (True, None) on any error so a race is never lost to a dedupe failure.
         """
         import os
 
         session_dir = session.directory.directory
         try:
-            from fusil.python.tsan_dedup import read_crash_stdout
+            from fusil.python.tsan_dedup import format_races_tsv, read_crash_stdout
 
             text = read_crash_stdout(os.path.join(session_dir, "stdout"))
-            return self._tsan_deduper.decide(text)
+            keep, label, races = self._tsan_deduper.decide_all(text)
+            if keep and len(races) >= 2:
+                # Multi-race session (only possible under --tsan-no-halt): persist the full
+                # breakdown next to source.py so triage/ingest sees every race, not just the
+                # headline. Never let a sidecar-write failure lose the crash.
+                try:
+                    with open(os.path.join(session_dir, "tsan_races.tsv"), "w") as fh:
+                        fh.write(format_races_tsv(races))
+                except OSError as err:
+                    self.error("TSan sidecar write failed (%s); keeping crash dir" % err)
+            return keep, label
         except Exception as err:
             self.error("TSan keep-policy failed (%s); keeping crash dir unlabelled" % err)
             return True, None

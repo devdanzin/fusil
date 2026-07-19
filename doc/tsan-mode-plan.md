@@ -518,6 +518,47 @@ lockstep), E later. After each slice: full suite, `test_tsan_generation` + `test
 non-`--tsan` golden check (untouched), `ruff check` + `ruff format --check`; for C/D a real
 emitted-script smoke run + a fleet re-ingest showing **0 unexpected new signatures**.
 
+## Phase 5 as-built: multi-race per session (`--tsan-no-halt`)
+
+**Status (2026-07-18):** foundation landed as PR #221, dedup/keep + sidecar as PR #222.
+
+**Motivation.** After the count-`__repr__` fast-mode fix (cpython#153917) landed and the TSan
+build was rebuilt, fleet-10 surfaced a diverse spray of *new* races (`setiter_iternext`,
+`unicodeiter_next`, `dictiter_iternext_threadsafe`, `_decimal_Context_clear_traps_impl`,
+`_PyLong_DigitCount`, `_elementtree create_extra`) — but that diversity was **across** sessions.
+Under the default `halt_on_error=1`, TSan reports only the **first** race per session and exits,
+so every other race a session could expose is thrown away. Re-running one fleet-10 `_decimal`
+`source.py` under `halt_on_error=0` produced **13 report blocks = 10 distinct races** from a
+single session (the count residual + its UAF faces + two genuine new `_decimal` Context races
+`…clear_traps_impl | context_repr` and `… | type_call` + a cascade SEGV) — proving both the
+value and the caveat: the count UAF cascaded into a SEGV, so races reported *after* a fault can be
+corruption artifacts rather than independent findings.
+
+**#1 + #2 — capture (PR #221).**
+- `--tsan-no-halt` sets `TSAN_OPTIONS halt_on_error=0` (opt-in; default stays `halt_on_error=1`;
+  exit is still 66 and detection stays textual, so a session surfaces *every* race instead of the
+  first).
+- `tsan_dedup.parse_all_reports(text, source_roots=None)` splits a report-and-continue stdout on
+  each `WARNING:`/`==PID==ERROR: ThreadSanitizer:` header, parses each chunk with the *unchanged*
+  `parse_report`, de-dupes by signature, and returns the distinct races in stream order with an
+  `order` index. `parse_report` stays first-report-only, so the sibling catalog's signature
+  contract (which imports `parse_report`) is untouched.
+
+**#3 — dedup / keep / sidecar (PR #222).**
+- `TSanDeduper.decide_all(text)` classifies **every** distinct race (via the shared
+  `_classify_report`, so tallying and the prune cap behave exactly as the single-race `decide`).
+  It returns `(keep, headline_label, races)`: **keep-if-ANY** race is worth keeping; a dir is
+  pruned only when **every** race is a known-over-cap duplicate or suppressed. The dir name takes
+  the **headline** label — the first new finding (`tsanNEW`/`tsanSEGV`), else the first kept known
+  id. For 0 or 1 parseable reports it delegates to `decide`, so the default `halt_on_error=1` path
+  (accounting, label, noparse) is byte-for-byte unchanged.
+- Each race carries `after_fault` — True once a SEGV/UAF has appeared earlier in the same stream —
+  flagging the corruption-artifact caveat above.
+- A multi-race kept session drops a **`tsan_races.tsv` sidecar** (`format_races_tsv`, columns
+  `order/label/kind/after_fault/signature`, signature last so a naïve tab-split is safe) next to
+  `source.py`, recording the full per-race breakdown for the sibling catalog's ingest (#4). Only
+  written under `--tsan-no-halt` with ≥2 distinct races, so default runs are unaffected.
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden
