@@ -104,6 +104,29 @@ FUSIL_TSAN_DEDUP=../fusil/fusil/python/tsan_dedup.py \
 python3 scripts/gen_known_races.py                        # regenerate known_races.tsv; fleet restart picks it up
 ```
 
+### Un-masking profile (expose the rare tail)
+
+A handful of "gateway" races (itertools.count + the bytes/str/struct/dict/set iterator cursors)
+dominate the **first race** of almost every session, so they shadow rarer, more interesting races
+— even under `--tsan-no-halt`, they still crowd the vehicle counts. (Analysis:
+`cpython-tsan-findings/notes/feature-impact.md`; the filed GenericAlias **crash**, cpython#154043,
+is *never* a first race.) To hunt the tail — new object races, the hostile weird-subclass surface,
+rare crashers — run a **dedicated** fleet that suppresses the gateways at the TSan level via
+`--tsan-suppressions`:
+
+```sh
+GATEWAY=~/projects/cpython-tsan-findings/catalog/gateway_suppressions.txt
+FUSIL_FLAGS="--tsan --tsan-no-halt --tsan-dedup-catalog=$CATALOG --tsan-suppressions=$GATEWAY"
+```
+
+fusil feeds the file to both `TSAN_OPTIONS=suppressions=…` (so TSan never reports the gateways) and
+the in-loop deduper. Sessions whose only races are gateways then exit clean and aren't kept, so the
+kept dirs are enriched for the tail and the rare races accumulate the vehicles they need to be
+minimized. This is **experiment-only** — keep the standard catalog-building fleet on the plain
+`FUSIL_FLAGS` above, since the gateway file is deliberately aggressive (it can also suppress a new
+race that merely shares a frame with a gateway function). Prioritize the kept crashes for the
+"does it segfault on a plain build?" check with `cpython-tsan-findings/scripts/prioritize.py`.
+
 ## Under the hood (so it's not a black box)
 
 - **`fusil@.service.in`** — a systemd *template* unit. `%i` is the instance number;
