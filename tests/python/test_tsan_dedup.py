@@ -155,6 +155,42 @@ REPORT_UAF_FRAMES = "\n".join(
 )
 
 
+class TestParseAll(unittest.TestCase):
+    """parse_all_reports: extract EVERY race from a report-and-continue (halt_on_error=0) stdout."""
+
+    def test_multiple_distinct_races(self):
+        text = "\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC, REPORT_SEGV_NOFRAMES])
+        reps = tsan_dedup.parse_all_reports(text)
+        self.assertEqual([r["kind"] for r in reps], ["race", "race", "segv"])
+        self.assertEqual([r["order"] for r in reps], [0, 1, 2])  # stream position preserved
+        sigs = {r["signature"] for r in reps}
+        self.assertIn("Objects/listobject.c:list_append | Objects/listobject.c:list_extend", sigs)
+        self.assertEqual(len(sigs), 3)
+
+    def test_dedup_by_signature(self):
+        # the same race reported twice (here swapped-thread form) collapses to one entry
+        text = "\n".join([REPORT_TWO_SITES, REPORT_SWAPPED])
+        reps = tsan_dedup.parse_all_reports(text)
+        self.assertEqual(len(reps), 1)
+        self.assertEqual(
+            reps[0]["signature"],
+            "Objects/listobject.c:list_append | Objects/listobject.c:list_extend",
+        )
+
+    def test_single_report_and_empty(self):
+        self.assertEqual(len(tsan_dedup.parse_all_reports(REPORT_TWO_SITES)), 1)
+        self.assertEqual(tsan_dedup.parse_all_reports(NO_RACE), [])
+        self.assertEqual(tsan_dedup.parse_all_reports(""), [])
+
+    def test_parse_report_still_first_only(self):
+        # the contract for the sibling catalog: parse_report is unchanged (first report only).
+        text = "\n".join([REPORT_TWO_SITES, REPORT_PREVIOUS_ATOMIC])
+        self.assertEqual(
+            tsan_dedup.parse_report(text)["signature"],
+            "Objects/listobject.c:list_append | Objects/listobject.c:list_extend",
+        )
+
+
 class TestParse(unittest.TestCase):
     def test_signature_is_sorted_site_pair(self):
         r = tsan_dedup.parse_report(REPORT_TWO_SITES)
