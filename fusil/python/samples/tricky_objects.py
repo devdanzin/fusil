@@ -91,7 +91,10 @@ try:
         # tricky_frame.f_builtins.update(tricky_dict)
         tricky_frame.f_globals.update(tricky_dict)
         tricky_frame.f_locals.update(tricky_dict)
-except RuntimeError:
+# Writing f_locals is a CPython frame detail (PEP 667 in 3.13); on interpreters where
+# it is a read-only snapshot the .update() can raise TypeError/AttributeError, not just
+# RuntimeError -- catch broadly so this best-effort frame pollution never aborts the script.
+except Exception:
     tricky_frame = None
 
 

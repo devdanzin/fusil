@@ -298,7 +298,18 @@ class WritePythonCode(WriteCode):
             ),
         )
         if not self.options.no_tstrings and _ARG_GEN_USE_TEMPLATES:
-            self.write(0, "from string.templatelib import Interpolation, Template")
+            # string.templatelib is CPython 3.14+ (PEP 750). The parent decides whether to
+            # emit t-string args from ITS OWN capability (_ARG_GEN_USE_TEMPLATES), but the
+            # target may be an older CPython / PyPy without it, so guard the import: template
+            # args are emitted as Template(...)/Interpolation(...) calls that then raise a
+            # (caught) NameError at the wrapped call site instead of killing the whole script.
+            # Use --no-tstrings to skip emitting them entirely.
+            self.write(0, "try:")
+            with self.indented():
+                self.write(0, "from string.templatelib import Interpolation, Template")
+            self.write(0, "except ImportError:")
+            with self.indented():
+                self.write(0, "pass")
 
         self.write_print_to_stderr(0, f'"Importing target module: {self.module_name}"')
         # The parent discovers importable modules in ITS interpreter; the target interpreter

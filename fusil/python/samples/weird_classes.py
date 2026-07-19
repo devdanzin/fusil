@@ -1,7 +1,6 @@
 import sys
-from _collections import OrderedDict, deque
 from abc import ABCMeta
-from collections import Counter
+from collections import Counter, OrderedDict, deque
 from queue import Queue
 from random import randint
 from string import printable
@@ -87,7 +86,11 @@ tricky_strs = (
 
 # We cannot create a Decimal larger than 10 ** 4300 with _pydecimal, only with _decimal
 max_str_digits_adjustment = 1 if has__decimal else -1
-big_int_for_decimal = 10 ** (sys.int_info.default_max_str_digits + max_str_digits_adjustment)
+# default_max_str_digits is CPython 3.11+; fall back to its 4300 default on interpreters
+# (older CPython, some PyPy) that don't expose it so this boilerplate stays importable.
+_default_max_str_digits = getattr(sys, "int_info", None)
+_default_max_str_digits = getattr(_default_max_str_digits, "default_max_str_digits", 4300)
+big_int_for_decimal = 10 ** (_default_max_str_digits + max_str_digits_adjustment)
 
 for cls in sequences:
     weird_instances[f"weird_{cls.__name__}_single"] = weird_classes[f"weird_{cls.__name__}"]("a")
