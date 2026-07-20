@@ -56,7 +56,9 @@ def _tsan_module():
     return mod
 
 
-def _make_tsan_options(threads=4, iterations=200, shared_objects=3, weird_subclasses=False):
+def _make_tsan_options(
+    threads=4, iterations=200, shared_objects=3, weird_subclasses=False, mutate_state=False
+):
     o = MagicMock()
     o.tsan = True
     o.tsan_threads = threads
@@ -78,6 +80,9 @@ def _make_tsan_options(threads=4, iterations=200, shared_objects=3, weird_subcla
     o.objects_number = 0
     o.methods_number = 2
     o.tsan_weird_subclasses = weird_subclasses  # Slice E, opt-in
+    # Opt-in concurrent-mutation ops. MUST be set explicitly: a bare MagicMock would auto-vivify
+    # a truthy attribute and turn the machinery on in every test.
+    o.tsan_mutate_state = mutate_state
     return o
 
 
@@ -329,6 +334,64 @@ class TestTSanGeneration(unittest.TestCase):
         # region, so its banner must be absent.
         src = _generate_tsan()
         self.assertNotIn("functions in tsanmod", src)
+
+    def test_mutate_state_off_by_default(self):
+        # --tsan-mutate-state is opt-in: the default script does not run op (j) or the enriched
+        # op (b) (the _MUTATE_STATE runtime gate is False), so the manifest advertises neither.
+        src = _generate_tsan()
+        self.assertIn("_MUTATE_STATE = False", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertFalse(manifest["mutate_state"])
+        self.assertNotIn("j:prop-reassign", manifest["ops"])
+        self.assertIn("ops=a-i", src)  # human provenance line
+        # op (b) still uses the original shared-container args when the gate is off
+        self.assertIn("_m(*_tsan_shared_args[: (_i % 3)])", src)
+
+    def test_mutate_state_ops_emitted_when_enabled(self):
+        # With --tsan-mutate-state the worker gains a property-reassign op (j) and op (b) draws
+        # type-diverse args; the manifest and provenance advertise op j.
+        src = _generate_tsan(mutate_state=True)
+        ast.parse(src)  # still valid Python
+        self.assertIn("_MUTATE_STATE = True", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertTrue(manifest["mutate_state"])
+        self.assertIn("j:prop-reassign", manifest["ops"])
+        self.assertIn("ops=a-j", src)  # human provenance line
+        # generic tiers: type-diverse call args + the self-reassign property fallback
+        self.assertIn("_tsan_call_args = ", src)
+        self.assertIn("setattr(_obj, _pn, getattr(_obj, _pn))", src)
+        # settable-property discovery is emitted
+        self.assertIn('hasattr(getattr(type(_obj), _n, None), "__set__")', src)
+
+    def test_plugin_mutator_registry_spliced_and_consulted(self):
+        # A plugin publishes a curated per-type registry via a definitions provider; it is spliced
+        # into the child BEFORE the stress region, and the region reads it defensively (the
+        # sanctioned child-side-global pattern -- no live callable crosses the process boundary).
+        from fusil.plugin_manager import PluginManager
+
+        pm = PluginManager()
+        pm.add_definitions_provider(
+            lambda config, module_name: (
+                "_FUSIL_STATEFUL_MUTATORS = {\n"
+                "    getattr(fuzz_target_module, 'Widget'): {\n"
+                "        'mutators': [('op', lambda: ('x',))],\n"
+                "        'properties': {},\n"
+                "    },\n"
+                "}\n"
+            )
+        )
+        src = _generate_tsan(plugin_manager=pm, mutate_state=True)
+        ast.parse(src)
+        # the registry is defined in the child, and core reads it AFTER (ordering guarantee)
+        self.assertIn("_FUSIL_STATEFUL_MUTATORS = {", src)
+        self.assertIn('_MUT_REG = globals().get("_FUSIL_STATEFUL_MUTATORS", {})', src)
+        self.assertLess(
+            src.index("_FUSIL_STATEFUL_MUTATORS = {"),
+            src.index('_MUT_REG = globals().get("_FUSIL_STATEFUL_MUTATORS"'),
+        )
+        # the worker consults the curated mutators (op b) and properties (op j)
+        self.assertIn('_mut["mutators"]', src)
+        self.assertIn('_mut["properties"]', src)
 
 
 if __name__ == "__main__":

@@ -148,6 +148,46 @@ Because the child is a separate process, the runner must find scenarios in its o
 generated script, since the target interpreter (`--python`) may not have the plugin
 installed. The cereggii plugin's `cereggii_scenario` mode is the worked example.
 
+### Concurrency-stress mutators (`--tsan-mutate-state`)
+
+The `--tsan` / `--concurrency-stress` region can drive **concurrent mutation** of the shared
+target objects (real-arg method calls + settable-property reassignment) on top of its
+read-heavy op-mix, so an extension's *stateful* race surface — mutating a shared object while
+another thread reads it — is exercised, not just read-only sharing. With no plugin it still
+does something useful (type-diverse method args + a self-reassign of each settable property);
+a plugin makes it *targeted* by publishing a curated per-type registry — **the same
+child-side-global pattern as scenarios** (a definitions provider, no live callable crossing
+the process boundary):
+
+```python
+def provide_mylib_mutators(config, module_name):
+    if not _is_mylib_target(config, module_name):
+        return None
+    # Keys are the child's OWN type objects (resolved via fuzz_target_module, never by
+    # importing the plugin); values are factories called fresh each use.
+    return (
+        "_FUSIL_STATEFUL_MUTATORS = {\n"
+        "    getattr(fuzz_target_module, 'Thing'): {\n"
+        "        'mutators': [\n"
+        "            ('add_item',    lambda: (['a', 'b'],)),   # (method_name, args-factory)\n"
+        "            ('set_limit',   lambda: (8,)),\n"
+        "        ],\n"
+        "        'properties': {                               # settable-prop -> value-factory\n"
+        "            'strategy': lambda: getattr(fuzz_target_module, 'Strategy')(),\n"
+        "        },\n"
+        "    },\n"
+        "}\n"
+    )
+
+manager.add_definitions_provider(provide_mylib_mutators)
+```
+
+The region reads `globals().get("_FUSIL_STATEFUL_MUTATORS", {})` defensively: for a shared
+object whose `type(obj)` is a registry key, op (b) calls its curated `mutators` with real args
+and op (j) reassigns its `properties` to fresh values; otherwise the generic fallback applies.
+Only active under `--tsan-mutate-state` (opt-in); absent the flag the registry is ignored.
+Design + phase history: [`tsan-mode-plan.md`](tsan-mode-plan.md).
+
 ## Suppression, blacklists, and dependencies
 
 - **Suppression** (`add_suppression_entry`) drops crashing-session *hits* whose stdout

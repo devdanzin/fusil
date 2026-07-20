@@ -910,6 +910,10 @@ class WritePythonCode(WriteCode):
         funcs = [f for f in (self.module_functions or []) if f not in TSAN_UNSAFE_CALLS][:40]
         # Slice E (opt-in): also share hostile subclasses of the target's own C types.
         weird_subclasses = bool(getattr(self.options, "tsan_weird_subclasses", False))
+        # Opt-in: drive concurrent MUTATION of the shared objects (real-arg method calls +
+        # settable-property reassignment) on top of the read-heavy op-mix. Off => the emitted
+        # worker runs exactly today's op (b) and skips op (j) (the _MUTATE_STATE gate below).
+        mutate_state = bool(getattr(self.options, "tsan_mutate_state", False))
 
         # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
         # iterable) -- real target objects rather than only bare Class() instances. The same
@@ -988,6 +992,9 @@ class WritePythonCode(WriteCode):
             "weird_subclasses": list(shared_classes) if weird_subclasses else [],
             "iter_off": iter_off,
             "roles": {"0": "writer", "1": "reader", "2": "both"},
+            # Opt-in concurrent-mutation ops: op (b) gets real args + curated mutators, and op (j)
+            # (property reassignment) is added. Reflected in the ops list only when actually on.
+            "mutate_state": mutate_state,
             "ops": [
                 "a:read-churn",
                 "b:method",
@@ -998,7 +1005,8 @@ class WritePythonCode(WriteCode):
                 "g:gc",
                 "h:shared-iter",
                 "i:read-while-mutate",
-            ],
+            ]
+            + (["j:prop-reassign"] if mutate_state else []),
             "workers_per_obj": workers_per_obj,
             "iters": iters,
             "func_count": len(funcs),
@@ -1006,7 +1014,7 @@ class WritePythonCode(WriteCode):
         provenance_line = (
             "[TSAN] provenance module=%s shared=%s(%dobj+%dcls+%dplugin+module) weird=%d "
             "args=list,dict,set,bytearray iterators=8+%dext iter_off=%d roles=r/w/both "
-            "ops=a-i workers=%d iters=%d funcs=%d"
+            "ops=%s workers=%d iters=%d funcs=%d"
             % (
                 self.module_name,
                 shared_kind,
@@ -1016,6 +1024,7 @@ class WritePythonCode(WriteCode):
                 len(shared_classes) if weird_subclasses else 0,
                 ext_iterators,
                 iter_off,
+                "a-j" if mutate_state else "a-i",
                 workers_per_obj,
                 iters,
                 len(funcs),
@@ -1058,6 +1067,22 @@ class WritePythonCode(WriteCode):
         # Runtime skip set: the worker introspects dir(shared_object), so a shared MODULE object
         # would still expose fork/exec/... by name -- filter them there too.
         self.write(0, "_tsan_unsafe = frozenset(%r)" % (tuple(sorted(TSAN_UNSAFE_CALLS)),))
+        # Concurrent-mutation support (op b enriched + op j), inert unless --tsan-mutate-state.
+        # _MUT_REG is the OPTIONAL plugin-supplied curated registry (type -> {"mutators":[(name,
+        # args-factory)], "properties":{name: value-factory}}), published as a child-side global
+        # by a plugin's definitions provider (doc/plugins.md); absent => {} and the generic
+        # fallback (type-diverse args + self-reassign) applies. Read like plugin_factories: if
+        # present use it, else nothing.
+        self.write(0, "_MUTATE_STATE = %r" % mutate_state)
+        self.write(0, '_MUT_REG = globals().get("_FUSIL_STATEFUL_MUTATORS", {})')
+        # Type-diverse argument pool for op (b)'s generic tier, so real single-arg mutators
+        # (add_tokens([...]), enable_truncation(int), ...) actually fire instead of TypeError-ing
+        # on the four generic containers.
+        self.write(
+            0,
+            "_tsan_call_args = "
+            '["x", "fusil", 1, 2, 0, -1, 1.5, True, ["a", "b"], ("a",), {"a": 1}, b"x", None]',
+        )
         # Build the shared objects from the guarded factories (Slice C): a few real target
         # objects (module-level instances, class instances w/ & w/o args, plugin objects),
         # capped for CONCENTRATION (few objects, many workers = what trips a race), plus the
@@ -1247,6 +1272,17 @@ class WritePythonCode(WriteCode):
                 # mutate/advance; _role == 2 does both. With >=2 workers per object both sides are
                 # present, so a reader always races a writer on the object / container / iterator.
                 _role = _wid % 3
+                # Concurrent-mutation state (op b curated tier + op j), cached once per worker;
+                # both inert unless _MUTATE_STATE. _mut = this type's curated registry entry (or
+                # None); _settable = its reassignable properties (getset/property with a setter),
+                # for the generic self-reassign fallback when no curated entry exists.
+                _mut = _MUT_REG.get(type(_obj)) if _MUTATE_STATE else None
+                _settable = (
+                    [_n for _n in dir(type(_obj))
+                     if not _n.startswith("_")
+                     and hasattr(getattr(type(_obj), _n, None), "__set__")]
+                    if _MUTATE_STATE else []
+                )
                 _tsan_barrier.wait()
                 for _i in range(_ITERS):
                     if _role != 1:
@@ -1256,12 +1292,26 @@ class WritePythonCode(WriteCode):
                                 _op(_obj)
                             except Exception:
                                 pass
-                    if _role != 0 and _names:
-                        # (b) writer: a method call with shared (mutable) arguments
+                    if _role != 0 and (_names or _mut):
+                        # (b) writer: a method call. Default: a dir() method with the shared
+                        # containers. --tsan-mutate-state: prefer a plugin-curated mutator with
+                        # real args, else a dir() method with TYPE-DIVERSE args so an extension's
+                        # actual state-mutators fire instead of TypeError-ing on the containers.
                         try:
-                            _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
-                            if callable(_m):
-                                _m(*_tsan_shared_args[: (_i % 3)])
+                            if _MUTATE_STATE and _mut and _mut.get("mutators"):
+                                _mn, _af = _mut["mutators"][(_wid + _i) % len(_mut["mutators"])]
+                                _m = getattr(_obj, _mn, None)
+                                if callable(_m):
+                                    _m(*_af())
+                            elif _MUTATE_STATE and _names:
+                                _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
+                                if callable(_m):
+                                    _off = (_wid + _i) % len(_tsan_call_args)
+                                    _m(*_tsan_call_args[_off:][: 1 + (_i % 2)])
+                            elif _names:
+                                _m = getattr(_obj, _names[(_wid + _i) % len(_names)])
+                                if callable(_m):
+                                    _m(*_tsan_shared_args[: (_i % 3)])
                         except Exception:
                             pass
                     if _role != 0 and _tsan_funcs:
@@ -1344,6 +1394,29 @@ class WritePythonCode(WriteCode):
                                 list(_bag)
                             elif isinstance(_bag, bytearray):
                                 bytes(_bag)
+                        except Exception:
+                            pass
+                    if _MUTATE_STATE and (_settable or (_mut and _mut.get("properties"))):
+                        # (j) property reassignment: writers reassign a settable property while
+                        # readers read it -- the mutate-while-read race an extension's stateful API
+                        # (a tokenizer's .normalizer= / .model= during encode) exposes. Curated:
+                        # cross-assign a fresh value from the plugin registry; generic fallback:
+                        # self-reassign (getattr then setattr), which still races the setter's
+                        # internal lock / pointer-swap against a concurrent reader.
+                        try:
+                            if _mut and _mut.get("properties"):
+                                _props = _mut["properties"]
+                                _pn = list(_props)[(_wid + _i) % len(_props)]
+                                if _role != 0:
+                                    setattr(_obj, _pn, _props[_pn]())
+                                if _role != 1:
+                                    getattr(_obj, _pn, None)
+                            elif _settable:
+                                _pn = _settable[(_wid + _i) % len(_settable)]
+                                if _role != 0:
+                                    setattr(_obj, _pn, getattr(_obj, _pn))
+                                if _role != 1:
+                                    getattr(_obj, _pn, None)
                         except Exception:
                             pass
             """,
