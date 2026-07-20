@@ -14,8 +14,9 @@ Environment=FLEET_CONF=@@FLEET_CONF@@
 ExecStart=@@FLEET_RUN@@ %i
 Restart=always
 RestartSec=10
-# Cap memory so a runaway OOM-injection child can't take down the host. The OOM
-# killer reaps the instance; Restart=always brings it back.
+# Cap memory so a runaway child (an OOM-injection sweep, a RustPython balloon, a huge
+# eager-collect, ...) can't take down the host. The OOM killer reaps the instance;
+# Restart=always brings it back.
 MemoryMax=@@MEM_MAX@@
 OOMPolicy=continue
 Nice=@@NICE@@

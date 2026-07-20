@@ -4,12 +4,17 @@
 #   ./fleet check           validate fleet.conf (paths exist, runner imports fusil)
 #   sudo ./fleet up [N]      install the unit + start N instances (default: nproc-1)
 #   sudo ./fleet down        stop + disable all instances
+#   ./fleet info            show the fleet's mode, plugins, target and paths
 #   ./fleet status          per-instance state + crash/NEW-find counts
-#   ./fleet finds           list this fleet's oomNEW (new-bug candidate) dirs
+#   ./fleet finds           list this fleet's new-bug-candidate dirs (oomNEW/tsanNEW/rustpyNEW/...)
 #   ./fleet report [N]      observability report: per-instance + campaign (--watch, --json, --html PATH, --no-systemd)
-#   ./fleet triage          dedupe oomNEW/oomSEGV candidates across instances (needs INGEST); extra args pass to ingest (e.g. --gdb)
+#   ./fleet triage          dedupe *NEW/*SEGV/*FRAME candidates across instances (needs INGEST); extra args pass to ingest (e.g. --gdb)
 #   ./fleet tail [N]        follow instance N's log (default: 1)
 #   sudo ./fleet restart    restart all instances (e.g. to pick up a new catalog)
+#
+# The label prefixes are mode-agnostic: any dedup engine marks a new-bug candidate "<prefix>NEW"
+# and an unresolved segv/frame "<prefix>SEGV"/"tsanFRAME", so status/finds/triage work for OOM,
+# TSan, RustPython and normal runs alike. The active mode is auto-detected from FUSIL_FLAGS.
 #
 # All paths/flags come from fleet.conf next to this script.
 set -euo pipefail
@@ -40,6 +45,51 @@ list_crashes(){  # kept crash dirs under an instance (layout-agnostic: has sourc
         | grep -vE '/session-[0-9]+$' | sort -u || true
 }
 
+# Mode-agnostic dedup-label patterns. Every engine labels a new-bug candidate "<prefix>NEW"
+# (oomNEW/tsanNEW/rustpyNEW) and an unresolved segv/frame "<prefix>SEGV"/"tsanFRAME". Case
+# matters: labels use UPPERCASE NEW/SEGV, a signal kind is lowercase ("sigsegv"), so these
+# never match the kind field.
+NEW_RE='[a-z]+NEW'                        # new-bug candidates
+CAND_RE='[a-z]+NEW|[a-z]+SEGV|tsanFRAME'  # all triage candidates (new + unresolved)
+
+fleet_mode(){  # human mode label auto-detected from FUSIL_FLAGS ("+"-joined; "normal" if none)
+    local m=()
+    case "$FUSIL_FLAGS" in
+        *--oom-foreign*) m+=(oom-foreign) ;;
+        *--oom-fuzz*)    m+=(oom) ;;
+    esac
+    case "$FUSIL_FLAGS" in *--tsan|*--tsan[!-]*) m+=(tsan) ;; esac
+    case "$FUSIL_FLAGS" in *--rustpython*) m+=(rustpython) ;; esac
+    case "$FUSIL_FLAGS" in *--concurrency-stress*) m+=(concurrency-stress) ;; esac
+    case "$FUSIL_FLAGS" in *--new-uninit*) m+=(new-uninit) ;; esac
+    if [ "${#m[@]}" -eq 0 ]; then echo normal; else (IFS=+; echo "${m[*]}"); fi
+}
+
+fleet_plugins(){  # best-effort: loaded plugin names from the newest run's stats sidecar
+    local newest
+    newest="$(find "$FLEET_DIR"/inst-*/python* -maxdepth 1 -name fusil_stats.json 2>/dev/null \
+              | xargs -r ls -t 2>/dev/null | head -1)"
+    [ -n "$newest" ] && [ -x "$RUNNER_PY" ] || return 0
+    "$RUNNER_PY" - "$newest" 2>/dev/null <<'PY' || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(", ".join(d.get("plugins") or []) or "(none)")
+except Exception:
+    pass
+PY
+}
+
+cmd_info(){  # the fleet banner: what this fleet is + where it lives
+    local plugins; plugins="$(fleet_plugins)"
+    echo "mode      : $(fleet_mode)"
+    echo "plugins   : ${plugins:-(run some sessions, then ./fleet report)}"
+    echo "fleet dir : $FLEET_DIR"
+    echo "target    : ${TARGET_PYTHON:-?}"
+    echo "catalog   : ${CATALOG:-(none)}"
+    echo "gil modes : ${GIL_MODES:-1}   instances: ${INSTANCES:-nproc-1}"
+}
+
 cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:
               # wrong paths / a non-venv python that can't import fusil under systemd)
     local ok=1 repo
@@ -56,6 +106,11 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
         *--tsan-dedup-catalog*) [ -f "$CATALOG" ] || {
             echo "  CATALOG not found but --tsan-dedup-catalog is set: '$CATALOG'"
             echo "    -> point CATALOG at cpython-tsan-findings/catalog/known_races.tsv"; ok=0; } ;;
+    esac
+    case "$FUSIL_FLAGS" in
+        *--rustpython-dedup-catalog*) [ -f "$CATALOG" ] || {
+            echo "  CATALOG not found but --rustpython-dedup-catalog is set: '$CATALOG'"
+            echo "    -> point CATALOG at rustpython-findings/catalog/known_panics.tsv"; ok=0; } ;;
     esac
     # A --tsan fleet needs a free-threaded + ThreadSanitizer TARGET (fusil's own preflight fails
     # fast otherwise, wasting the instance). Check here so the whole fleet doesn't start doomed.
@@ -131,6 +186,7 @@ cmd_restart(){
 cmd_status(){
     local list; list="$(units)"
     [ -n "$list" ] || { echo "no instances (run: sudo ./fleet up)"; return; }
+    echo "fleet: $(fleet_mode)   dir: $FLEET_DIR"
     printf '%-4s %-9s %-20s %8s %6s\n' '#' STATE SINCE CRASHES NEW
     local tot=0 totnew=0
     for u in $list; do
@@ -140,20 +196,20 @@ cmd_status(){
         since="$(systemctl show -p ActiveEnterTimestamp --value "$u" 2>/dev/null | cut -d' ' -f2-3)"
         dir="$(inst_dir "$i")"
         n="$(list_crashes "$dir" | wc -l)"
-        new="$(list_crashes "$dir" | grep -c oomNEW || true)"
+        new="$(list_crashes "$dir" | grep -cE "$NEW_RE" || true)"
         tot=$((tot + n)); totnew=$((totnew + new))
         printf '%-4s %-9s %-20s %8s %6s\n' "$i" "$state" "${since:-?}" "$n" "$new"
     done
-    echo "---- totals: $tot crashes kept, $totnew oomNEW candidates ----"
+    echo "---- totals: $tot crashes kept, $totnew new-bug candidates ----"
     [ "$totnew" -gt 0 ] && echo "see them with: ./fleet finds"
 }
 
 cmd_finds(){
-    echo "== oomNEW (new-bug candidates) across the fleet =="
+    echo "== new-bug candidates ($(fleet_mode)) across the fleet =="
     local any=
     for d in "$FLEET_DIR"/inst-*; do
         [ -d "$d" ] || continue
-        list_crashes "$d" | grep oomNEW | sed "s#$FLEET_DIR/##" && any=1 || true
+        list_crashes "$d" | grep -E "$NEW_RE" | sed "s#$FLEET_DIR/##" && any=1 || true
     done
     [ -n "$any" ] || echo "(none yet)"
 }
@@ -162,13 +218,14 @@ cmd_triage(){
     # Candidate crash dirs live at inst-*/python-*/<label>/ (each holds a `stdout`); ingest.py
     # checks ONE level for a stdout (it does not recurse), so it must be handed those leaf dirs.
     # The old `inst-*/` glob passed the instance roots, which contain no stdout, so ingest saw
-    # 0 dirs and triage did nothing. Collect the oomNEW/oomSEGV candidates (depth-agnostic) and
-    # dedupe those against the catalog.
+    # 0 dirs and triage did nothing. Collect the *NEW/*SEGV/*FRAME candidates (mode-agnostic,
+    # depth-agnostic) and dedupe those against the catalog.
     local dirs=()
-    mapfile -t dirs < <(find "$FLEET_DIR"/inst-* -type d \( -name '*oomNEW*' -o -name '*oomSEGV*' \) 2>/dev/null | sort)
+    mapfile -t dirs < <(find "$FLEET_DIR"/inst-* -type d 2>/dev/null \
+        | grep -E "$CAND_RE" | sort)
     if [ -n "${INGEST:-}" ] && [ -f "$INGEST" ]; then
-        if [ "${#dirs[@]}" -eq 0 ]; then echo "no oomNEW/oomSEGV candidate dirs under $FLEET_DIR"; return 0; fi
-        echo "ingesting ${#dirs[@]} oomNEW/oomSEGV candidate dirs via $INGEST ..."
+        if [ "${#dirs[@]}" -eq 0 ]; then echo "no new-bug/segv candidate dirs under $FLEET_DIR"; return 0; fi
+        echo "ingesting ${#dirs[@]} candidate dirs via $INGEST ..."
         "$RUNNER_PY" "$INGEST" "${dirs[@]}" --snapshot "$CATALOG" "$@"
     else
         echo "(no INGEST configured in fleet.conf -- listing candidates only)"
@@ -201,10 +258,11 @@ case "${1:-status}" in
     check)    cmd_check ;;
     install)  cmd_install ;;
     restart)  cmd_restart ;;
+    info)     cmd_info ;;
     status)   cmd_status ;;
     finds)    cmd_finds ;;
     triage)   shift; cmd_triage "$@" ;;
     report)   shift; cmd_report "$@" ;;
     tail)     shift; cmd_tail "$@" ;;
-    *)        sed -n '2,14p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
+    *)        sed -n '2,19p' "$HERE/fleet" | sed 's/^# \{0,1\}//' ;;
 esac

@@ -39,7 +39,26 @@ from fusil.python.session_stats import SessionStats
 # Crash-dir label parsing. A kept crash dir is named "<module>-<kind>-<dedup-label>[-N]",
 # e.g. "_blake2-fatal_python_error-OOM-0043-2". We token-search rather than split so a
 # trailing "-N" collision suffix and multi-part kinds don't confuse attribution.
-_LABEL_RE = re.compile(r"(OOM-\d{3,}|oomNEW|oomSEGV|oomclean|oomimport)")
+#
+# Mode-agnostic: every dedup engine (oom_dedup / tsan_dedup / rustpython_dedup, and any future
+# one) shares a labelling convention -- a known bug is "<PREFIX>-NNN" (OOM-/TSAN-/RUSTPY-), a
+# new-bug candidate is "<prefix>NEW" (oomNEW/tsanNEW/rustpyNEW), and an unresolved segv/frame is
+# "<prefix>SEGV"/"tsanFRAME". Case matters: the labels use UPPERCASE NEW/SEGV while a signal
+# kind is lowercase ("sigsegv"), so "[a-z]+SEGV" never matches the kind field.
+_LABEL_RE = re.compile(
+    r"([A-Z]+-\d{3,}"  # known dedup id: OOM-0043 / TSAN-0012 / RUSTPY-0024
+    r"|[a-z]+NEW"  # new-bug candidate: oomNEW / tsanNEW / rustpyNEW
+    r"|[a-z]+SEGV"  # unresolved segv: oomSEGV / rustpySEGV / tsanSEGV
+    r"|[a-z]+FRAME"  # tsan non-race frame bucket: tsanFRAME
+    r"|oomclean|oomimport)"  # OOM-only extra buckets
+)
+
+
+def new_candidate_count(by_label: dict) -> int:
+    """Sum of all new-bug-candidate labels (any "<prefix>NEW"), mode-agnostic."""
+    return sum(v for k, v in by_label.items() if k.endswith("NEW"))
+
+
 _KIND_RE = re.compile(
     r"(fatal_python_error|systemerror|assertion|sig[a-z]{2,}|exitcode\d+|cpu_load|timeout|bug)"
 )
@@ -216,7 +235,9 @@ def collect_instance(inst_dir: str, *, now=None, systemd=True) -> dict:
         "sidecar_crashes": merged.get("crashes", 0),
         "timeouts": merged.get("timeouts", 0),
         "cpu_load_kills": merged.get("cpu_load_kills", 0),
-        "oomnew": by_label.get("oomNEW", 0),
+        "new": new_candidate_count(by_label),
+        "mode": merged.get("mode") or (current or {}).get("mode"),
+        "plugins": merged.get("plugins") or (current or {}).get("plugins") or [],
         "by_label": by_label,
         "by_kind": by_kind,
         "by_module_crash": by_module_crash,
@@ -260,13 +281,21 @@ def discover_instances(fleet_dir: str) -> list[str]:
 
 def aggregate_campaign(reports: list[dict], *, now=None) -> dict:
     now = now if now is not None else time.time()
+    # mode/plugins are constant across a fleet; take the first non-"normal" mode and the union
+    # of plugin names, so the campaign header reports what the fleet is running.
+    modes = [r.get("mode") for r in reports if r.get("mode") and r.get("mode") != "normal"]
+    plugins: set[str] = set()
+    for r in reports:
+        plugins.update(r.get("plugins") or [])
     agg = {
         "instances": len(reports),
         "running": sum(1 for r in reports if r["running"]),
         "sessions": sum(r["sessions"] for r in reports),
         "kept_crashes": sum(r["kept_crashes"] for r in reports),
         "timeouts": sum(r["timeouts"] for r in reports),
-        "oomnew": sum(r["oomnew"] for r in reports),
+        "new": sum(r["new"] for r in reports),
+        "mode": modes[0] if modes else (reports[0].get("mode") if reports else None),
+        "plugins": sorted(plugins),
         "disk_bytes": sum(r["disk_bytes"] for r in reports),
         "by_label": {},
         "by_kind": {},
@@ -370,6 +399,10 @@ def render_instance(r: dict) -> str:
     )
     L.append("=" * 72)
     L.append(
+        "mode %s   plugins %s"
+        % (r.get("mode") or "?", ", ".join(r.get("plugins") or []) or "(none)")
+    )
+    L.append(
         "uptime %-10s  restarts %-3d  heartbeat %s ago"
         % (format_duration(r["uptime_s"]), r["restarts"], format_duration(r["heartbeat_age_s"]))
     )
@@ -423,7 +456,9 @@ def render_instance(r: dict) -> str:
     return "\n".join(L)
 
 
-def render_campaign(reports: list[dict], agg: dict, flags: list[tuple[int, str]]) -> str:
+def render_campaign(
+    reports: list[dict], agg: dict, flags: list[tuple[int, str]], fleet_dir: str | None = None
+) -> str:
     L = []
     L.append("=" * 84)
     L.append(
@@ -435,15 +470,23 @@ def render_campaign(reports: list[dict], agg: dict, flags: list[tuple[int, str]]
             human_bytes(agg["disk_bytes"]),
         )
     )
+    L.append(
+        "mode %s   plugins %s%s"
+        % (
+            agg.get("mode") or "?",
+            ", ".join(agg.get("plugins") or []) or "(none)",
+            ("   dir %s" % fleet_dir) if fleet_dir else "",
+        )
+    )
     find = (1000.0 * agg["kept_crashes"] / agg["sessions"]) if agg["sessions"] else 0.0
     L.append(
-        "sessions %-9d (%s)  crashes %-6d (%.1f/1k)  oomNEW %d  timeouts %d"
+        "sessions %-9d (%s)  crashes %-6d (%.1f/1k)  NEW %d  timeouts %d"
         % (
             agg["sessions"],
             format_rate(agg["sessions"], agg["elapsed_s"]),
             agg["kept_crashes"],
             find,
-            agg["oomnew"],
+            agg["new"],
             agg["timeouts"],
         )
     )
@@ -465,7 +508,7 @@ def render_campaign(reports: list[dict], agg: dict, flags: list[tuple[int, str]]
                 r["sessions"],
                 format_rate(r["sessions"], r["uptime_s"]).replace("/m", ""),
                 r["kept_crashes"],
-                r["oomnew"],
+                r["new"],
                 to_pct,
                 human_bytes(r["mem_current"]),
                 human_bytes(r["disk_bytes"]),
@@ -580,9 +623,16 @@ def render_html(report: dict, *, generated: str | None = None) -> str:
         "<!doctype html><html lang=en><head><meta charset=utf-8>",
         "<meta name=viewport content='width=device-width,initial-scale=1'>",
         "<title>fusil fleet report</title><style>%s</style></head><body>" % _CSS,
-        "<h1>fusil fleet <span class=sub>%d instances &middot; %d running &middot; elapsed %s "
-        "&middot; generated %s</span></h1>"
-        % (agg["instances"], agg["running"], _esc(format_duration(agg["elapsed_s"])), _esc(gen)),
+        "<h1>fusil fleet <span class=sub>mode %s &middot; plugins %s &middot; %d instances "
+        "&middot; %d running &middot; elapsed %s &middot; generated %s</span></h1>"
+        % (
+            _esc(agg.get("mode") or "?"),
+            _esc(", ".join(agg.get("plugins") or []) or "(none)"),
+            agg["instances"],
+            agg["running"],
+            _esc(format_duration(agg["elapsed_s"])),
+            _esc(gen),
+        ),
         "<div class=kpis>",
     ]
     for label, value in (
@@ -590,7 +640,7 @@ def render_html(report: dict, *, generated: str | None = None) -> str:
         ("throughput", format_rate(agg["sessions"], agg["elapsed_s"])),
         ("crashes", "{:,}".format(agg["kept_crashes"])),
         ("find rate", "%.1f/1k" % find),
-        ("oomNEW", agg["oomnew"]),
+        ("NEW", agg["new"]),
         ("timeouts", agg["timeouts"]),
         ("disk", human_bytes(agg["disk_bytes"])),
     ):
@@ -636,7 +686,7 @@ def render_html(report: dict, *, generated: str | None = None) -> str:
         p.append(_num_td("{:,}".format(r["sessions"]), r["sessions"]))
         p.append(_num_td("%.1f" % spm, spm))
         p.append(_num_td("{:,}".format(r["kept_crashes"]), r["kept_crashes"]))
-        p.append(_num_td(r["oomnew"], r["oomnew"]))
+        p.append(_num_td(r["new"], r["new"]))
         p.append(_num_td("%.0f%%" % to_pct, to_pct))
         p.append(
             _num_td(human_bytes(r["mem_current"]), r["mem_current"] if r["mem_current"] else -1)
@@ -667,6 +717,7 @@ def build_report(fleet_dir: str, instance: int | None, *, systemd=True, now=None
         inst_dirs = [d for d in inst_dirs if instance_number(d) == instance]
     reports = [collect_instance(d, now=now, systemd=systemd) for d in inst_dirs]
     return {
+        "fleet_dir": fleet_dir,
         "instances": reports,
         "campaign": aggregate_campaign(reports, now=now),
         "anomalies": anomalies(reports),
@@ -679,7 +730,9 @@ def render(report: dict, instance: int | None) -> str:
         return "no instances found"
     if instance is not None:
         return "\n".join(render_instance(r) for r in reports)
-    return render_campaign(reports, report["campaign"], report["anomalies"])
+    return render_campaign(
+        reports, report["campaign"], report["anomalies"], report.get("fleet_dir")
+    )
 
 
 def main(argv=None) -> int:
