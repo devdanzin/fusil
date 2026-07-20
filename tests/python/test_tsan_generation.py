@@ -57,7 +57,12 @@ def _tsan_module():
 
 
 def _make_tsan_options(
-    threads=4, iterations=200, shared_objects=3, weird_subclasses=False, mutate_state=False
+    threads=4,
+    iterations=200,
+    shared_objects=3,
+    weird_subclasses=False,
+    mutate_state=False,
+    shared_objects_only=False,
 ):
     o = MagicMock()
     o.tsan = True
@@ -83,6 +88,7 @@ def _make_tsan_options(
     # Opt-in concurrent-mutation ops. MUST be set explicitly: a bare MagicMock would auto-vivify
     # a truthy attribute and turn the machinery on in every test.
     o.tsan_mutate_state = mutate_state
+    o.tsan_shared_objects_only = shared_objects_only  # same auto-vivify caveat
     return o
 
 
@@ -392,6 +398,49 @@ class TestTSanGeneration(unittest.TestCase):
         # the worker consults the curated mutators (op b) and properties (op j)
         self.assertIn('_mut["mutators"]', src)
         self.assertIn('_mut["properties"]', src)
+
+    def test_shared_objects_only_off_by_default(self):
+        # Default: the generic builtin iterators (op h) and shared-container ops (f/i) are present.
+        src = _generate_tsan()
+        self.assertIn("_TSAN_OBJ_ONLY = False", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertFalse(manifest["shared_objects_only"])
+        self.assertIn("f:container-mutate", manifest["ops"])
+        self.assertIn("i:read-while-mutate", manifest["ops"])
+        self.assertEqual(len(manifest["iterators"]), 8)  # the builtin iterator pool
+        self.assertEqual(manifest["shared_args"], ["list", "dict", "set", "bytearray"])
+        self.assertIn("iterators=8+", src)  # human provenance line
+
+    def test_shared_objects_only_drops_generic_state(self):
+        # --tsan-shared-objects-only: builtin iterators gone (op h races only ext-object iters),
+        # container ops f/i dropped, so an extension hunt stops flooding with CPython-core races.
+        src = _generate_tsan(shared_objects_only=True)
+        ast.parse(src)  # still valid Python
+        self.assertIn("_TSAN_OBJ_ONLY = True", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertTrue(manifest["shared_objects_only"])
+        self.assertNotIn("f:container-mutate", manifest["ops"])
+        self.assertNotIn("i:read-while-mutate", manifest["ops"])
+        self.assertEqual(manifest["iterators"], [])  # no builtin iterators
+        self.assertEqual(manifest["shared_args"], [])
+        self.assertIn("iterators=0+", src)
+        self.assertIn("objonly", src)  # human provenance marker
+        # the builtin iterator factory list is reset before the ext-object iterators are folded in
+        self.assertIn("_tsan_iter_factories = []", src)
+        # ops f/i are gated off; op (h) guards an empty iterator pool
+        self.assertIn("if _role != 0 and not _TSAN_OBJ_ONLY:", src)
+        self.assertIn("if _role != 1 and not _TSAN_OBJ_ONLY:", src)
+        self.assertIn("if _cell is not None:", src)
+
+    def test_shared_objects_only_composes_with_mutate_state(self):
+        # The two extension-hunt levers stack: obj-only drops generics, mutate-state adds op j.
+        src = _generate_tsan(shared_objects_only=True, mutate_state=True)
+        ast.parse(src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertTrue(manifest["shared_objects_only"])
+        self.assertTrue(manifest["mutate_state"])
+        self.assertNotIn("f:container-mutate", manifest["ops"])
+        self.assertIn("j:prop-reassign", manifest["ops"])
 
 
 if __name__ == "__main__":

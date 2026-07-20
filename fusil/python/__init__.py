@@ -518,6 +518,18 @@ class Fuzzer(Application):
             default=False,
         )
         tsan_options.add_option(
+            "--tsan-shared-objects-only",
+            action="store_true",
+            help="Restrict the stress region to racing the TARGET module's objects: drop the "
+            "generic-builtin shared state (the str/bytes/list/tuple/dict/range/count/struct "
+            "iterators feeding op h, and the shared list/dict/set/bytearray container ops f/i) "
+            "that otherwise flood an EXTENSION hunt with CPython-core races (rangeiter/count-repr "
+            "cursors, shared-list resize, etc.). Only the extension's own objects + their "
+            "iterators are shared. Opt-in (default off); pairs with an extension-noise TSan "
+            "suppressions file for the residual interning/generator races.",
+            default=False,
+        )
+        tsan_options.add_option(
             "--tsan-no-halt",
             action="store_true",
             help="Run TSan with halt_on_error=0 (report-and-continue) instead of stopping at the "
