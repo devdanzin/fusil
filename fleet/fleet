@@ -59,8 +59,12 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
     esac
     # A --tsan fleet needs a free-threaded + ThreadSanitizer TARGET (fusil's own preflight fails
     # fast otherwise, wasting the instance). Check here so the whole fleet doesn't start doomed.
+    # Match ONLY the bare `--tsan` mode flag, not the `--tsan-*` sub-options (--tsan-threads,
+    # --tsan-iterations, --tsan-dedup-*): those knobs are ALSO reused by --concurrency-stress, which
+    # runs on an ordinary interpreter and must NOT trip the ThreadSanitizer-build requirement. The
+    # bare flag appears as `--tsan ` (space) or ends the string; `[!-]` excludes the `--tsan-` forms.
     case "$FUSIL_FLAGS" in
-        *--tsan*) [ -x "$TARGET_PYTHON" ] && "$TARGET_PYTHON" -c \
+        *--tsan|*--tsan[!-]*) [ -x "$TARGET_PYTHON" ] && "$TARGET_PYTHON" -c \
             'import sys,sysconfig; ca=sysconfig.get_config_var("CONFIG_ARGS") or ""; sys.exit(0 if (not sys._is_gil_enabled() and "thread-sanitizer" in ca) else 1)' \
             2>/dev/null || {
             echo "  --tsan is set but TARGET_PYTHON is not free-threaded + --with-thread-sanitizer: '$TARGET_PYTHON'"
