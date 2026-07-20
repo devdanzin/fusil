@@ -914,6 +914,10 @@ class WritePythonCode(WriteCode):
         # settable-property reassignment) on top of the read-heavy op-mix. Off => the emitted
         # worker runs exactly today's op (b) and skips op (j) (the _MUTATE_STATE gate below).
         mutate_state = bool(getattr(self.options, "tsan_mutate_state", False))
+        # Opt-in: share ONLY the target module's objects (+ their iterators); drop the generic
+        # builtin iterators (op h) and shared containers (ops f/i) that flood an extension hunt
+        # with CPython-core races. See the ops-list / iterator-factory / worker gates below.
+        objects_only = bool(getattr(self.options, "tsan_shared_objects_only", False))
 
         # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
         # iterable) -- real target objects rather than only bare Class() instances. The same
@@ -963,6 +967,32 @@ class WritePythonCode(WriteCode):
             else "module-only"
         )
         ext_iterators = sum(1 for _s, _l, it in obj_factory_specs if it)
+        # --tsan-shared-objects-only drops the generic builtin iterators (op h) and the shared
+        # container ops (f/i); the manifest reflects only what actually runs.
+        builtin_iterators = (
+            []
+            if objects_only
+            else [
+                "str",
+                "bytes",
+                "list",
+                "tuple",
+                "dict",
+                "range",
+                "itertools.count",
+                "struct.iter_unpack",
+            ]
+        )
+        ops_list = ["a:read-churn", "b:method", "c:module-func", "d:attr-dict", "e:weakref"]
+        if not objects_only:
+            ops_list.append("f:container-mutate")
+        ops_list.append("g:gc")
+        if ext_iterators or not objects_only:
+            ops_list.append("h:shared-iter")
+        if not objects_only:
+            ops_list.append("i:read-while-mutate")
+        if mutate_state:
+            ops_list.append("j:prop-reassign")
         self.tsan_shared_kind = shared_kind
         self.tsan_manifest = {
             "kind": "tsan-provenance",
@@ -972,19 +1002,13 @@ class WritePythonCode(WriteCode):
             "shared_classes": list(shared_classes),
             "plugin_factories": [label for _s, label, _i in plugin_factories],
             "shared_kind": shared_kind,
-            "shared_args": ["list", "dict", "set", "bytearray"],
-            # builtin iterator kinds always in the shared-iterator pool (op h); the last two are
-            # attempted under try/except in the script (near-always present on the target).
-            "iterators": [
-                "str",
-                "bytes",
-                "list",
-                "tuple",
-                "dict",
-                "range",
-                "itertools.count",
-                "struct.iter_unpack",
-            ],
+            # generic shared containers (ops f/i) + builtin iterators (op h); both dropped under
+            # --tsan-shared-objects-only (extension hunt: only the target's own objects race).
+            "shared_objects_only": objects_only,
+            "shared_args": [] if objects_only else ["list", "dict", "set", "bytearray"],
+            # builtin iterator kinds in the shared-iterator pool (op h); the last two are attempted
+            # under try/except in the script (near-always present on the target). [] under obj-only.
+            "iterators": builtin_iterators,
             # extension-object iterators (iter(factory())) folded into op (h) on top of builtins.
             "ext_iterators": ext_iterators,
             # hostile subclasses of these target C types shared too (Slice E, opt-in; guarded so
@@ -995,26 +1019,15 @@ class WritePythonCode(WriteCode):
             # Opt-in concurrent-mutation ops: op (b) gets real args + curated mutators, and op (j)
             # (property reassignment) is added. Reflected in the ops list only when actually on.
             "mutate_state": mutate_state,
-            "ops": [
-                "a:read-churn",
-                "b:method",
-                "c:module-func",
-                "d:attr-dict",
-                "e:weakref",
-                "f:container-mutate",
-                "g:gc",
-                "h:shared-iter",
-                "i:read-while-mutate",
-            ]
-            + (["j:prop-reassign"] if mutate_state else []),
+            "ops": ops_list,
             "workers_per_obj": workers_per_obj,
             "iters": iters,
             "func_count": len(funcs),
         }
         provenance_line = (
             "[TSAN] provenance module=%s shared=%s(%dobj+%dcls+%dplugin+module) weird=%d "
-            "args=list,dict,set,bytearray iterators=8+%dext iter_off=%d roles=r/w/both "
-            "ops=%s workers=%d iters=%d funcs=%d"
+            "args=%s iterators=%d+%dext iter_off=%d roles=r/w/both "
+            "ops=%s%s workers=%d iters=%d funcs=%d"
             % (
                 self.module_name,
                 shared_kind,
@@ -1022,9 +1035,12 @@ class WritePythonCode(WriteCode):
                 len(shared_classes),
                 len(plugin_factories),
                 len(shared_classes) if weird_subclasses else 0,
+                "none" if objects_only else "list,dict,set,bytearray",
+                len(builtin_iterators),
                 ext_iterators,
                 iter_off,
                 "a-j" if mutate_state else "a-i",
+                " objonly" if objects_only else "",
                 workers_per_obj,
                 iters,
                 len(funcs),
@@ -1075,6 +1091,9 @@ class WritePythonCode(WriteCode):
         # present use it, else nothing.
         self.write(0, "_MUTATE_STATE = %r" % mutate_state)
         self.write(0, '_MUT_REG = globals().get("_FUSIL_STATEFUL_MUTATORS", {})')
+        # --tsan-shared-objects-only: skip the generic shared-container ops (f/i) at runtime (the
+        # builtin iterators for op h are dropped gen-time from _tsan_iter_factories below).
+        self.write(0, "_TSAN_OBJ_ONLY = %r" % objects_only)
         # Type-diverse argument pool for op (b)'s generic tier, so real single-arg mutators
         # (add_tokens([...]), enable_truncation(int), ...) actually fire instead of TypeError-ing
         # on the four generic containers.
@@ -1218,6 +1237,10 @@ class WritePythonCode(WriteCode):
                 pass
             """,
         )
+        if objects_only:
+            # Extension hunt: drop the generic builtins just built (rangeiter/count-repr/... are
+            # CPython-core noise) -- op (h) races only the target's OWN iterators, folded next.
+            self.write(0, "_tsan_iter_factories = []")
         # Extension-object iterators (Slice C): fold iter(factory()) for each iterable shared-obj
         # factory into the pool, pointing op (h) at the TARGET's own tp_iternext on top of the
         # builtins above. Guarded build below drops non-iterables (a Widget() etc.) so the
@@ -1267,7 +1290,9 @@ class WritePythonCode(WriteCode):
                 # This worker's GROUP (every _wid on this _idx) shares ONE container and ONE
                 # iterator, so the complementary roles below race the SAME resource.
                 _bag = _tsan_shared_args[_idx % len(_tsan_shared_args)]
-                _cell = _tsan_iters[(_idx + _ITER_OFF) % len(_tsan_iters)]
+                # _cell may be None under --tsan-shared-objects-only if the target exposes no
+                # iterables (builtin iterators dropped); op (h) below guards on it.
+                _cell = _tsan_iters[(_idx + _ITER_OFF) % len(_tsan_iters)] if _tsan_iters else None
                 # Role by _wid: readers (_role != 1) inspect/iterate/read; writers (_role != 0)
                 # mutate/advance; _role == 2 does both. With >=2 workers per object both sides are
                 # present, so a reader always races a writer on the object / container / iterator.
@@ -1338,7 +1363,7 @@ class WritePythonCode(WriteCode):
                         _tsan_weakref.ref(_obj)
                     except Exception:
                         pass
-                    if _role != 0:
+                    if _role != 0 and not _TSAN_OBJ_ONLY:
                         # (f) writer: hammer ONE shared container from every writer in the group
                         try:
                             if isinstance(_bag, list):
@@ -1364,23 +1389,24 @@ class WritePythonCode(WriteCode):
                     # readers read its cursor state (repr for count slow-mode; length_hint reads
                     # it_index) while it is advanced -- non-atomic it_index / iternext / it_seq
                     # (cpython#153928 bytes/str, #154013 struct, #153981 count).
-                    try:
-                        _it = _cell[0]
-                        if _role != 0:
-                            for _ in range(4):
-                                next(_it)
-                        if _role != 1:
-                            repr(_it)
-                            try:
-                                _tsan_operator.length_hint(_it, 0)
-                            except Exception:
-                                pass
-                    except StopIteration:
-                        _cell[0] = _tsan_iter_factories[
-                            (_idx + _ITER_OFF) % len(_tsan_iter_factories)]()
-                    except Exception:
-                        pass
-                    if _role != 1:
+                    if _cell is not None:
+                        try:
+                            _it = _cell[0]
+                            if _role != 0:
+                                for _ in range(4):
+                                    next(_it)
+                            if _role != 1:
+                                repr(_it)
+                                try:
+                                    _tsan_operator.length_hint(_it, 0)
+                                except Exception:
+                                    pass
+                        except StopIteration:
+                            _cell[0] = _tsan_iter_factories[
+                                (_idx + _ITER_OFF) % len(_tsan_iter_factories)]()
+                        except Exception:
+                            pass
+                    if _role != 1 and not _TSAN_OBJ_ONLY:
                         # (i) reader: iterate / copy / sort the shared container while writers
                         # mutate it in (f) -- the non-atomic reader-vs-writer class (list Py_SIZE +
                         # binarysort/list.sort, bytes_join, dict/odict/set iter-vs-resize).

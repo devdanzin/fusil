@@ -603,6 +603,23 @@ tokenizers wraps state in `Arc<RwLock<…>>`) wants a **TSan-instrumented** exte
 (`.so` compiled `-fsanitize=thread`) — on a plain ASan/FT build only genuine memory-safety
 bugs in the extension's `unsafe` code surface.
 
+### `--tsan-shared-objects-only` (extension-hunt companion)
+
+Even on a TSan build, the region shares *generic builtins* — the str/bytes/list/tuple/dict/
+range/count/struct iterators (op h) and the shared list/dict/set/bytearray containers (ops
+f/i) — which race in CPython's own code and flood an *extension* hunt with core races
+(rangeiter/count-repr cursors, shared-list resize, …) that dedupe/suppress but still dominate.
+`--tsan-shared-objects-only` (opt-in, `tsan_options`) restricts the region to the **target
+module's own objects + their iterators**: gen-time it emits an empty builtin-iterator list (op
+h then races only ext-object iterators), and a `_TSAN_OBJ_ONLY` runtime gate skips ops f/i;
+the worker's `_cell` is guarded against an empty iterator pool. The manifest reflects it
+(`shared_objects_only`, `iterators: []`, `shared_args: []`, ops without f/i; human line
+`ops=… objonly`). Off by default → normal runs unchanged. Pairs with a TSan **suppressions**
+file for the residual CPython noise that isn't from shared state — the interning/immortalize
+race from concurrent `setattr` (cpython#128137/#113956) and concurrent generator resume
+(cpython#120321) — for which the `cpython-tsan-findings` gateway carries `race:` entries.
+Tests: `test_tsan_generation.py` (`test_shared_objects_only_*`).
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden
