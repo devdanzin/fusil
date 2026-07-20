@@ -559,6 +559,50 @@ corruption artifacts rather than independent findings.
   `source.py`, recording the full per-race breakdown for the sibling catalog's ingest (#4). Only
   written under `--tsan-no-halt` with ≥2 distinct races, so default runs are unaffected.
 
+## Phase 6 as-built: concurrent stateful-object mutation (`--tsan-mutate-state`)
+
+The base op-mix is tuned for **CPython-level** races (managed-dict, refcount, container,
+iterator, gc, weakref) and is **argument-starved** on the target object: op (b) calls methods
+with four fixed generic containers (`_tsan_shared_args`), so an extension's real mutators
+(`Tokenizer.add_tokens(list[str])`, `enable_truncation(int)`, …) `TypeError` on the wrong
+arg types and are swallowed *before mutating*; op (d) only reassigns a synthetic `_tsan_aN`
+int, never a real settable property (`.normalizer` / `.model`). Consequence, proven on the
+tokenizers fleet (`fusil-tokenizers_01`): a 32-dir gdb sample was **32/32 CPython, 0/32
+tokenizers** — the interesting *mutate-while-read* extension race surface was never exercised.
+
+`--tsan-mutate-state` (opt-in, `store_true`, default off; in the `tsan_options` group so it
+applies to `--tsan` **and** `--concurrency-stress`) adds it via a runtime `_MUTATE_STATE` gate
+in the single worker body — off ⇒ op (b) runs today's container-arg path verbatim and op (j)
+is skipped, so existing campaigns and the dedup catalog are unchanged:
+
+- **op (b) enriched** — when a plugin registry entry exists for `type(_obj)`, call its curated
+  `mutators` with real args; else draw from a type-diverse pool `_tsan_call_args` (str/int/
+  float/bool/list/tuple/dict/bytes/None) so generic single-arg mutators actually fire.
+- **op (j) property reassign** (new) — writers reassign a settable property while readers read
+  it. Curated tier: a fresh value from the plugin registry (`.normalizer = Lowercase()`).
+  Generic fallback (any object): **self-reassign** `setattr(o, n, getattr(o, n))` over the
+  type's settable descriptors (`hasattr(getattr(type(o), n), "__set__")`) — always type-valid,
+  still races the setter's internal lock / pointer-swap against a concurrent reader.
+
+**Core/plugin split.** The mechanism + generic fallback are in core (module-agnostic); the
+curated per-type *mutators / property factories* live in a plugin, published as the child-side
+global `_FUSIL_STATEFUL_MUTATORS` via `add_definitions_provider` (the scenario pattern — no
+live callable crosses the process boundary). The region reads `globals().get(
+"_FUSIL_STATEFUL_MUTATORS", {})` defensively, exactly as it reads optional `plugin_factories`.
+Contract + recipe: [`plugins.md`](plugins.md) (*Concurrency-stress mutators*).
+
+**Provenance.** The manifest gains `"mutate_state": bool` and appends `"j:prop-reassign"` to
+`ops` (human line `ops=a-i` → `ops=a-j`) only when the flag is on. Tests:
+`test_tsan_generation.py` (`test_mutate_state_off_by_default`,
+`test_mutate_state_ops_emitted_when_enabled`, `test_plugin_mutator_registry_spliced_and_consulted`).
+
+**Caveats / EV.** Mutations succeed, so they cut swallowed-exception noise but reduce
+reproducibility (state diverges per run) and can wedge slow mutators; the generic tier is a
+blind `dir()`/descriptor sweep. And real *race detection* for a lock-correct extension (HF
+tokenizers wraps state in `Arc<RwLock<…>>`) wants a **TSan-instrumented** extension build
+(`.so` compiled `-fsanitize=thread`) — on a plain ASan/FT build only genuine memory-safety
+bugs in the extension's `unsafe` code surface.
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden

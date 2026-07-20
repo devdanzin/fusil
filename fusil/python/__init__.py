@@ -504,6 +504,20 @@ class Fuzzer(Application):
             default=False,
         )
         tsan_options.add_option(
+            "--tsan-mutate-state",
+            action="store_true",
+            help="Also drive CONCURRENT MUTATION of the shared target objects (not just reads + "
+            "generic-arg method calls): the writer method-call op gets type-diverse args so real "
+            "mutators actually fire, and a new op reassigns each object's settable properties "
+            "(self-reassign generically; a fresh value when a plugin supplies one) while readers "
+            "touch them -- the mutate-while-read race an extension's stateful API exposes (e.g. a "
+            "tokenizer's add_tokens / .normalizer= during encode). A plugin can publish a curated "
+            "per-type mutator/property map via the child-side _FUSIL_STATEFUL_MUTATORS registry "
+            "(see doc/plugins.md); with none, the generic fallback still applies. Opt-in (default "
+            "off): mutations reduce reproducibility and raise more benign exceptions.",
+            default=False,
+        )
+        tsan_options.add_option(
             "--tsan-no-halt",
             action="store_true",
             help="Run TSan with halt_on_error=0 (report-and-continue) instead of stopping at the "
