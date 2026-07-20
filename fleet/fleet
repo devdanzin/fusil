@@ -65,29 +65,36 @@ fleet_mode(){  # human mode label auto-detected from FUSIL_FLAGS ("+"-joined; "n
     if [ "${#m[@]}" -eq 0 ]; then echo normal; else (IFS=+; echo "${m[*]}"); fi
 }
 
-fleet_plugins(){  # best-effort: loaded plugin names from the newest run's stats sidecar
-    local newest
-    newest="$(find "$FLEET_DIR"/inst-*/python* -maxdepth 1 -name fusil_stats.json 2>/dev/null \
-              | xargs -r ls -t 2>/dev/null | head -1)"
-    [ -n "$newest" ] && [ -x "$RUNNER_PY" ] || return 0
-    "$RUNNER_PY" - "$newest" 2>/dev/null <<'PY' || true
-import json, sys
+fleet_plugins(){  # installed fusil plugins in the RUNNER venv, discovered via the same
+                  # 'fusil.plugins' entry-point group the fuzzer uses. Queried directly (not from
+                  # a run sidecar) so it's correct immediately -- even before the fleet starts, and
+                  # for a fleet started before the sidecar recorded plugins. Metadata-only (no
+                  # plugin import / register), so it's cheap and side-effect-free.
+    [ -x "$RUNNER_PY" ] || { echo "(runner not found)"; return 0; }
+    "$RUNNER_PY" - 2>/dev/null <<'PY' || echo "(unknown)"
 try:
-    d = json.load(open(sys.argv[1]))
-    print(", ".join(d.get("plugins") or []) or "(none)")
+    from importlib.metadata import entry_points
+    try:
+        eps = entry_points(group="fusil.plugins")
+    except TypeError:  # Python <3.10: entry_points() returns a dict of groups
+        eps = entry_points().get("fusil.plugins", [])
+    print(", ".join(sorted(ep.name for ep in eps)) or "(none installed)")
 except Exception:
-    pass
+    print("(unknown)")
 PY
 }
 
 cmd_info(){  # the fleet banner: what this fleet is + where it lives
-    local plugins; plugins="$(fleet_plugins)"
+    # instances: the *running* unit count (what's actually up), not the fleet.conf default --
+    # `fleet up N` can start fewer than the configured default, and units may have died.
+    local plugins running; plugins="$(fleet_plugins)"; running="$(units | wc -l)"
     echo "mode      : $(fleet_mode)"
-    echo "plugins   : ${plugins:-(run some sessions, then ./fleet report)}"
+    echo "plugins   : $plugins"
     echo "fleet dir : $FLEET_DIR"
     echo "target    : ${TARGET_PYTHON:-?}"
     echo "catalog   : ${CATALOG:-(none)}"
-    echo "gil modes : ${GIL_MODES:-1}   instances: ${INSTANCES:-nproc-1}"
+    echo "instances : ${running} running (default ${INSTANCES:-?})"
+    echo "gil modes : ${GIL_MODES:-1}"
 }
 
 cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:
