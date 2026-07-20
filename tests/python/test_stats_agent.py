@@ -17,11 +17,44 @@ sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
 try:
     from fusil.python.session_stats import SessionStats
-    from fusil.python.stats_agent import StatsAgent
+    from fusil.python.stats_agent import StatsAgent, detect_mode
 
     HAVE = True
 except Exception:  # noqa: BLE001 -- runtime stack (python-ptrace) may be absent
     HAVE = False
+
+
+@unittest.skipUnless(HAVE, "requires the fusil runtime stack (python-ptrace)")
+class TestDetectMode(unittest.TestCase):
+    def _opts(self, **kw):
+        base = dict(
+            oom_fuzz=False,
+            oom_foreign=False,
+            tsan=False,
+            rustpython=False,
+            concurrency_stress=False,
+            new_uninit=False,
+        )
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    def test_modes(self):
+        self.assertEqual(detect_mode(None), "normal")
+        self.assertEqual(detect_mode(self._opts()), "normal")
+        self.assertEqual(detect_mode(self._opts(oom_fuzz=True)), "oom")
+        self.assertEqual(detect_mode(self._opts(tsan=True)), "tsan")
+        self.assertEqual(detect_mode(self._opts(rustpython=True)), "rustpython")
+        # --oom-foreign implies --oom-fuzz; only the specific label is emitted
+        self.assertEqual(detect_mode(self._opts(oom_fuzz=True, oom_foreign=True)), "oom-foreign")
+        # combined flags are "+"-joined in a stable order
+        self.assertEqual(
+            detect_mode(self._opts(rustpython=True, concurrency_stress=True)),
+            "rustpython+concurrency-stress",
+        )
+
+    def test_missing_attrs_are_tolerated(self):
+        # an options object lacking a flag attr must not raise (getattr default False)
+        self.assertEqual(detect_mode(SimpleNamespace(tsan=True)), "tsan")
 
 
 @unittest.skipUnless(HAVE, "requires the fusil runtime stack (python-ptrace)")

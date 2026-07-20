@@ -10,7 +10,10 @@ in isolation -- same split as ``oom_dedup.py``. The MAS wiring lives in ``stats_
 Sidecar schema (v1)::
 
     {
-      "schema": 1,
+      "schema": 2,
+      "mode": "oom",              # active fuzzing mode ("oom"/"tsan"/"rustpython"/
+                                  #   "concurrency-stress"/"normal"/a "+"-joined combo)
+      "plugins": ["cereggii"],    # names of the loaded fusil plugins (entry-point discovered)
       "gil_mode": "0",            # PYTHON_GIL for this instance ("0"/"1"/None)
       "pid": 12345,               # the fusil parent pid
       "run_dir": "python-2",      # basename of the project run directory
@@ -38,7 +41,7 @@ import os
 import time
 from typing import Callable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2 adds "mode" + "plugins" (additive; readers use .get with defaults)
 
 
 class SessionStats:
@@ -50,6 +53,8 @@ class SessionStats:
     def __init__(
         self,
         *,
+        mode: str | None = None,
+        plugins: list[str] | None = None,
         gil_mode: str | None = None,
         pid: int | None = None,
         run_dir: str | None = None,
@@ -57,6 +62,10 @@ class SessionStats:
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._clock = clock
+        # Active fuzzing mode + loaded plugin names -- per-run constants recorded so the fleet
+        # tooling can report what a run actually is (not just OOM). Set by StatsAgent.
+        self.mode = mode
+        self.plugins = list(plugins) if plugins else []
         self.gil_mode = gil_mode
         self.pid = pid
         self.run_dir = run_dir
@@ -107,6 +116,8 @@ class SessionStats:
     def to_dict(self) -> dict:
         return {
             "schema": SCHEMA_VERSION,
+            "mode": self.mode,
+            "plugins": self.plugins,
             "gil_mode": self.gil_mode,
             "pid": self.pid,
             "run_dir": self.run_dir,
@@ -142,6 +153,8 @@ class SessionStats:
         """
         out = {
             "schema": SCHEMA_VERSION,
+            "mode": None,
+            "plugins": [],
             "sessions": 0,
             "crashes": 0,
             "timeouts": 0,
@@ -156,6 +169,11 @@ class SessionStats:
             if not d:
                 continue
             out["runs"] += 1
+            # mode/plugins are per-run constants for an instance; keep the last non-empty seen.
+            if d.get("mode"):
+                out["mode"] = d["mode"]
+            if d.get("plugins"):
+                out["plugins"] = list(d["plugins"])
             for key in ("sessions", "crashes", "timeouts", "cpu_load_kills"):
                 out[key] += int(d.get(key, 0) or 0)
             for name, bucket in (d.get("modules") or {}).items():
