@@ -78,6 +78,30 @@ TSAN_UNSAFE_CALLS = frozenset(
 )  # fmt: skip
 
 
+class _MetaProxy:
+    """Stand-in for a live target member when module discovery ran in the target subprocess
+    (see ``target_introspect``). Carries the serializable metadata the generation path needs; the
+    duck-typed ``_fusil_*`` attributes are recognised by ``get_arg_number`` / ``class_arg_number``
+    / ``_get_object_methods``, so the live-object path is unchanged. Never a ``FunctionType`` /
+    ``type`` / ``ModuleType`` -- the classification already happened in the subprocess."""
+
+    _fusil_is_meta = True
+
+    def __init__(self, name: str, meta: dict):
+        self._name = name
+        self._meta = meta
+        self._fusil_arity = meta.get("arity")  # function/method: [lo, hi] or None (C builtin)
+        self._fusil_doc = meta.get("doc")
+        self._fusil_ctor_arity = meta.get("ctor_arity")  # class: [lo, hi] or None
+        self._fusil_is_exception = bool(meta.get("is_exception"))
+        self._fusil_class_name = meta.get("class_name", name)
+
+    def _fusil_raw_methods(self):
+        """(name, method-proxy) candidates for ``_get_object_methods`` to filter (blacklist /
+        private / plugin / exception-``__init__`` filtering stays in the parent)."""
+        return [(m["name"], _MetaProxy(m["name"], m)) for m in self._meta.get("methods", [])]
+
+
 class PythonFuzzerError(Exception):
     """Custom exception raised when fuzzer encounters unrecoverable errors."""
 
@@ -89,19 +113,33 @@ class WritePythonCode(WriteCode):
         self,
         parent_python_source: "PythonSource",
         filename: str,
-        module: ModuleType,
+        module: ModuleType | None,
         module_name: str,
         threads: bool = True,
         _async: bool = True,
         plugin_manager=None,
+        member_metadata: dict | None = None,
     ):
-        """Initialize the Python code writer."""
+        """Initialize the Python code writer.
+
+        ``member_metadata`` is the JSON discovery payload from
+        :func:`fusil.python.target_introspect.introspect_module` when discovery ran in the target
+        subprocess (``--discover-in-target``); then ``module`` may be ``None`` and generation reads
+        arities/methods from the metadata via ``_MetaProxy`` instead of introspecting a live object
+        the runner venv would have to import.
+        """
         super().__init__()  # Initialize base WriteCode
         self.parent_python_source = parent_python_source
         self.plugin_manager = plugin_manager
         self.options = parent_python_source.options
         self.filenames = parent_python_source.filenames
         self.module = module
+        self._meta_mode = member_metadata is not None
+        self._members = (
+            {m["name"]: m for m in member_metadata.get("members", [])}
+            if member_metadata is not None
+            else {}
+        )
         self.module_name = module_name
         self.enable_threads = threads
         self.enable_async = _async
@@ -144,8 +182,68 @@ class WritePythonCode(WriteCode):
             self.write(level, code)
         return ""
 
+    def _member(self, name: str):
+        """Fetch a module member for generation: a live object (default) or a ``_MetaProxy`` when
+        discovery ran in the target subprocess. Raises ``AttributeError`` if absent (so the call
+        sites' existing ``except AttributeError`` handling is unchanged)."""
+        if self._meta_mode:
+            try:
+                return _MetaProxy(name, self._members[name])
+            except KeyError:
+                raise AttributeError(name) from None
+        return getattr(self.module, name)
+
+    def _classify_from_meta(self) -> tuple[list[str], list[str], list[str]]:
+        """Metadata-mode ``_get_module_members``: apply the SAME fusil filtering to the subprocess
+        member list (using each member's ``kind``/``is_exception`` instead of live ``isinstance``).
+        The subprocess already dropped module/trivial-typed members (object branch)."""
+        classes: list[str] = []
+        functions: list[str] = []
+        objects: list[str] = []
+        try:
+            module_blacklist = BLACKLIST.get(self.module_name, set())
+        except KeyError:
+            module_blacklist = set()
+        current_blacklist = module_blacklist | METHOD_BLACKLIST
+        names = set(self._members)
+        names -= {
+            "__builtins__", "__doc__", "__file__", "__name__",
+            "__package__", "__loader__", "__spec__", "__cached__",
+        }  # fmt: skip
+        names -= {"True", "None", "False", "Ellipsis"}
+        if not self.options.fuzz_exceptions:
+            names -= EXCEPTION_NAMES
+        names -= current_blacklist
+        pm = self.plugin_manager
+        for name in sorted(names):
+            if name.startswith("_") and not self.options.test_private:
+                if not (name.startswith("__") and name.endswith("__")):
+                    continue
+            meta = self._members[name]
+            kind = meta.get("kind")
+            is_exc = bool(meta.get("is_exception"))
+            if kind == "function":
+                if pm and pm.is_blacklisted("function", name):
+                    continue
+                functions.append(name)
+            elif kind == "class":
+                if not self.options.fuzz_exceptions and is_exc:
+                    continue
+                if pm and pm.is_blacklisted("class", name):
+                    continue
+                classes.append(name)
+            elif kind == "object":
+                if not self.options.fuzz_exceptions and is_exc:
+                    continue
+                if pm and pm.is_blacklisted("object", name):
+                    continue
+                objects.append(name)
+        return functions, classes, objects
+
     def _get_module_members(self) -> tuple[list[str], list[str], list[str]]:
         """Extracts fuzzable functions, classes, and objects from the current module."""
+        if self._meta_mode:
+            return self._classify_from_meta()
         _EXCEPTION_NAMES = EXCEPTION_NAMES
 
         classes = []
@@ -221,9 +319,16 @@ class WritePythonCode(WriteCode):
     def _get_object_methods(
         self, obj_instance_or_class: Any, owner_name: str
     ) -> dict[str, Callable[..., Any]]:
-        """Extracts callable methods from an object or class, respecting blacklists."""
+        """Extracts callable methods from an object or class, respecting blacklists.
+
+        Live: walk ``dir()`` + ``getattr`` + ``callable``. Metadata (``_MetaProxy``): the callable
+        set was already discovered in the target subprocess -- take its ``_fusil_raw_methods`` as
+        candidates. Either way the SAME fusil filtering (blacklist / private / plugin / exception-
+        ``__init__``) is applied here, and the values are the objects/proxies the arity code reads.
+        """
         methods: dict[str, Callable[..., Any]] = {}
-        if type(obj_instance_or_class) in TRIVIAL_TYPES:
+        is_meta = getattr(obj_instance_or_class, "_fusil_is_meta", False)
+        if not is_meta and type(obj_instance_or_class) in TRIVIAL_TYPES:
             return methods
 
         try:
@@ -233,13 +338,18 @@ class WritePythonCode(WriteCode):
             blacklist = set()
         blacklist |= METHOD_BLACKLIST
 
-        is_exception_type_or_instance = (
-            isinstance(obj_instance_or_class, type)
-            and issubclass(obj_instance_or_class, BaseException)
-        ) or isinstance(obj_instance_or_class, BaseException)
+        if is_meta:
+            is_exception_type_or_instance = obj_instance_or_class._fusil_is_exception
+            candidates = obj_instance_or_class._fusil_raw_methods()  # [(name, method_proxy)]
+        else:
+            is_exception_type_or_instance = (
+                isinstance(obj_instance_or_class, type)
+                and issubclass(obj_instance_or_class, BaseException)
+            ) or isinstance(obj_instance_or_class, BaseException)
+            candidates = [(name, None) for name in dir(obj_instance_or_class)]
 
         pm = self.plugin_manager
-        for name in dir(obj_instance_or_class):
+        for name, method_proxy in candidates:
             if name in blacklist:
                 continue
             if pm and pm.is_blacklisted("method", name):
@@ -256,6 +366,9 @@ class WritePythonCode(WriteCode):
             if is_exception_type_or_instance and name == "__init__":  # Avoid re-initing exceptions
                 continue
 
+            if is_meta:
+                methods[name] = method_proxy
+                continue
             try:
                 attr = getattr(obj_instance_or_class, name, None)
                 if attr is None or not callable(attr):
@@ -1487,7 +1600,7 @@ class WritePythonCode(WriteCode):
             # OOM injection: wrap a function call in a dense set_nomemory sweep
             func_name = choice(self.module_functions)
             try:
-                func_obj = getattr(self.module, func_name)
+                func_obj = self._member(func_name)
             except AttributeError:
                 return
             self._generate_oom_function_call(prefix, func_name, func_obj)
@@ -1496,7 +1609,7 @@ class WritePythonCode(WriteCode):
         # Standard function call fuzzing
         func_name = choice(self.module_functions)
         try:
-            func_obj = getattr(self.module, func_name)
+            func_obj = self._member(func_name)
         except AttributeError:
             return
         self._generate_and_write_call(
@@ -1522,7 +1635,7 @@ class WritePythonCode(WriteCode):
             if class_name in OBJECT_BLACKLIST:
                 continue
             try:
-                class_obj = getattr(self.module, class_name)
+                class_obj = self._member(class_name)
             except AttributeError:
                 continue
             self._generate_oom_class_fuzzing(f"oc{i + 1}", class_name, class_obj)
@@ -1542,7 +1655,7 @@ class WritePythonCode(WriteCode):
             if class_name in OBJECT_BLACKLIST:
                 continue
             try:
-                class_obj = getattr(self.module, class_name)
+                class_obj = self._member(class_name)
             except AttributeError:
                 continue
 
@@ -1563,7 +1676,7 @@ class WritePythonCode(WriteCode):
             if obj_name in OBJECT_BLACKLIST:
                 continue
             try:
-                obj_instance = getattr(self.module, obj_name)
+                obj_instance = self._member(obj_name)
             except AttributeError:
                 continue
             if isinstance(obj_instance, ModuleType):
@@ -1878,11 +1991,21 @@ class WritePythonCode(WriteCode):
         prefix = f"obj{obj_idx + 1}"
         obj_expr_in_script = f"fuzz_target_module.{obj_name_str}"
 
+        # Metadata mode: the proxy carries the class name + method set; live mode reads them off
+        # the instance. Pass the proxy itself as the "type" so _get_object_methods finds its
+        # _fusil_raw_methods (type(proxy) would be _MetaProxy, not the target's type).
+        if getattr(obj_instance, "_fusil_is_meta", False):
+            class_name = obj_instance._fusil_class_name
+            type_for_methods = obj_instance
+        else:
+            class_name = obj_instance.__class__.__name__
+            type_for_methods = type(obj_instance)
+
         self._fuzz_methods_on_object_or_specific_types(
             current_prefix=f"obj{obj_idx}m",  # Prefix for this object
             target_obj_expr_str=obj_expr_in_script,
-            target_obj_class_name=obj_instance.__class__.__name__,  # Get class name from instance
-            target_obj_actual_type_obj=type(obj_instance),  # Get type from instance
+            target_obj_class_name=class_name,
+            target_obj_actual_type_obj=type_for_methods,
             num_method_calls_to_make=self.options.methods_number,
         )
         self.write_print_to_stderr(
@@ -1996,7 +2119,7 @@ class WritePythonCode(WriteCode):
         for j in range(self._oom_pick_seq_len()):
             func_name = choice(self.module_functions)
             try:
-                func_obj = getattr(self.module, func_name)
+                func_obj = self._member(func_name)
             except AttributeError:
                 continue
             min_arg, max_arg = get_arg_number(func_obj, func_name, 1)

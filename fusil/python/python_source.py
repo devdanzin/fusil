@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 from os.path import exists as path_exists
@@ -176,6 +177,56 @@ class PythonSource(ProjectAgent):
             plugin_manager=self.plugin_manager,
         )
 
+    def _thread_flags(self) -> tuple[bool, bool]:
+        """(threads, async) for the writer -- disabled under --tsan/--concurrency-stress (which
+        replace the per-call wrappers with the concentrated stress region)."""
+        stress = self.options.tsan or getattr(self.options, "concurrency_stress", False)
+        return (
+            (not self.options.no_threads) and not stress,
+            (not self.options.no_async) and not stress,
+        )
+
+    def _target_discovery_env(self) -> dict:
+        """Minimal env for the discovery subprocess running the TARGET interpreter. Inherits the
+        current env (so a fleet's exported PYTHON_GIL etc. carry over) + the pycache/debuginfod
+        overrides fusil already uses for target children, and forces PYTHON_GIL=0 under --tsan."""
+        env = dict(os.environ)
+        env["PYTHONPYCACHEPREFIX"] = "/tmp/fusil-pycache-root"
+        env["DEBUGINFOD_URLS"] = ""  # dodge the llvm-symbolizer debuginfod hang; harmless otherwise
+        if getattr(self.options, "tsan", False):
+            env["PYTHON_GIL"] = "0"
+        return env
+
+    def discoverInTarget(self, module_name: str) -> bool:
+        """Discover a module's members by introspecting it in a subprocess running the TARGET
+        interpreter (``--discover-in-target``), so the runner venv need not have the extension
+        installed. Sets up ``self.write`` from the returned metadata and returns True; returns
+        False if the subprocess failed (import error / timeout / bad output) so the caller skips
+        the module -- the same disposition as a failed runner import."""
+        from fusil.python.target_introspect import introspect_module
+
+        self.module_name = module_name
+        self.module = None
+        timeout = int(getattr(self.options, "discover_timeout", 60))
+        metadata = introspect_module(
+            self.options.python, module_name, env=self._target_discovery_env(), timeout=timeout
+        )
+        if metadata is None:
+            return False
+        threads, _async = self._thread_flags()
+        write_code_factory = self.write_code_factory or WritePythonCode
+        self.write = write_code_factory(
+            self,
+            self.filename,
+            None,  # no live module: generation reads member_metadata via _MetaProxy
+            module_name,
+            threads=threads,
+            _async=_async,
+            plugin_manager=self.plugin_manager,
+            member_metadata=metadata,
+        )
+        return True
+
     def on_session_start(self) -> None:
         """Start a new fuzzing session by selecting a module and generating test code."""
         if self.source_output_path:
@@ -187,10 +238,17 @@ class PythonSource(ProjectAgent):
         old_sys_modules = sys.modules.copy()
 
         name = "NO_MODULES!"
+        discover_in_target = getattr(self.options, "discover_in_target", False)
         while self.modules_list:
             name = choice(self.modules_list)
             try:
-                self.loadModule(name)
+                if discover_in_target:
+                    # Introspect in a subprocess running the target interpreter (runner needn't
+                    # have the extension). A failed subprocess is an unloadable module.
+                    if not self.discoverInTarget(name):
+                        raise ImportError("target-subprocess discovery failed for %s" % name)
+                else:
+                    self.loadModule(name)
                 break
             except (Exception, SystemExit) as err:
                 # Catch Exception plus SystemExit: a module that runs argparse/optparse on

@@ -73,8 +73,22 @@ Entry point: `fuzzers/fusil-python-threaded` → `fusil.python.Fuzzer`.
   `WatchProcess` / `WatchStdout` (crash-detection probes).
 - **`PythonSource`** (`python_source.py`): a `ProjectAgent`. Discovers importable modules
   (`ListAllModules`, filtered by `blacklists.py`), and on each `session_start` picks one module,
-  calls `WritePythonCode.generate_fuzzing_script()` to emit `source.py`, then sends
-  `python_source` so `PythonProcess` runs it under the target interpreter.
+  imports it, introspects its members (functions/classes/objects + arities/methods), calls
+  `WritePythonCode.generate_fuzzing_script()` to emit `source.py`, then sends `python_source` so
+  `PythonProcess` runs it under the target interpreter.
+  - **`--discover-in-target`** (opt-in): do that member introspection in a **subprocess running
+    the target interpreter** (`--python`) rather than by importing the module in the *runner*, so
+    the runner venv need not have the target extension installed (FT/debug builds with no wheels, a
+    target that differs from the runner). `fusil/python/target_introspect.py` runs a stdlib-only
+    introspector under the target and returns the members as JSON; `WritePythonCode` reads that
+    metadata via `_MetaProxy` instead of a live object (the generated script re-imports the module
+    by name in the target regardless, so nothing else changes). The subprocess emits *raw*
+    metadata; all fusil policy (blacklists, `--test-private`, `--fuzz-exceptions`, arity name-table
+    overrides) stays in the parent, so the live and subprocess paths stay in parity (guarded by
+    `tests/python/test_target_introspect.py`). Pair with an explicit `--modules`/`--modules-file`
+    (which bypass the runner-side package walk); moving `--packages` enumeration into the target is
+    a follow-up. **Limitation:** a plugin `add_class_handler` that introspects the *live* class
+    can't run when the extension isn't in the runner (see `doc/plugins.md`).
 - **`WritePythonCode`** (`write_python_code.py`, the largest/most important file): generates the
   test script — imports the target, then emits randomized function calls, class instantiations,
   method calls, objects, and thread/async wrappers. Arguments come from **`ArgumentGenerator`**

@@ -68,6 +68,27 @@ class Fuzzer(Application):
             default="*",
         )
         input_options.add_option(
+            "--discover-in-target",
+            help="Discover each module's members (functions/classes/methods + arities) by "
+            "introspecting it in a SUBPROCESS running the target interpreter (--python), instead "
+            "of importing it in the runner. So the runner venv need not have the target extension "
+            "installed -- useful for FT/debug CPython builds with no wheels, or a target that "
+            "differs from the runner. Pair with an explicit --modules/--modules-file (which bypass "
+            "the runner-side package walk); --packages enumeration in the target is a follow-up. "
+            "Default: False (import + introspect in the runner).",
+            action="store_true",
+            dest="discover_in_target",
+            default=False,
+        )
+        input_options.add_option(
+            "--discover-timeout",
+            help="Per-module timeout (seconds) for --discover-in-target's introspection subprocess "
+            "(default: 60). A module that times out is skipped, like a failed import.",
+            type="int",
+            dest="discover_timeout",
+            default=60,
+        )
+        input_options.add_option(
             "--skip-test",
             help="Skip modules with 'test' in the name (default: False)",
             action="store_true",
