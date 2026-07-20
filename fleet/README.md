@@ -11,11 +11,15 @@ and capture their logs — no VMs or containers needed.
   `PYTHON_GIL` modes (they find *different* crashes).
 - **Auto-restart**: if an instance crashes or hits `--success` and exits, systemd brings
   it back. This is the "is it still running?" check, done by the OS.
-- **A memory cap per instance** (`MemoryMax`) so a runaway OOM-injection child can't take
-  down the whole machine.
-- **`fleet finds`**: surfaces the `oomNEW` crash dirs — the new-bug candidates — across
-  all instances, using the labels the in-loop dedup already writes. That's your
-  "anything interesting?" answer.
+- **A memory cap per instance** (`MemoryMax`) so a runaway child (an OOM-injection sweep, a
+  RustPython balloon, …) can't take down the whole machine.
+- **`fleet finds`**: surfaces the new-bug-candidate crash dirs across all instances, using the
+  labels the in-loop dedup already writes. That's your "anything interesting?" answer.
+
+The tooling is **mode-agnostic** — `status`, `finds`, `triage` and `report` work the same for OOM,
+TSan, RustPython and plain runs, because every dedup engine labels a new-bug candidate `<prefix>NEW`
+(`oomNEW`/`tsanNEW`/`rustpyNEW`) and an unresolved segv/frame `<prefix>SEGV`/`tsanFRAME`. Run
+**`./fleet info`** to see the fleet's auto-detected mode, loaded plugins, target and paths.
 
 ## One-time setup
 
@@ -25,18 +29,20 @@ and capture their logs — no VMs or containers needed.
    `python3` from the venv that has fusil installed.
 3. `chmod +x fleet fleet-run`
 
-> The `CATALOG` (`known_sites.tsv`) is the dedup snapshot. Generate/refresh it from the
-> `cpython-oom-findings` catalog with `gen_known_sites.py`; all instances read it
-> read-only, so there's no write contention.
+> The `CATALOG` is the dedup snapshot for whichever mode you run — `known_sites.tsv` from
+> `cpython-oom-findings` (OOM), `known_races.tsv` from `cpython-tsan-findings` (TSan), or
+> `known_panics.tsv` from `rustpython-findings` (RustPython). Regenerate it with the catalog's
+> generator; all instances read it read-only, so there's no write contention.
 
 ## Daily use
 
 ```bash
 sudo ./fleet up            # start (nproc-1) instances; or: sudo ./fleet up 8
+./fleet info               # mode, plugins, target and paths for this fleet
 ./fleet status             # per-instance state + crashes kept + NEW candidates
-./fleet report             # rich observability: sessions, throughput, crash taxonomy, disk, health
+./fleet report             # rich observability: mode/plugins, sessions, throughput, crash taxonomy, health
 ./fleet report 3           # ...for one instance;  add --watch (live), --html FILE (dashboard), or --json
-./fleet finds              # list the oomNEW dirs across the whole fleet
+./fleet finds              # list the new-bug-candidate dirs across the whole fleet
 ./fleet tail 3             # follow instance 3's output live
 sudo ./fleet down          # stop everything
 sudo ./fleet restart       # restart all (e.g. after refreshing the catalog)

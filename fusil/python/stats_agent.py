@@ -21,6 +21,36 @@ from fusil.python.session_stats import SessionStats
 SIDECAR_NAME = "fusil_stats.json"
 _FLUSH_INTERVAL = 1.0  # seconds; the sidecar lags in-memory counters by at most this
 
+# (option attribute, mode label) pairs, checked in order. Each store_true flag that is set
+# contributes its label; the labels are "+"-joined (e.g. "rustpython+concurrency-stress"), so
+# a run reports exactly what it is. "oom-foreign" wins over "oom" (it implies --oom-fuzz).
+_MODE_FLAGS = (
+    ("oom_foreign", "oom-foreign"),
+    ("oom_fuzz", "oom"),
+    ("tsan", "tsan"),
+    ("rustpython", "rustpython"),
+    ("concurrency_stress", "concurrency-stress"),
+    ("new_uninit", "new-uninit"),
+)
+
+
+def detect_mode(options) -> str:
+    """Human-readable active-mode label from parsed options; "normal" if no special mode.
+
+    Best-effort and defensive (observability must never break fuzzing): unknown/absent
+    options are simply skipped. ``--oom-foreign`` implies ``--oom-fuzz``, so only the more
+    specific label is emitted.
+    """
+    if options is None:
+        return "normal"
+    parts: list[str] = []
+    for attr, label in _MODE_FLAGS:
+        if getattr(options, attr, False):
+            parts.append(label)
+    if "oom-foreign" in parts and "oom" in parts:
+        parts.remove("oom")
+    return "+".join(parts) if parts else "normal"
+
 
 class StatsAgent(ProjectAgent):
     """Fold each finished session into a ``SessionStats`` and periodically write the sidecar.
@@ -38,7 +68,13 @@ class StatsAgent(ProjectAgent):
             run_dir = os.path.basename(project.directory.directory)
         except Exception:
             pass
+        # Record what this run actually is (mode + loaded plugins) so the fleet tooling reports
+        # any fuzzing kind, not just OOM. Both are best-effort -- a failure here must not break
+        # fuzzing, so we swallow and fall back to unknown/empty.
+        mode, plugins = self._detect_mode_and_plugins()
         self.stats = SessionStats(
+            mode=mode,
+            plugins=plugins,
             gil_mode=os.environ.get("PYTHON_GIL"),
             pid=os.getpid(),
             run_dir=run_dir,
@@ -46,6 +82,33 @@ class StatsAgent(ProjectAgent):
         self._path = None  # resolved lazily on first flush
         self._rename_parts: list[str] = []
         self._last_flush = 0.0
+
+    def _detect_mode_and_plugins(self) -> tuple[str, list[str]]:
+        """(mode, plugin-names) for this run, from the application's options + plugin manager.
+
+        Fully defensive: any failure returns ("normal", []) rather than raising, since a stats
+        agent must never take down a fuzzing run.
+        """
+        mode, plugins = "normal", []
+        try:
+            app = self.application()
+            options = getattr(app, "options", None)
+            mode = detect_mode(options)
+            # A plugin can also register a fuzzing mode with no core option (e.g. a future
+            # plugin-only mode); prefer the explicit flags above, but fall back to it.
+            pm = getattr(app, "plugin_manager", None)
+            if pm is not None:
+                if mode == "normal":
+                    try:
+                        active = pm.get_active_mode(getattr(app, "config", None) or options)
+                        if active is not None and getattr(active, "name", None):
+                            mode = active.name
+                    except Exception:
+                        pass
+                plugins = sorted(getattr(pm, "plugins", {}) or {})
+        except Exception:
+            pass
+        return mode, plugins
 
     # --- session event stream ---------------------------------------------------------
 

@@ -62,12 +62,20 @@ class TestRecord(unittest.TestCase):
 class TestSerialization(unittest.TestCase):
     def test_to_dict_schema(self):
         s = SessionStats(
-            gil_mode="1", pid=42, run_dir="python-2", started_at=5.0, clock=lambda: 9.0
+            mode="tsan",
+            plugins=["cereggii"],
+            gil_mode="1",
+            pid=42,
+            run_dir="python-2",
+            started_at=5.0,
+            clock=lambda: 9.0,
         )
         s.record("m", crash=True)
         d = s.to_dict()
         self.assertEqual(d["schema"], SCHEMA_VERSION)
         for key in (
+            "mode",
+            "plugins",
             "gil_mode",
             "pid",
             "run_dir",
@@ -80,9 +88,19 @@ class TestSerialization(unittest.TestCase):
             "modules",
         ):
             self.assertIn(key, d)
+        self.assertEqual(d["mode"], "tsan")
+        self.assertEqual(d["plugins"], ["cereggii"])
         self.assertEqual(d["gil_mode"], "1")
         self.assertEqual(d["pid"], 42)
         self.assertEqual(d["sessions"], 1)
+
+    def test_plugins_default_empty_and_copied(self):
+        # plugins defaults to [] (not None), and the constructor copies the list it's given
+        src = ["a"]
+        s = SessionStats(plugins=src)
+        self.assertEqual(SessionStats().plugins, [])
+        src.append("b")
+        self.assertEqual(s.plugins, ["a"])  # not aliased to the caller's list
 
     def test_write_is_atomic_and_roundtrips(self):
         s = SessionStats(started_at=1.0, clock=lambda: 2.0)
@@ -100,12 +118,15 @@ class TestSerialization(unittest.TestCase):
 
 class TestMerge(unittest.TestCase):
     def test_merge_sums_and_unions(self):
-        a = SessionStats(started_at=10.0, clock=lambda: 20.0)
+        a = SessionStats(mode="oom", plugins=["numpy"], started_at=10.0, clock=lambda: 20.0)
         a.record("json", crash=True)
         b = SessionStats(started_at=5.0, clock=lambda: 30.0)
         b.record("json")
         b.record("sqlite3", timeout=True)
         merged = SessionStats.merge([a.to_dict(), b.to_dict()])
+        # mode/plugins are per-run constants: the last non-empty seen wins
+        self.assertEqual(merged["mode"], "oom")
+        self.assertEqual(merged["plugins"], ["numpy"])
         self.assertEqual(merged["sessions"], 3)
         self.assertEqual(merged["crashes"], 1)
         self.assertEqual(merged["timeouts"], 1)

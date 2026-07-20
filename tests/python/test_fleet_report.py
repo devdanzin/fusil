@@ -50,9 +50,21 @@ class TestClassify(unittest.TestCase):
             "json-sigsegv-oomNEW": ("json", "sigsegv", "oomNEW"),
             "mod-exitcode127-oomclean": ("mod", "exitcode127", "oomclean"),
             "weird_name_only": ("weird_name_only", "other", "other"),
+            # mode-agnostic: TSan / RustPython dedup labels classify the same way.
+            "unicode-panicked-TSAN-0012": ("unicode", "other", "TSAN-0012"),
+            "_thread-sigsegv-tsanNEW": ("_thread", "sigsegv", "tsanNEW"),
+            "email-timeout-tsanFRAME-3": ("email", "timeout", "tsanFRAME"),
+            "_asyncio-sigsegv-rustpySEGV": ("_asyncio", "sigsegv", "rustpySEGV"),
+            "sys-panicked-RUSTPY-0024": ("sys", "other", "RUSTPY-0024"),
+            "itertools-panicked-rustpyNEW-2": ("itertools", "other", "rustpyNEW"),
         }
         for name, expected in cases.items():
             self.assertEqual(fr.classify_crash_dir(name), expected, name)
+
+    def test_new_candidate_count_is_mode_agnostic(self):
+        by_label = {"oomNEW": 2, "tsanNEW": 1, "rustpyNEW": 3, "OOM-0043": 5, "oomSEGV": 4}
+        # counts every "<prefix>NEW", ignores known ids and segv/frame buckets
+        self.assertEqual(fr.new_candidate_count(by_label), 6)
 
 
 class TestCollectAndAggregate(unittest.TestCase):
@@ -94,7 +106,7 @@ class TestCollectAndAggregate(unittest.TestCase):
             self.assertEqual(r["sessions"], 150)  # summed across the two run dirs
             self.assertEqual(r["restarts"], 2)
             self.assertEqual(r["kept_crashes"], 2)
-            self.assertEqual(r["oomnew"], 1)
+            self.assertEqual(r["new"], 1)
             self.assertEqual(r["by_kind"].get("sigsegv"), 1)
             self.assertEqual(r["by_label"].get("oomclean"), 1)
             self.assertEqual(r["modules"]["json"]["hits"], 60)
@@ -110,7 +122,7 @@ class TestCollectAndAggregate(unittest.TestCase):
             self.assertEqual(agg["instances"], 2)
             self.assertEqual(agg["sessions"], 150)  # inst-02 has no sidecar
             self.assertEqual(agg["kept_crashes"], 3)
-            self.assertEqual(agg["oomnew"], 1)
+            self.assertEqual(agg["new"], 1)
             self.assertEqual(agg["by_label"].get("OOM-0043"), 1)
 
     def test_single_instance_filter(self):
@@ -125,6 +137,32 @@ class TestCollectAndAggregate(unittest.TestCase):
             self._fleet(tmp)
             insts = fr.discover_instances(os.path.join(tmp, "inst-01"))
             self.assertEqual(len(insts), 1)
+
+    def test_mode_and_plugins_flow_through_and_render(self):
+        # v2 sidecars record the active mode + loaded plugins; they must reach the per-instance
+        # dict, the campaign aggregate, and both text renders (the mode/plugins banner).
+        with tempfile.TemporaryDirectory() as tmp:
+            r1 = os.path.join(tmp, "inst-01", "python")
+            os.makedirs(r1)
+            _sidecar(
+                os.path.join(r1, "fusil_stats.json"),
+                schema=2,
+                sessions=10,
+                mode="rustpython+concurrency-stress",
+                plugins=["cereggii", "rustpython"],
+            )
+            r = fr.collect_instance(os.path.join(tmp, "inst-01"), now=2000.0, systemd=False)
+            self.assertEqual(r["mode"], "rustpython+concurrency-stress")
+            self.assertEqual(r["plugins"], ["cereggii", "rustpython"])
+            report = fr.build_report(tmp, None, systemd=False, now=2000.0)
+            self.assertEqual(report["campaign"]["mode"], "rustpython+concurrency-stress")
+            self.assertEqual(report["campaign"]["plugins"], ["cereggii", "rustpython"])
+            camp = fr.render(report, None)
+            self.assertIn("rustpython+concurrency-stress", camp)
+            self.assertIn("cereggii", camp)
+            self.assertIn(tmp, camp)  # fleet dir in the banner
+            inst = fr.render(report, 1)
+            self.assertIn("rustpython+concurrency-stress", inst)
 
     def test_tsan_kinds_flow_through_and_render(self):
         # Slice B: the --tsan shared-object distribution rides the sidecar through
