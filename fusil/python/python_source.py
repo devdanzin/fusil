@@ -98,15 +98,21 @@ class PythonSource(ProjectAgent):
 
             packages = self.options.packages.split(",")
 
-            for package in packages:
-                package = package.strip().strip("/")
-                if not len(package):
-                    continue
-                pack = __import__(package)
-                path = pack.__path__[0]
-                self.info("Adding package: %s (%s)" % (package, path))
-                package_walker = all_modules.discover_modules([path], package + ".")
-                self.modules |= set(name for finder, name, ispgk in package_walker)
+            if getattr(self.options, "discover_in_target", False):
+                # Walk the packages in a subprocess under the target interpreter, so --packages
+                # enumeration -- like --discover-in-target's member introspection -- doesn't import
+                # the extension in the runner.
+                self._add_packages_from_target(all_modules, packages)
+            else:
+                for package in packages:
+                    package = package.strip().strip("/")
+                    if not len(package):
+                        continue
+                    pack = __import__(package)
+                    path = pack.__path__[0]
+                    self.info("Adding package: %s (%s)" % (package, path))
+                    package_walker = all_modules.discover_modules([path], package + ".")
+                    self.modules |= set(name for finder, name, ispgk in package_walker)
 
             self.info(
                 "Known modules (%d): %s" % (len(self.modules), ",".join(sorted(self.modules)))
@@ -175,6 +181,40 @@ class PythonSource(ProjectAgent):
             _async=(not self.options.no_async)
             and not (self.options.tsan or getattr(self.options, "concurrency_stress", False)),
             plugin_manager=self.plugin_manager,
+        )
+
+    def _add_packages_from_target(self, all_modules, packages) -> None:
+        """--discover-in-target: enumerate the named packages' submodules in a subprocess running
+        the target interpreter (so --packages doesn't import the extension in the runner), then
+        apply the SAME ListAllModules filtering as the runner-side walk (``keep_walked_module``)."""
+        from fusil.python.target_introspect import enumerate_packages
+
+        names = [p.strip().strip("/") for p in packages]
+        names = [p for p in names if p]
+        timeout = int(getattr(self.options, "discover_timeout", 60))
+        data = enumerate_packages(
+            self.options.python, names, env=self._target_discovery_env(), timeout=timeout
+        )
+        if data is None:
+            self.error(
+                "Target-subprocess package enumeration failed (%s); no submodules added."
+                % ",".join(names)
+            )
+            return
+        kept = 0
+        for sub in data["submodules"]:
+            if all_modules.keep_walked_module(
+                sub["name"],
+                sub.get("ispkg", False),
+                sub.get("origin"),
+                sub.get("search_path", ""),
+                "",
+                sub.get("package"),
+            ):
+                self.modules.add(sub["name"])
+                kept += 1
+        self.info(
+            "Added %d submodule(s) from %d package(s) via target introspection" % (kept, len(names))
         )
 
     def _thread_flags(self) -> tuple[bool, bool]:

@@ -101,6 +101,31 @@ class ListAllModules:
 
         return True
 
+    def keep_walked_module(
+        self,
+        name: str,
+        is_package: bool,
+        filename: str | None,
+        search_path: str = "",
+        prefix: str = "",
+        package: str | None = None,
+        path: list[str] | None = None,
+    ) -> bool:
+        """Full keep/skip decision for a walked (sub)module: the name-based skips (blacklist /
+        ``__main__`` / ``*_d``) plus :meth:`_is_valid_module` (site_package / only_c / blacklist
+        substrings). Shared by the runner-side :meth:`discover_modules` walk and the target-
+        subprocess package enumeration (``target_introspect.enumerate_packages``), so both apply
+        identical filtering."""
+        if name in self.blacklist:
+            return False
+        if name == "__main__" or name.endswith(".__main__"):
+            return False
+        if name.endswith("_d"):
+            return False
+        return self._is_valid_module(
+            name, is_package, filename, path, package, prefix, search_path=search_path
+        )
+
     def _find_module(self, fullname: str, name: str, prefix: str) -> ModuleType | None:
         """
         Attempt to find and import a module using various strategies.
@@ -156,19 +181,9 @@ class ListAllModules:
             path = sys.path
 
         for finder, name, ispkg in pkgutil.walk_packages(path, prefix, onerror):
-            if name in self.blacklist:
-                continue
-
-            if name == "__main__" or name.endswith(".__main__"):
-                # A package's __main__ is its CLI entry point: importing it *runs* the CLI
-                # (argparse over sys.argv, then sys.exit()) -- e.g. venv.__main__, json.__main__,
-                # zipfile.__main__. It is never a useful fuzz target and its import-time exit
-                # would otherwise churn the fuzzer, so skip the whole family here.
-                continue
-
-            if name.endswith("_d"):
-                continue
-
+            # __main__ (a package's CLI entry point) / *_d / blacklisted names are skipped inside
+            # keep_walked_module; importing __main__ *runs* the CLI (argparse -> sys.exit), which
+            # would churn the fuzzer, but find_spec below does not execute it.
             filename = None
             try:
                 spec = finder.find_spec(name)
@@ -180,14 +195,14 @@ class ListAllModules:
             module_data = self._get_module_metadata(name)
             search_path = finder.path if hasattr(finder, "path") else ""
 
-            if not self._is_valid_module(
+            if not self.keep_walked_module(
                 name,
                 ispkg,
                 filename,
-                module_data.get("path"),
-                module_data.get("package"),
+                search_path,
                 prefix,
-                search_path=search_path,
+                module_data.get("package"),
+                module_data.get("path"),
             ):
                 if self.verbose:
                     print(f"SKIPPED {name}", file=sys.stderr)

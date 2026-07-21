@@ -17,7 +17,14 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "..", ".."))
 
-from fusil.python.target_introspect import _DISCOVERY_SRC, introspect_module
+from fusil.python.blacklists import MODULE_BLACKLIST
+from fusil.python.list_all_modules import ListAllModules
+from fusil.python.target_introspect import (
+    _DISCOVERY_SRC,
+    _ENUMERATE_SRC,
+    enumerate_packages,
+    introspect_module,
+)
 from fusil.python.write_python_code import WritePythonCode
 
 # Introspect using THIS interpreter (it can import `json`); no separate target needed for the unit.
@@ -151,6 +158,41 @@ class TestParity(unittest.TestCase):
         w, _ = _generate(None, "json", meta)
         got = (sorted(w.module_functions), sorted(w.module_classes), sorted(w.module_objects))
         self.assertEqual(live, got)
+
+
+class TestPackageEnumeration(unittest.TestCase):
+    def test_enumerate_script_is_valid_python(self):
+        ast.parse(_ENUMERATE_SRC)
+
+    def test_empty_and_bad_packages(self):
+        self.assertEqual(enumerate_packages(PYEXE, [])["submodules"], [])
+        # a single-file module (no __path__) yields no submodules; a missing package is skipped
+        data = enumerate_packages(PYEXE, ["bisect", "no_such_pkg_zzz"])
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["submodules"], [])
+
+    def test_enumeration_matches_runner_walk(self):
+        # Parity: subprocess enumeration + the SHARED keep_walked_module filter yields the same
+        # submodule set as the runner-side ListAllModules.discover_modules walk.
+        import email
+
+        lm = ListAllModules(None, False, True, MODULE_BLACKLIST, False, verbose=False)
+        live = {name for _f, name, _p in lm.discover_modules(list(email.__path__), "email.")}
+        data = enumerate_packages(PYEXE, ["email"])
+        meta = {
+            s["name"]
+            for s in data["submodules"]
+            if lm.keep_walked_module(
+                s["name"],
+                s["ispkg"],
+                s.get("origin"),
+                s.get("search_path", ""),
+                "",
+                s.get("package"),
+            )
+        }
+        self.assertTrue(live)  # sanity: email has submodules
+        self.assertEqual(live, meta)
 
 
 if __name__ == "__main__":

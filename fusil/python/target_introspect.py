@@ -145,6 +145,90 @@ main()
 '''
 
 
+# Enumeration script: walk the named packages under the TARGET interpreter and emit each
+# submodule's (name, ispkg, origin, search_path, package) so the parent can apply the same
+# ListAllModules filtering (blacklist / only_c / site_package) it uses for the runner-side walk.
+# Mirrors ListAllModules.discover_modules' pkgutil.walk_packages loop (which imports subpackages to
+# recurse -- that happens here, in the target, where the extension is installed).
+_ENUMERATE_SRC = r"""
+import sys, json, importlib, pkgutil
+
+
+def main():
+    subs = []
+    seen = set()
+    for pkg in sys.argv[1:]:
+        pkg = pkg.strip().strip("/")
+        if not pkg or pkg in seen:
+            continue
+        try:
+            mod = importlib.import_module(pkg)
+        except BaseException:
+            continue
+        paths = getattr(mod, "__path__", None)
+        if not paths:
+            continue
+
+        def _onerror(_name):
+            return None
+
+        try:
+            walker = pkgutil.walk_packages(list(paths), pkg + ".", _onerror)
+            for finder, name, ispkg in walker:
+                if name in seen:
+                    continue
+                seen.add(name)
+                origin = None
+                try:
+                    spec = finder.find_spec(name)
+                    if spec is not None:
+                        origin = spec.origin
+                except Exception:
+                    origin = None
+                subs.append({
+                    "name": name,
+                    "ispkg": bool(ispkg),
+                    "origin": origin,
+                    "search_path": getattr(finder, "path", "") or "",
+                    "package": name.rpartition(".")[0],
+                })
+        except Exception:
+            continue
+    print(json.dumps({"ok": True, "submodules": subs}))
+
+
+main()
+"""
+
+
+def enumerate_packages(python_path, package_names, env=None, timeout=120):
+    """Walk the named packages under ``python_path`` and return ``{"ok", "submodules": [...]}`` (each
+    submodule dict is ``{name, ispkg, origin, search_path, package}`` for the parent to filter), or
+    ``None`` on timeout / non-zero / unparseable output. The runner-side analogue is
+    ``ListAllModules.discover_modules``; the parent applies ``keep_walked_module`` to the result."""
+    if not package_names:
+        return {"ok": True, "submodules": []}
+    try:
+        proc = subprocess.run(
+            [python_path, "-c", _ENUMERATE_SRC, *package_names],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        data = json.loads(proc.stdout.splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    if not isinstance(data, dict) or not data.get("ok") or "submodules" not in data:
+        return None
+    return data
+
+
 def introspect_module(python_path, module_name, env=None, timeout=60):
     """Run the discovery script under ``python_path`` and return the parsed metadata dict.
 

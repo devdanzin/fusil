@@ -73,9 +73,9 @@ class Fuzzer(Application):
             "introspecting it in a SUBPROCESS running the target interpreter (--python), instead "
             "of importing it in the runner. So the runner venv need not have the target extension "
             "installed -- useful for FT/debug CPython builds with no wheels, or a target that "
-            "differs from the runner. Pair with an explicit --modules/--modules-file (which bypass "
-            "the runner-side package walk); --packages enumeration in the target is a follow-up. "
-            "Default: False (import + introspect in the runner).",
+            "differs from the runner. --packages enumeration also runs in the target subprocess "
+            "under this flag, so neither member discovery nor package walking imports the extension "
+            "in the runner. Default: False (import + introspect in the runner).",
             action="store_true",
             dest="discover_in_target",
             default=False,
