@@ -814,6 +814,72 @@ class TestTerminate(unittest.TestCase):
         killpg.assert_called_once_with(321, create.SIGKILL)
 
 
+# =========================================================================== grace-drain
+@unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
+class TestGraceDrain(unittest.TestCase):
+    def test_crash_drain_stored_from_options_in_seconds(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(crash_drain_ms=250))
+        self.assertEqual(agent.crash_drain, 0.25)
+
+    def test_disabled_by_default(self):
+        agent, _ = _make(arguments=["python"], name="p")  # no crash_drain_ms -> 0
+        self.assertEqual(agent.crash_drain, 0.0)
+        agent.process = _FakePopen(pid=7, poll_status=None)
+        agent._drained = False
+        agent._graceDrain = lambda: setattr(agent, "_drained", True)
+        agent._terminate = lambda: None
+        agent.waitExit = lambda: None
+        with patch.object(create, "killpg"), patch.object(create, "getpgrp", return_value=1):
+            agent.terminate()
+        self.assertFalse(agent._drained)  # crash_drain == 0 -> no drain, immediate kill path
+
+    def test_skipped_on_timeout(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(crash_drain_ms=300))
+        agent.timeout_reached = True  # a hang, not a crash: don't waste the window
+        agent.process = _FakePopen(pid=7, poll_status=None)
+        agent._drained = False
+        agent._graceDrain = lambda: setattr(agent, "_drained", True)
+        agent._terminate = lambda: None
+        agent.waitExit = lambda: None
+        with patch.object(create, "killpg"), patch.object(create, "getpgrp", return_value=1):
+            agent.terminate()
+        self.assertFalse(agent._drained)
+
+    def test_captures_self_exit_without_killing(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(crash_drain_ms=300))
+        # poll(): terminate's outer check -> None; then the drain sees None, then -11 (self-exit).
+        statuses = iter([None, None, -11])
+        agent.process = _FakePopen(pid=7)
+        agent.process.poll = lambda: next(statuses)
+        agent._killed = False
+        agent._terminate = lambda: setattr(agent, "_killed", True)
+        agent.waitExit = lambda: None
+        with (
+            patch.object(create, "sleep", lambda _s: None),
+            patch.object(create, "killpg"),
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.terminate()
+        self.assertFalse(agent._killed)  # exited on its own during the drain -> no SIGKILL
+        self.assertEqual(agent.status, -11)
+
+    def test_forces_kill_if_never_exits(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(crash_drain_ms=300))
+        agent.process = _FakePopen(pid=7, poll_status=None)  # never self-exits (soft crash / hang)
+        agent._killed = False
+        agent._terminate = lambda: setattr(agent, "_killed", True)
+        agent.waitExit = lambda: None
+        # time(): deadline = 0.0 + 0.3; first loop check 0.0 < 0.3 (drain once), second 0.5 >= 0.3 (give up).
+        with (
+            patch.object(create, "time", side_effect=[0.0, 0.0, 0.5]),
+            patch.object(create, "sleep", lambda _s: None),
+            patch.object(create, "killpg"),
+            patch.object(create, "getpgrp", return_value=1),
+        ):
+            agent.terminate()
+        self.assertTrue(agent._killed)  # still alive after the window -> SIGKILL as before
+
+
 # =========================================================================== waitExit
 @unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
 class TestWaitExit(unittest.TestCase):

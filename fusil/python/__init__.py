@@ -126,6 +126,17 @@ class Fuzzer(Application):
             default=TIMEOUT,
         )
         running_options.add_option(
+            "--crash-drain-ms",
+            help="On a detected crash, wait up to N milliseconds for the child to self-terminate "
+            "(ASan/UBSan abort, segfault, or finish printing a Rust/Python backtrace) before "
+            "SIGKILLing it, so the kept stdout (the child's stderr is merged in) is not truncated "
+            "mid-backtrace/SUMMARY and can be triaged without re-running. 0 = kill immediately "
+            "(default). Bounded: a soft crash or hang that never self-exits just costs N ms. "
+            "Recommended ~300 for sanitizer or panic-heavy targets.",
+            type="int",
+            default=0,
+        )
+        running_options.add_option(
             "--python",
             help="Python executable program path (default: %s)" % PYTHON,
             type="str",

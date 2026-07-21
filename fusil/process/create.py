@@ -95,6 +95,11 @@ class CreateProcess(ProjectAgent):
         self.popen_args["close_fds"] = True
         self.stdin = stdin
         self.options = options
+        # Grace-drain window (seconds): on a detected crash, how long to let the child
+        # self-terminate (ASan/UBSan abort, segfault, or finish printing a Rust/Python backtrace)
+        # before we SIGKILL it, so the kept stdout -- which the child's stderr is merged into --
+        # isn't truncated mid-report. 0 disables it (kill immediately, the historical behaviour).
+        self.crash_drain = max(0.0, (getattr(options, "crash_drain_ms", 0) or 0) / 1000.0)
 
     def init(self):
         self.score = None
@@ -330,7 +335,16 @@ class CreateProcess(ProjectAgent):
         if not self.process:
             return
         if self.poll() is None:
-            # Kill the process and wait for its exit status
+            # Grace-drain: a crash is usually self-terminating (ASan/UBSan abort_on_error, a
+            # segfault, or a Rust/Python backtrace followed by exit). SIGKILLing on the first
+            # crash-word we read from stdout catches the child mid-report, so the kept stdout
+            # (its stderr is merged in) is truncated before the backtrace/SUMMARY. Give it a
+            # bounded window to finish and exit on its own first. Skipped for timeouts (the
+            # child is hung, not crashing) and when disabled (crash_drain == 0).
+            if self.crash_drain and not self.timeout_reached:
+                self._graceDrain()
+        if self.poll() is None:
+            # Still alive after the drain (or drain disabled): kill it and reap.
             self.warning("Terminate process %s" % self.process.pid)
             self._terminate()
             self.waitExit()
@@ -342,6 +356,23 @@ class CreateProcess(ProjectAgent):
         # atexit handlers of a *clean* interpreter exit, so a crashed/SIGKILLed child strands
         # them. They are then reparented to init and survive for the whole run.
         self.reapProcessGroup()
+
+    def _graceDrain(self):
+        """Wait up to ``crash_drain`` seconds for a self-terminating crash to exit on its own.
+
+        Polls the child; the moment it exits (``poll()`` returns a status) the full report has
+        been flushed to the stdout file and we return without killing it. Bounded: a soft crash
+        (a caught ``PanicException`` whose process keeps running) or a hang never self-exits, so
+        the window elapses and the caller falls through to the normal SIGKILL -- an added cost of
+        at most ``crash_drain`` seconds for those.
+        """
+        deadline = time() + self.crash_drain
+        while time() < deadline:
+            if self.poll() is not None:
+                self.info("Crash self-terminated within grace-drain window; full report captured")
+                return
+            sleep(0.010)
+        self.info("Grace-drain window elapsed; child still alive, forcing kill")
 
     def reapProcessGroup(self):
         """SIGKILL any descendants of the child that outlived it (see terminate())."""
