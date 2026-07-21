@@ -616,9 +616,19 @@ the worker's `_cell` is guarded against an empty iterator pool. The manifest ref
 (`shared_objects_only`, `iterators: []`, `shared_args: []`, ops without f/i; human line
 `ops=… objonly`). Off by default → normal runs unchanged. Pairs with a TSan **suppressions**
 file for the residual CPython noise that isn't from shared state — the interning/immortalize
-race from concurrent `setattr` (cpython#128137/#113956) and concurrent generator resume
-(cpython#120321) — for which the `cpython-tsan-findings` gateway carries `race:` entries.
-Tests: `test_tsan_generation.py` (`test_shared_objects_only_*`).
+race from concurrent `setattr` (cpython#128137/#113956) — for which the `cpython-tsan-findings`
+gateway carries `race:` entries. Tests: `test_tsan_generation.py` (`test_shared_objects_only_*`).
+
+**op (h) skips generators/coroutines.** The guarded `_tsan_iters` build drops any factory whose
+iterator is a `GeneratorType`/`CoroutineType`/`AsyncGeneratorType`: advancing a shared generator
+from many threads only ever reproduces CPython's known concurrent-generator-resume crash
+(**cpython#120321** — the `WITHIN_STACK_BOUNDS`/`frame->stackpointer`/`genobject.c` assert cascade,
+a SIGABRT/SIGSEGV, not a TSan race stanza, so the gateway can't suppress it), which dominated
+extension hunts (`fusil-tokenizers_07`/`_08`) and buried real extension-layer finds like a PyO3
+`PyDict::iter` "dictionary changed size during iteration" panic under concurrent `setattr`. All
+other iterator kinds (builtin cursors, ext-object `tp_iternext`) are still shared. Unconditional
+(the builtin set has no generators, so the CPython campaign's cursor-race coverage is unaffected);
+`test_generator_iterators_skipped`.
 
 ## 10. Testing
 
