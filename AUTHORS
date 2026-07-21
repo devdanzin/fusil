@@ -1,14 +1,11 @@
-Main developers
-===============
+# Authors
 
-Victor Stinner aka haypo <victor.stinner AT haypocalc.com>
+## Main developers
 
-Contributor
-===========
+- Victor Stinner aka @vstinner (creator)
+- Daniel Diniz aka @devdanzin (maintainer)
 
-Geoffroy Couprie aka geal <geal AT videolan.org>
+## Contributors
 
-Others
-======
-
-Daniel Diniz aka @devdanzin
+- Geoffroy Couprie aka geal <geal AT videolan.org>
+- Xiaowei Lu aka @weixlu
