@@ -85,10 +85,12 @@ Entry point: `fuzzers/fusil-python-threaded` → `fusil.python.Fuzzer`.
     by name in the target regardless, so nothing else changes). The subprocess emits *raw*
     metadata; all fusil policy (blacklists, `--test-private`, `--fuzz-exceptions`, arity name-table
     overrides) stays in the parent, so the live and subprocess paths stay in parity (guarded by
-    `tests/python/test_target_introspect.py`). Pair with an explicit `--modules`/`--modules-file`
-    (which bypass the runner-side package walk); moving `--packages` enumeration into the target is
-    a follow-up. **Limitation:** a plugin `add_class_handler` that introspects the *live* class
-    can't run when the extension isn't in the runner (see `doc/plugins.md`).
+    `tests/python/test_target_introspect.py`). `--packages` **enumeration** also runs in the target
+    subprocess under this flag (`target_introspect.enumerate_packages` walks the packages there; the
+    parent applies the shared `ListAllModules.keep_walked_module` filter), so neither member
+    discovery nor package walking imports the extension in the runner. **Limitation:** a plugin
+    `add_class_handler` that introspects the *live* class can't run when the extension isn't in the
+    runner (see `doc/plugins.md`).
 - **`WritePythonCode`** (`write_python_code.py`, the largest/most important file): generates the
   test script — imports the target, then emits randomized function calls, class instantiations,
   method calls, objects, and thread/async wrappers. Arguments come from **`ArgumentGenerator`**
