@@ -35,6 +35,9 @@ class ProjectDirectory(ProjectAgent, Directory):
                 self.warning("Fusil error: keep the directory %s" % self.directory)
             return True
 
+        if application and application.options.only_generate:
+            return True
+
         # Not session executed: remove the directory
         if (
             project

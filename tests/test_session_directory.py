@@ -64,6 +64,7 @@ def _keep_dir(
     exitcode=0,
     keep_sessions=False,
     keep_generated=False,
+    only_generate=False,
     policy="absent",
 ):
     """A bare SessionDirectory wired for checkKeepDirectory().
@@ -86,7 +87,11 @@ def _keep_dir(
 
     sd.isEmpty = isEmpty
     sd.session = lambda: SimpleNamespace(isSuccess=lambda: success)
-    options = SimpleNamespace(keep_sessions=keep_sessions, keep_generated_files=keep_generated)
+    options = SimpleNamespace(
+        keep_sessions=keep_sessions,
+        keep_generated_files=keep_generated,
+        only_generate=only_generate,
+    )
     application = SimpleNamespace(exitcode=exitcode, options=options)
     if policy != "absent":
         application.session_keep_policy = policy
@@ -134,6 +139,10 @@ class TestCheckKeepDirectory(unittest.TestCase):
     def test_nonempty_no_flags_dropped(self):
         sd = _keep_dir(empty=False, success=False)
         self.assertFalse(sd.checkKeepDirectory())
+
+    def test_only_generate_keeps_empty_dir(self):
+        sd = _keep_dir(empty=True, success=False, only_generate=True)
+        self.assertTrue(sd.checkKeepDirectory())
 
     def test_keep_generated_with_nongenerated_files_kept(self):
         # keep_generated_files keeps the dir when isEmpty(ignore_generated=True) is False,

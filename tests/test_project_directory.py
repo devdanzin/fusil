@@ -28,6 +28,7 @@ def _bare_pd(
     exitcode=0,
     session_executed=1,
     keep_sessions=False,
+    only_generate=False,
     empty_ignore_generated=True,
 ):
     """A ProjectDirectory with only the state keepDirectory()/rmtree()/destroy() touch."""
@@ -39,7 +40,7 @@ def _bare_pd(
     pd.error = lambda *a, **k: None
     # isEmpty(True) is the only call keepDirectory makes; True == "nothing worth keeping".
     pd.isEmpty = lambda ignore_generated=False: empty_ignore_generated
-    options = SimpleNamespace(keep_sessions=keep_sessions)
+    options = SimpleNamespace(keep_sessions=keep_sessions, only_generate=only_generate)
     application = SimpleNamespace(exitcode=exitcode, options=options)
     pd.application = lambda: application
     project = SimpleNamespace(session_executed=session_executed)
@@ -80,6 +81,10 @@ class TestKeepDirectory(unittest.TestCase):
     def test_empty_dir_dropped(self):
         pd = _bare_pd(session_executed=1, empty_ignore_generated=True)
         self.assertFalse(pd.keepDirectory())
+
+    def test_only_generate_keeps_run_dir(self):
+        pd = _bare_pd(session_executed=0, empty_ignore_generated=True, only_generate=True)
+        self.assertTrue(pd.keepDirectory())
 
     def test_verbose_false_suppresses_logging(self):
         # destroy() calls keepDirectory(verbose=False); make sure that path still decides.
