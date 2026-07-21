@@ -314,6 +314,19 @@ def get_arg_number(func, func_name, min_arg):
     except KeyError:
         pass
 
+    # Metadata proxy (discovery ran in the target subprocess, no live object): the arity was
+    # already computed there (argspec branch) as `_fusil_arity`, or is unknown (`None`, e.g. a C
+    # builtin) -> fall to the same doc/default the live branch below uses.
+    if getattr(func, "_fusil_is_meta", False):
+        ar = getattr(func, "_fusil_arity", None)
+        if ar:
+            return ar[0], ar[1]
+        if PARSE_PROTOTYPE:
+            doc_args = parseDocumentation(getattr(func, "_fusil_doc", None), MAX_VAR_ARG)
+            if doc_args:
+                return doc_args
+        return min_arg, MAX_ARG
+
     try:
         argspec = inspect.getfullargspec(func)
         has_self = 1 if "self" in argspec.args or "cls" in argspec.args else 0
@@ -336,6 +349,10 @@ def class_arg_number(class_name, cls):
     if class_name in CLASS_NB_ARG:
         min_args, max_args = CLASS_NB_ARG[class_name]
         nb_arg = randint(min_args, max_args)
+    elif getattr(cls, "_fusil_is_meta", False):
+        # Metadata proxy: ctor arity computed in the target subprocess (or unknown -> 0..3).
+        ca = getattr(cls, "_fusil_ctor_arity", None)
+        nb_arg = randint(ca[0], ca[1]) if ca else randint(0, 3)
     else:
         try:
             argspec = inspect.getfullargspec(cls.__init__)

@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,9 @@ def _bare_source(modules_list):
     """A PythonSource with just the state on_session_start touches (no MAS/project)."""
     ps = PythonSource.__new__(PythonSource)
     ps.source_output_path = "unused.py"  # truthy -> skip session().createFilename()
+    # on_session_start reads options.discover_in_target to choose runner-import vs target-subprocess
+    # discovery; default off keeps this exercising the runner-import (loadModule) path.
+    ps.options = types.SimpleNamespace(discover_in_target=False)
     ps.modules_list = list(modules_list)
     ps.sent = []
     ps.debug = lambda *a, **k: None

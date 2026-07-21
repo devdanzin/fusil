@@ -90,6 +90,14 @@ by" column is where the core reads it back, so you can see exactly what each hoo
 | `add_definitions_provider(func)` | `func(config, module) -> str \| None`: **source code** injected near the top of every generated script (setup for tricky objects, helper funcs, imports). | `WritePythonCode` (definitions block) |
 | `add_instance_dispatcher(func)` | `func(writer, prefix, target_expr, class_hint, depth) -> int \| None`: emit `elif isinstance(target, MyType): …` fuzzing branches for a live instance. Return the indent level to restore (to wrap the generic fallback in `else:`), or `None`. | `WritePythonCode._dispatch_fuzz_on_instance` |
 | `add_class_handler(func)` | `func(writer, class_name, class_type, instance_var, prefix) -> bool`: emit specialized instantiation for a class the generic `callFunc` can't build; return `True` to claim it. | `WritePythonCode._fuzz_one_class` |
+
+> **`--discover-in-target` caveat for `add_class_handler`.** Under `--discover-in-target` the runner
+> may not have imported the extension, so `class_type` is a metadata `_MetaProxy` (name + bases +
+> method names + ctor arity), not the live class. A handler that only reads those still works; one
+> that introspects the *live* class (attributes, `__mro__` beyond names, calling it) does not.
+> Such plugins need the extension in the runner venv (i.e. don't use `--discover-in-target`), or a
+> future metadata-based `class_meta` handler contract. `add_instance_dispatcher` is unaffected (its
+> arguments are already source-expression strings, never live objects).
 | `add_fuzzing_mode(name, activation_check, setup_script)` | A whole alternative main-logic generator. `activation_check(config) -> bool`; `setup_script(writer)` emits the entire fuzzing body. | `WritePythonCode` (`get_active_mode`) |
 | `add_blacklist_entry(kind, pattern, pattern_type="exact")` | Skip a discovered name. `kind` ∈ `module`/`class`/`function`/`object`/`method`; `pattern_type` `exact` or `glob`. | name filtering in `WritePythonCode` |
 | `add_whitelist_entry(kind, pattern, pattern_type="exact")` | Keep a name normally skipped (honoured for `method`, e.g. `__del__`). | method filtering in `WritePythonCode` |
