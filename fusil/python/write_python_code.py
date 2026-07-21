@@ -1167,6 +1167,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "import gc as _tsan_gc")
         self.write(0, "import weakref as _tsan_weakref")
         self.write(0, "import operator as _tsan_operator")
+        self.write(0, "import types as _tsan_types")
         self.write_print_to_stderr(0, '"[TSAN] entering concurrency-stress region"')
         # Emit provenance FIRST (before the region runs) so it is already in the crash dir's
         # captured output no matter where a later race/abort stops the child. Human line + a
@@ -1376,9 +1377,21 @@ class WritePythonCode(WriteCode):
             """
             _tsan_iters = []
             _tsan_iter_ok = []
+            # Skip GENERATORS / coroutines: op (h) advancing one from many threads only ever hits
+            # CPython's known concurrent-generator-resume crash (gh-120321), not an extension bug,
+            # so sharing them just floods an extension hunt with that abort. Every other iterator
+            # kind (builtin cursors, ext-object tp_iternext) is still shared.
+            _TSAN_SKIP_ITER = (
+                _tsan_types.GeneratorType,
+                _tsan_types.CoroutineType,
+                _tsan_types.AsyncGeneratorType,
+            )
             for _f in _tsan_iter_factories:
                 try:
-                    _tsan_iters.append([_f()])
+                    _it0 = _f()
+                    if isinstance(_it0, _TSAN_SKIP_ITER):
+                        continue
+                    _tsan_iters.append([_it0])
                     _tsan_iter_ok.append(_f)
                 except Exception:
                     pass

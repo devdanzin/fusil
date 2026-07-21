@@ -151,12 +151,23 @@ class TestTSanGeneration(unittest.TestCase):
         # repr() reading its state -- the class behind cpython#153928/#154013/#153981.
         src = _generate_tsan()
         self.assertIn("_tsan_iter_factories", src)
-        self.assertIn("_tsan_iters.append([_f()])", src)  # guarded, length-aligned build (Slice C)
+        self.assertIn("_tsan_iters.append([_it0])", src)  # guarded, length-aligned build (Slice C)
         self.assertIn("next(_it)", src)  # concurrent cursor advance on the shared iterator
         self.assertIn("repr(_it)", src)  # state read racing the concurrent next()
         # covers the builtin iterator family + the stdlib C iterators from the linked issues
         self.assertIn("iter_unpack", src)  # struct (cpython#154013)
         self.assertIn("_tsan_itertools.count(10 ** 18, 2)", src)  # count slow mode (cpython#153981)
+
+    def test_generator_iterators_skipped(self):
+        # op (h) must NOT share generators/coroutines: advancing one from many threads only
+        # reproduces the known CPython concurrent-generator-resume crash (gh-120321), drowning an
+        # extension hunt. The guarded build drops them by type.
+        src = _generate_tsan()
+        self.assertIn("import types as _tsan_types", src)
+        self.assertIn("_TSAN_SKIP_ITER", src)
+        self.assertIn("_tsan_types.GeneratorType", src)
+        self.assertIn("_tsan_types.CoroutineType", src)
+        self.assertIn("isinstance(_it0, _TSAN_SKIP_ITER)", src)
 
     def test_read_while_mutate_op_emitted(self):
         # (i) iterate / copy / sort the shared container while siblings mutate it in (f).
