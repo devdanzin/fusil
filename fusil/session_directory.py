@@ -58,6 +58,10 @@ class SessionDirectory(SessionAgent, Directory):
     def checkKeepDirectory(self):
         session = self.session()
         application = self.application()
+
+        if application.options.only_generate:
+            return True
+
         if not self.isEmpty(False):
             if session.isSuccess():
                 # Optional keep-policy (e.g. OOM in-loop dedupe): may relabel the

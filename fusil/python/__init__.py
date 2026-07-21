@@ -188,7 +188,7 @@ class Fuzzer(Application):
         )
         running_options.add_option(
             "--only-generate",
-            help="Do not run scripts, only generate them (default: False)",
+            help="Do not run scripts, only generate them and keep its output (default: False)",
             action="store_true",
             default=False,
         )

@@ -1,6 +1,6 @@
 from grp import getgrgid, getgrnam
 from optparse import OptionGroup, OptionParser
-from os import getgid, getuid
+from os import getgid, getuid, path
 from pwd import getpwnam, getpwuid
 from sys import exit, stderr, stdout
 
@@ -417,8 +417,10 @@ class Application(ApplicationAgent):
 
         if not keep_log:
             self.logger.unlinkFile()
-        elif self.logger.filename:
+        elif self.logger.filename and path.exists(self.logger.filename):
             self.error("Fusil log written into %s" % relativePath(self.logger.filename))
+            if self.options.only_generate:
+                self.error("Generated source written into %s" % relativePath(self.source.filename))
 
         self.mta = None
         self.univers = None
