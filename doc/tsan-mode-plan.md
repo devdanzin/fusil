@@ -630,6 +630,33 @@ other iterator kinds (builtin cursors, ext-object `tp_iternext`) are still share
 (the builtin set has no generators, so the CPython campaign's cursor-race coverage is unaffected);
 `test_generator_iterators_skipped`.
 
+## Phase 7 as-built: shared-type mutation (`--tsan-mutate-types`, op l)
+
+**Motivation.** The op-mix through Phase 6 is *object-state / container / iterator*-centric: op
+(d) churns a shared **instance**'s `__dict__`, ops f/i/h race shared containers and iterators. It
+never mutates a **type object**, so the whole type-system FT surface — the `tp_version_tag`
+method-cache, `_PyType_Lookup`, and `tp_mro` recomputation — is untouched. That surface is exactly
+the "per-object mutable C state, no critical section" shape the iterator family kept yielding on,
+and it's where the magalu `--tsan` primary config had converged (fleet_tsan03–05 = 0 new).
+
+**op (l)** (opt-in, `--tsan-mutate-types`, `store_true`, default off; `tsan_options` group). A
+fresh **generic** shared class `_TsanSharedType(_TsanTypeBaseA)` (a couple of methods, a class
+attribute, a swappable base) + one shared instance are emitted always (inert under the
+`_MUTATE_TYPES` runtime gate, exactly like `_MUTATE_STATE`/op j). When on, the worker:
+- **writers** (`_role != 0`) `setattr`/`delattr` methods on the *class* (version-tag invalidation
+  via `type_modified`), reassign a class attribute, and periodically swap `__bases__` between two
+  layout-compatible bases (`tp_mro` recompute + propagation to the subclass);
+- **readers** (`_role != 1`) resolve+call those methods on the shared instance and run
+  `isinstance(inst, _TsanSharedType)` — the `_PyType_Lookup` method-cache read racing the writers'
+  invalidations.
+
+Generic (not the target's own class), so it works for every target and never corrupts the module
+under test. The manifest advertises it (`mutate_types`, `l:type-mutate` in `ops`, human line
+`ops=…+l`); default runs are unchanged (gate `False`). Tests: `test_tsan_generation.py`
+(`test_mutate_types_off_by_default` / `_op_emitted_when_enabled` / `_composes_with_mutate_state`).
+Distinct from generators (op h skip above → cpython#120321): type mutation is *not* already
+covered by the mix or the skip list, so it opens genuinely new surface.
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden

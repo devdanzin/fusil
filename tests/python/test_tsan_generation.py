@@ -63,6 +63,7 @@ def _make_tsan_options(
     weird_subclasses=False,
     mutate_state=False,
     shared_objects_only=False,
+    mutate_types=False,
 ):
     o = MagicMock()
     o.tsan = True
@@ -89,6 +90,7 @@ def _make_tsan_options(
     # a truthy attribute and turn the machinery on in every test.
     o.tsan_mutate_state = mutate_state
     o.tsan_shared_objects_only = shared_objects_only  # same auto-vivify caveat
+    o.tsan_mutate_types = mutate_types  # same auto-vivify caveat (op l, opt-in)
     return o
 
 
@@ -409,6 +411,43 @@ class TestTSanGeneration(unittest.TestCase):
         # the worker consults the curated mutators (op b) and properties (op j)
         self.assertIn('_mut["mutators"]', src)
         self.assertIn('_mut["properties"]', src)
+
+    def test_mutate_types_off_by_default(self):
+        # --tsan-mutate-types is opt-in: op (l) never runs by default (the _MUTATE_TYPES runtime
+        # gate is False), so the manifest advertises neither the op nor the flag.
+        src = _generate_tsan()
+        self.assertIn("_MUTATE_TYPES = False", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertFalse(manifest["mutate_types"])
+        self.assertNotIn("l:type-mutate", manifest["ops"])
+        self.assertIn("ops=a-i", src)  # human provenance line unchanged when off
+
+    def test_mutate_types_op_emitted_when_enabled(self):
+        # With --tsan-mutate-types the worker gains op (l): concurrent mutation of a shared TYPE
+        # (setattr/delattr methods + __bases__ swap) vs method-resolution/isinstance readers.
+        src = _generate_tsan(mutate_types=True)
+        ast.parse(src)  # still valid Python
+        self.assertIn("_MUTATE_TYPES = True", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertTrue(manifest["mutate_types"])
+        self.assertIn("l:type-mutate", manifest["ops"])
+        self.assertIn("ops=a-i+l", src)  # human provenance line advertises op l
+        # the shared generic type + instance are emitted, and the worker mutates the CLASS while
+        # readers resolve methods / run isinstance on the shared instance.
+        self.assertIn("class _TsanSharedType(_TsanTypeBaseA):", src)
+        self.assertIn("_tsan_type_inst = _TsanSharedType()", src)
+        self.assertIn("setattr(_TsanSharedType,", src)  # method churn -> version-tag invalidation
+        self.assertIn("_TsanSharedType.__bases__ = (", src)  # MRO recompute race
+        self.assertIn("isinstance(_tsan_type_inst, _TsanSharedType)", src)  # reader-side resolution
+
+    def test_mutate_types_composes_with_mutate_state(self):
+        # Both opt-in mutation ops together: provenance advertises a-j+l and both ops are present.
+        src = _generate_tsan(mutate_state=True, mutate_types=True)
+        ast.parse(src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertIn("j:prop-reassign", manifest["ops"])
+        self.assertIn("l:type-mutate", manifest["ops"])
+        self.assertIn("ops=a-j+l", src)
 
     def test_shared_objects_only_off_by_default(self):
         # Default: the generic builtin iterators (op h) and shared-container ops (f/i) are present.
