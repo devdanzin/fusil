@@ -869,7 +869,31 @@ class Fuzzer(Application):
             halt = "0" if self.options.tsan_no_halt else "1"
             tsan_opts = ["halt_on_error=%s" % halt, "symbolize=1", "exitcode=66", "history_size=4"]
             if self.options.tsan_suppressions:
-                tsan_opts.append("suppressions=%s" % self.options.tsan_suppressions)
+                # TSan's parser rejects the WHOLE file if any line is not `type:pattern`, but a
+                # fusil suppressions file mixes TSan-native rules with post-hoc-only signature
+                # regexes (which the --tsan-dedup-catalog deduper reads from the ORIGINAL file).
+                # Hand TSan only its parseable subset, written to a run-local file; if there is no
+                # TSan-native rule, hand it no suppressions file at all (post-hoc still prunes).
+                import os
+
+                from fusil.python.tsan_dedup import tsan_native_suppressions
+
+                with open(self.options.tsan_suppressions) as _sfh:
+                    _native = tsan_native_suppressions(_sfh.read())
+                if _native:
+                    _native_path = os.path.join(
+                        project.directory.directory, "tsan_suppressions_native.txt"
+                    )
+                    with open(_native_path, "w") as _sfh:
+                        _sfh.write(_native)
+                    tsan_opts.append("suppressions=%s" % _native_path)
+                else:
+                    self.warning(
+                        "TSan: --tsan-suppressions %s has no TSan-native (race:/called_from_lib:/"
+                        "...) rules; its signature-regex rules are applied post-hoc by "
+                        "--tsan-dedup-catalog only, not fed to TSAN_OPTIONS (which would reject them)."
+                        % self.options.tsan_suppressions
+                    )
             process.env.set("TSAN_OPTIONS", ":".join(tsan_opts))
             process.env.set("PYTHON_GIL", "0")
             # Clear DEBUGINFOD_URLS so llvm-symbolizer resolves frames from the target's own (full)

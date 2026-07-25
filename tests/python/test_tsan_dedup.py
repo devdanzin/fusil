@@ -6,6 +6,7 @@ Mirrors test_oom_dedup.
 """
 
 import os
+import re
 import tempfile
 import unittest
 
@@ -622,6 +623,47 @@ class TestReadStdout(unittest.TestCase):
         with os.fdopen(fd, "w") as fh:
             fh.write(REPORT_TWO_SITES)
         self.assertIn("data race", tsan_dedup.read_crash_stdout(path))
+
+
+class TestTsanNativeSuppressions(unittest.TestCase):
+    """tsan_native_suppressions() extracts only the lines TSan's own parser accepts, so a fusil
+    suppressions file (which mixes TSan-native rules with post-hoc-only signature regexes) can be
+    fed to TSAN_OPTIONS without the 'failed to parse suppressions' error."""
+
+    def _rule_lines(self, text):
+        return [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+    def test_signature_regex_lines_are_dropped(self):
+        src = (
+            "# comment\n"
+            "Modules/_localemodule.c:locale_decode_monetary\n"
+            "libc\\.so\n"
+            "^Objects/typeobject.c:tp_new_wrapper | Objects/typeobject.c:tp_new_wrapper$\n"
+            "called_from_lib:libcrypto.so\n"
+        )
+        out = tsan_dedup.tsan_native_suppressions(src)
+        self.assertEqual(self._rule_lines(out), ["called_from_lib:libcrypto.so"])
+        self.assertIn("# comment", out)  # comments kept
+
+    def test_all_native_file_is_kept_verbatim_rules(self):
+        src = "race:count_repr\nrace_top:foo\ncalled_from_lib:libssl.so\ndeadlock:bar\n"
+        out = tsan_dedup.tsan_native_suppressions(src)
+        self.assertEqual(
+            self._rule_lines(out),
+            ["race:count_repr", "race_top:foo", "called_from_lib:libssl.so", "deadlock:bar"],
+        )
+
+    def test_no_native_rule_returns_empty(self):
+        # a purely post-hoc (signature-regex) file -> "" so the caller hands TSan no file at all
+        src = "# only signature regexes\nlibc\\.so\nModules/foo.c:bar | Modules/foo.c:baz\n"
+        self.assertEqual(tsan_dedup.tsan_native_suppressions(src), "")
+
+    def test_output_is_tsan_parseable(self):
+        src = "libc\\.so\nrace:foo\ncalled_from_lib:libcrypto.so\n"
+        out = tsan_dedup.tsan_native_suppressions(src)
+        valid = re.compile(r"^(race|race_top|mutex|thread|signal|called_from_lib|deadlock):\S")
+        for ln in self._rule_lines(out):
+            self.assertRegex(ln.strip(), valid)
 
 
 if __name__ == "__main__":

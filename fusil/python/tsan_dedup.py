@@ -510,6 +510,35 @@ class Suppressor:
         return False
 
 
+# TSan's OWN suppression parser (TSAN_OPTIONS=suppressions=) rejects the WHOLE file with "failed
+# to parse suppressions" if any non-comment line is not `type:pattern` for a supported type. fusil
+# suppressions files also carry signature-regex lines (`file:func | file:func`, `^A | A$`,
+# `libc\.so`) that ONLY the post-hoc Suppressor above understands -- handing those to TSan is what
+# breaks it. This keeps just the TSan-native subset for TSAN_OPTIONS; the post-hoc deduper keeps
+# reading the ORIGINAL, full file (via Suppressor.from_file).
+_TSAN_NATIVE_SUPP = re.compile(
+    r"^\s*(?:race|race_top|mutex|thread|signal|called_from_lib|deadlock)\s*:"
+)
+
+
+def tsan_native_suppressions(text):
+    """Return the text of only the lines TSan itself can parse -- its supported ``type:pattern``
+    rules plus comments and blank lines -- from a fusil suppressions file that mixes those with
+    post-hoc-only signature regexes. Returns ``""`` when the file has NO TSan-native rule at all,
+    signalling the caller to hand TSan no suppressions file (the signature-regex rules are still
+    applied post-hoc by ``--tsan-dedup-catalog``)."""
+    kept = []
+    has_rule = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if _TSAN_NATIVE_SUPP.match(line):
+            kept.append(line)
+            has_rule = True
+        elif not stripped or stripped.startswith("#"):
+            kept.append(line)
+    return ("\n".join(kept) + "\n") if has_rule else ""
+
+
 # ---- bounded stdout reader (shared contract with oom_dedup) ----
 _STDOUT_HEAD = int(os.environ.get("TSAN_STDOUT_HEAD", 256 * 1024))
 _STDOUT_TAIL = int(os.environ.get("TSAN_STDOUT_TAIL", 1024 * 1024))
