@@ -358,6 +358,52 @@ class TypeFlipIterator:
         return {"str": "x", "none": None, "float": 1.5, "obj": object()}[self._flip]
 
 
+# --- Lying-equality bombs: hashable + storable, but == / identity lie -------------------------
+#
+# The stateful/lying bombs above lie about size/type; these lie about EQUALITY. They are cheap
+# to hash and store (a stable, colliding hash) so a C container accepts them as a key/member,
+# but their __eq__ then contradicts identity -- claiming equal to a value they are not, or giving
+# a different answer on each call. C code that assumes `a == b` implies interchangeability, caches
+# a slot after one comparison, or maintains its own hash table (a C-extension mapping) can probe
+# the wrong bucket, double-store, or read a stale entry. On core dict/set this desyncs values;
+# in a less-hardened C-extension container it can corrupt the table.
+
+
+class LyingEq:
+    """Hashes like the int ``1`` (a deliberate collision) and claims __eq__ equality with 1 and
+    every small int, and __index__/__int__ return 1 -- yet it is a distinct object that is not 1.
+    Used as a dict key / set member / sequence index it desyncs "equal-but-not-identical": stored
+    and found under hash(1), but not actually interchangeable with the ints it claims to equal."""
+
+    def __eq__(self, other):
+        return other == 1 or (isinstance(other, int) and -5 <= other <= 256)
+
+    def __hash__(self):
+        return hash(1)
+
+    def __index__(self):
+        return 1
+
+    __int__ = __index__
+
+
+class ShiftyEq:
+    """__eq__ flips its answer every few calls, so a single C routine that compares this object
+    more than once (insert-then-lookup in a hash table, a membership scan, a sort) sees the
+    equality relation change underneath it. __hash__ stays constant so it remains storable."""
+
+    def __init__(self):
+        self._calls = 0
+        self._period = _bomb_random.randint(2, 4)
+
+    def __eq__(self, other):
+        self._calls += 1
+        return (self._calls // self._period) % 2 == 0
+
+    def __hash__(self):
+        return 0
+
+
 # --- SuperBomb: every protocol slot is a landmine ----------------------------------------
 #
 # Spray-and-pray. A metaclass installs a raising method for a broad set of dunders; each one
@@ -638,6 +684,10 @@ BOMB_CLASS_NAMES = [
     "GrowingLen",
     "MutatingHash",
     "TypeFlipIterator",
+    # Lying-equality bombs: hashable + storable, but __eq__ / identity lie (claim equal to a
+    # value they are not, or flip the answer on each call) -- desyncs C hash tables.
+    "LyingEq",
+    "ShiftyEq",
 ]
 
 # Names the argument generator passes *as the class object itself* (not instantiated) -- the

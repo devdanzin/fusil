@@ -336,5 +336,37 @@ def _all_ints_then_str():
     yield "x"
 
 
+class TestLyingEqualityBombs(unittest.TestCase):
+    """The lying-equality family: hashable + storable, but __eq__ / identity contradict it."""
+
+    def test_lying_eq_collides_and_lies_equal(self):
+        le = B.LyingEq()
+        self.assertEqual(hash(le), hash(1))  # deliberate hash collision with 1
+        self.assertTrue(le == 1)  # claims equality with 1 ...
+        self.assertTrue(le == 256)  # ... and with small ints
+        self.assertFalse(le == 999)  # but not arbitrary ints
+        self.assertEqual(le.__index__(), 1)  # index/int report 1 ...
+        self.assertIsNot(le, 1)  # ... yet it is not 1 (equal-but-not-identical desync)
+
+    def test_lying_eq_is_storable_as_key(self):
+        # cheap stable hash -> a container accepts it as a key/member without error
+        d = {B.LyingEq(): "v"}
+        self.assertEqual(len(d), 1)
+        s = {B.LyingEq()}
+        self.assertEqual(len(s), 1)
+
+    def test_shifty_eq_flips_across_calls(self):
+        se = B.ShiftyEq()
+        se._period, se._calls = 2, 0
+        answers = [se == 0 for _ in range(8)]
+        self.assertGreater(len(set(answers)), 1)  # the equality answer changes underneath a caller
+        # hash stays constant so it remains storable while __eq__ lies
+        self.assertEqual(hash(se), hash(B.ShiftyEq()))
+
+    def test_lying_equality_bombs_registered(self):
+        for name in ("LyingEq", "ShiftyEq"):
+            self.assertIn(name, B.BOMB_CLASS_NAMES)
+
+
 if __name__ == "__main__":
     unittest.main()
