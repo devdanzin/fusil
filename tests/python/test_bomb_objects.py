@@ -284,5 +284,57 @@ class TestReentrantMutationBombs(unittest.TestCase):
             self.assertIn(name, B.BOMB_CLASS_NAMES)
 
 
+class TestStatefulLyingBombs(unittest.TestCase):
+    """The stateful/lying family: a slot succeeds but returns an inconsistent answer across
+    calls (grows / changes / flips type), rather than raising or mutating a container."""
+
+    def test_growing_len_underreports_then_grows(self):
+        gl = B.GrowingLen()
+        first = len(gl)
+        second = len(gl)
+        self.assertGreater(second, first)  # first read small (presize), then grows
+        # __getitem__ / __iter__ yield up to the grown count (past a buffer sized from `first`)
+        self.assertEqual(len(list(iter(gl))), second)
+        self.assertEqual(gl[0], 0)
+        with self.assertRaises(IndexError):
+            gl[second]
+
+    def test_mutating_hash_stable_then_changes(self):
+        mh = B.MutatingHash()
+        mh._delay, mh._calls = 2, 0
+        h1 = hash(mh)  # call 1
+        h2 = hash(mh)  # call 2 -- still stable, so it can be stored as a key
+        self.assertEqual(h1, h2)
+        # after the delay the hash starts changing (violating hash-constancy while keyed)
+        later = {hash(mh) for _ in range(20)}
+        self.assertTrue(any(h != h1 for h in later))
+        # equal only to itself, so a dict lookup with a changed hash misses its own key
+        self.assertTrue(mh == mh)
+        self.assertFalse(mh == B.MutatingHash())
+
+    def test_type_flip_iterator_flips_off_first_type(self):
+        # a consistent run of ints, then an incompatible type mid-stream
+        seen = set()
+        for _ in range(50):
+            kinds = [type(v).__name__ for v in B.TypeFlipIterator()]
+            self.assertEqual(kinds[0], "int")  # starts consistent
+            seen.update(kinds)
+        self.assertTrue(seen - {"int"})  # at least one non-int flip type appears
+        # feeding a C reducer a run of ints then a str raises (caught by the harness), not hangs
+        with self.assertRaises(TypeError):
+            max(_all_ints_then_str())
+
+    def test_stateful_lying_bombs_registered(self):
+        for name in ("GrowingLen", "MutatingHash", "TypeFlipIterator"):
+            self.assertIn(name, B.BOMB_CLASS_NAMES)
+
+
+def _all_ints_then_str():
+    # a deterministic type-flip stream for the reducer assertion above
+    yield 1
+    yield 2
+    yield "x"
+
+
 if __name__ == "__main__":
     unittest.main()
