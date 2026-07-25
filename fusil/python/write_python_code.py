@@ -784,6 +784,13 @@ class WritePythonCode(WriteCode):
             self._write_new_uninit_region()
             return
 
+        # --sys-monitoring mode: stress the sys.monitoring (PEP 669) instrumentation / event-
+        # dispatch C machinery with HOSTILE callbacks (raise / DISABLE / junk / re-entrant
+        # set_events / register_callback / free_tool_id from inside a callback). Self-contained.
+        if getattr(self.options, "sys_monitoring", False):
+            self._write_monitoring_region()
+            return
+
         self._write_function_fuzzing_loop()
         self.emptyLine()
 
@@ -1709,6 +1716,237 @@ class WritePythonCode(WriteCode):
             """,
         )
         self.write_print_to_stderr(0, '"[TSAN] concurrency-stress region complete"')
+        self.emptyLine()
+
+    def _write_monitoring_region(self) -> None:
+        """Emit the --sys-monitoring PEP-669 hostile-callback region.
+
+        Acquire a monitoring tool id, register HOSTILE callbacks (that raise, return the DISABLE
+        sentinel or junk, and re-entrantly mutate the monitoring state -- set_events /
+        register_callback / free_tool_id / restart_events -- from INSIDE a callback) for a
+        rotating subset of events, instrument a generic function plus the target module's own
+        functions, and run them so the events fire mid-hostile-callback. Stresses the
+        instrumentation / event-dispatch C machinery (a fragile, lightly-fuzzed surface).
+        Everything is wrapped so one bad slot never stops the sweep; the run is bounded (small
+        targets, few rounds) so the per-line/per-instruction events can't hang.
+        """
+        self.emptyLine()
+        self.write(0, "# --- sys.monitoring hostile-callback region (--sys-monitoring) ---")
+        self.write(0, "import sys as _mon_sys")
+        self.write(0, "_MON_UNSAFE = frozenset(%r)" % (tuple(sorted(TSAN_UNSAFE_CALLS)),))
+        self.write_print_to_stderr(
+            0, '"[MONITORING] entering sys.monitoring hostile-callback region"'
+        )
+        self.write_block(
+            0,
+            """
+            _mon = getattr(_mon_sys, "monitoring", None)
+
+            def _mon_run():
+                _mon_calls = [0]
+                # Pick a tool id, freeing it first in case a previous region left it registered.
+                _TID = 3
+                for _cand in (3, 4, 2, 1, 0, 5):
+                    try:
+                        try:
+                            _mon.free_tool_id(_cand)
+                        except BaseException:
+                            pass
+                        _mon.use_tool_id(_cand, "fusil")
+                        _TID = _cand
+                        break
+                    except BaseException:
+                        continue
+
+                _EV = _mon.events
+
+                def _evbit(_name):
+                    return getattr(_EV, _name, 0)
+
+                # Events that may be set GLOBALLY (set_events); LINE/INSTRUCTION/BRANCH*/JUMP are
+                # local-only and raise if set globally -- that validation path is itself a target,
+                # so they still go through set_local_events (guarded) below.
+                _GLOBAL_NAMES = ("PY_START", "PY_RESUME", "PY_RETURN", "PY_YIELD", "CALL",
+                                 "RAISE", "EXCEPTION_HANDLED", "PY_UNWIND", "PY_THROW",
+                                 "STOP_ITERATION", "RERAISE", "C_RETURN", "C_RAISE")
+                _LOCAL_NAMES = _GLOBAL_NAMES + ("LINE", "INSTRUCTION", "JUMP", "BRANCH",
+                                                "BRANCH_LEFT", "BRANCH_RIGHT")
+                _global_evs = [(_n, _evbit(_n)) for _n in _GLOBAL_NAMES if _evbit(_n)]
+                _local_evs = [(_n, _evbit(_n)) for _n in _LOCAL_NAMES if _evbit(_n)]
+
+                # The hostile callback: mostly returns None (event fires normally), but every few
+                # calls it detonates -- raise, DISABLE, junk return, or a RE-ENTRANT mutation of
+                # the monitoring state while the C dispatcher is still mid-callback.
+                def _mon_cb(*_a):
+                    _mon_calls[0] += 1
+                    _r = _mon_calls[0] % 11
+                    if _r == 0:
+                        raise ValueError("fusil monitoring callback bomb")
+                    if _r == 1:
+                        return _mon.DISABLE
+                    if _r == 2:
+                        return "fusil junk return"
+                    if _r == 3:
+                        try:
+                            _mon.set_events(_TID, 0)
+                        except BaseException:
+                            pass
+                    elif _r == 4:
+                        try:
+                            _mon.register_callback(_TID, _evbit("LINE"), _mon_cb)
+                        except BaseException:
+                            pass
+                    elif _r == 5:
+                        # very hostile: drop + re-acquire the tool id from inside dispatch
+                        try:
+                            _mon.free_tool_id(_TID)
+                            _mon.use_tool_id(_TID, "fusil")
+                        except BaseException:
+                            pass
+                    elif _r == 6:
+                        try:
+                            _mon.restart_events()
+                        except BaseException:
+                            pass
+                    return None
+
+                # Instrumented targets: a generic loop that raises/handles (fires PY_START/RETURN/
+                # RAISE/EXCEPTION_HANDLED/LINE/...), plus the target module's own functions (real
+                # C-calling code -> CALL/C_RETURN/C_RAISE events).
+                def _mon_target(_n):
+                    _s = 0
+                    for _i in range(_n):
+                        _s += _i
+                        if _i % 4 == 0:
+                            try:
+                                raise ValueError(_i)
+                            except ValueError:
+                                pass
+                    return _s
+
+                _mon_targets = [_mon_target]
+                for _name in list(dir(fuzz_target_module)):
+                    if _name.startswith("_") or _name in _MON_UNSAFE:
+                        continue
+                    try:
+                        _obj = getattr(fuzz_target_module, _name)
+                    except BaseException:
+                        continue
+                    if callable(_obj) and hasattr(_obj, "__code__"):
+                        _mon_targets.append(_obj)
+                    if len(_mon_targets) >= 8:
+                        break
+
+                # A SECOND tool statically instrumenting the same code: multi-tool dispatch (two
+                # tools' callbacks + DISABLE state on one location) is the most fragile monitoring
+                # area, exercised here while tool _TID churns its events/callbacks below.
+                _TID2 = -1
+                for _cand in (4, 2, 1, 0, 5):
+                    if _cand == _TID:
+                        continue
+                    try:
+                        try:
+                            _mon.free_tool_id(_cand)
+                        except BaseException:
+                            pass
+                        _mon.use_tool_id(_cand, "fusil2")
+                        _TID2 = _cand
+                        break
+                    except BaseException:
+                        continue
+                if _TID2 >= 0:
+                    _gmask2 = 0
+                    for _n, _bit in _global_evs:
+                        _gmask2 |= _bit
+                    for _n, _bit in _local_evs:
+                        try:
+                            _mon.register_callback(_TID2, _bit, _mon_cb)
+                        except BaseException:
+                            pass
+                    try:
+                        _mon.set_events(_TID2, _gmask2)
+                    except BaseException:
+                        pass
+                    for _fn in _mon_targets:
+                        try:
+                            _mon.set_local_events(_TID2, _fn.__code__, _gmask2)
+                        except BaseException:
+                            pass
+
+                for _round in range(200):
+                    try:
+                        # (1) register the hostile callback for a rotating event subset
+                        for _n, _bit in _local_evs:
+                            if (_round + len(_n)) % 3:
+                                try:
+                                    _mon.register_callback(_TID, _bit, _mon_cb)
+                                except BaseException:
+                                    pass
+                        # (2) set a rotating GLOBAL event mask
+                        _gmask = 0
+                        for _n, _bit in _global_evs:
+                            if (_round + _bit) % 2:
+                                _gmask |= _bit
+                        try:
+                            _mon.set_events(_TID, _gmask)
+                        except BaseException:
+                            pass
+                        # (3) set LOCAL events (incl. LINE/INSTRUCTION) on each target's code
+                        _lmask = 0
+                        for _n, _bit in _local_evs:
+                            if (_round + _bit) % 3 == 0:
+                                _lmask |= _bit
+                        for _fn in _mon_targets:
+                            try:
+                                _mon.set_local_events(_TID, _fn.__code__, _lmask)
+                            except BaseException:
+                                pass
+                        # (4) run instrumented code -> events fire -> hostile callbacks dispatch
+                        for _fn in _mon_targets:
+                            try:
+                                _fn(12) if _fn is _mon_target else _fn()
+                            except BaseException:
+                                pass
+                        # (5) tear down this round (the callback may already have)
+                        try:
+                            _mon.set_events(_TID, 0)
+                        except BaseException:
+                            pass
+                    except BaseException:
+                        pass
+
+                # Final cleanup: clear all events and release both tool ids.
+                try:
+                    for _fn in _mon_targets:
+                        for _tid in (_TID, _TID2):
+                            if _tid < 0:
+                                continue
+                            try:
+                                _mon.set_local_events(_tid, _fn.__code__, 0)
+                            except BaseException:
+                                pass
+                    for _tid in (_TID, _TID2):
+                        if _tid < 0:
+                            continue
+                        try:
+                            _mon.set_events(_tid, 0)
+                            _mon.free_tool_id(_tid)
+                        except BaseException:
+                            pass
+                except BaseException:
+                    pass
+
+            if _mon is None:
+                print("[MONITORING] sys.monitoring unavailable (need CPython 3.12+); skipping",
+                      file=stderr)
+            else:
+                try:
+                    _mon_run()
+                except BaseException as _mon_e:
+                    print("[MONITORING] region error: %r" % (_mon_e,), file=stderr)
+            """,
+        )
+        self.write_print_to_stderr(0, '"[MONITORING] sys.monitoring region complete"')
         self.emptyLine()
 
     def _write_function_fuzzing_loop(self) -> None:

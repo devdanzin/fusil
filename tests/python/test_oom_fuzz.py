@@ -50,6 +50,7 @@ def _make_options(oom_fuzz, oom_verbose=False):
     # Alt-interpreter generic modes OFF too (same MagicMock-is-truthy divert hazard as tsan).
     o.concurrency_stress = False
     o.new_uninit = False
+    o.sys_monitoring = False  # opt-in mode; a bare MagicMock attr would divert generation
     o.test_private = False
     o.no_numpy = True
     o.no_tstrings = True

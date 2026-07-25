@@ -624,6 +624,18 @@ class Fuzzer(Application):
             default=False,
         )
         altinterp_options.add_option(
+            "--sys-monitoring",
+            help="Emit the sys.monitoring (PEP 669) hostile-callback region: acquire a tool id, "
+            "register HOSTILE callbacks (that raise, return the DISABLE sentinel or junk, and "
+            "re-entrantly mutate the monitoring state -- set_events / register_callback / "
+            "free_tool_id -- from INSIDE a callback) for a rotating subset of events, instrument "
+            "generic + target-module code, then run it so the events fire mid-hostile-callback. "
+            "Stresses the instrumentation / event-dispatch C machinery, a fragile and lightly "
+            "fuzzed surface. Default: False",
+            action="store_true",
+            default=False,
+        )
+        altinterp_options.add_option(
             "--rustpython-dedup-catalog",
             help="Path to a known_panics.tsv snapshot (from the rustpython-findings catalog). "
             "In-loop dedupe: each crash is reduced to its panic-site signature "
