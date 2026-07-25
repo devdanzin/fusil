@@ -213,5 +213,76 @@ class TestGeneratorWiring(unittest.TestCase):
         self.assertTrue(saw_instance and saw_type)
 
 
+class TestReentrantMutationBombs(unittest.TestCase):
+    """The reentrant-mutation family MUTATES the container mid-callback (reentrancy / UAF
+    class) rather than raising -- distinct from the exception bombs above."""
+
+    def test_clear_parent_clears_container_on_compare_callback(self):
+        # delay 0 -> the first comparison callback clears the container holding the element.
+        lst = [1, 2, 3]
+        cp = B._ClearParent(lst, max_delay=0)
+        lst.append(cp)
+        self.assertEqual(len(lst), 4)
+        _ = cp == 99  # a compare callback (what a C compare loop invokes)
+        self.assertEqual(len(lst), 0)  # parent cleared from inside the dunder
+
+    def test_clear_parent_respects_delay(self):
+        lst = [1]
+        cp = B._ClearParent(lst)
+        cp._delay, cp._calls = 2, 0
+        lst.append(cp)
+        hash(cp)  # call 1
+        hash(cp)  # call 2
+        self.assertGreater(len(lst), 0)  # not yet
+        hash(cp)  # call 3 > delay 2 -> clears
+        self.assertEqual(len(lst), 0)
+
+    def test_clear_parent_fires_from_multiple_slots(self):
+        for trigger in (
+            lambda c: c == 1,
+            lambda c: c < 1,
+            lambda c: hash(c),
+            lambda c: c.__index__(),
+        ):
+            lst = [0, 1]
+            cp = B._ClearParent(lst, max_delay=0)
+            lst.append(cp)
+            trigger(cp)
+            self.assertEqual(len(lst), 0)
+
+    def test_reentrant_list_is_prearmed_and_benign_until_compared(self):
+        rl = B.ReentrantClearList()
+        self.assertIsInstance(rl, list)
+        self.assertGreater(len(rl), 0)
+        # repr / len must NOT trigger the clear (no compare/hash/index of the seeded element)
+        _ = repr(rl)
+        _ = len(rl)
+        self.assertGreater(len(rl), 0)
+        # exactly one seeded self-clearing element
+        self.assertEqual(sum(isinstance(x, B._ClearParent) for x in rl), 1)
+
+    def test_reentrant_dict_is_prearmed_dict(self):
+        rd = B.ReentrantClearDict()
+        self.assertIsInstance(rd, dict)
+        self.assertIn("_fusil_pull", rd)
+        self.assertIsInstance(rd["_fusil_pull"], B._ClearParent)
+
+    def test_mutating_iterable_lies_about_length(self):
+        # __length_hint__ draws from a set that includes negative and large values (presize
+        # crash vectors), while iteration yields a different, real count.
+        hints = {B.MutatingIterable().__length_hint__() for _ in range(200)}
+        self.assertTrue(any(h < 0 for h in hints))  # negative hint present
+        self.assertTrue(any(h >= (1 << 16) for h in hints))  # large over-report present
+        self.assertTrue(all(h <= (1 << 20) for h in hints))  # but never a guaranteed-OOM presize
+        # materializing works regardless of the (lying) hint and yields the real, different count
+        mi = B.MutatingIterable()
+        mi._hint = 1 << 20  # exercise the large-presize path deterministically
+        self.assertIsInstance(list(mi), list)
+
+    def test_reentrant_bombs_registered(self):
+        for name in ("ReentrantClearList", "ReentrantClearDict", "MutatingIterable"):
+            self.assertIn(name, B.BOMB_CLASS_NAMES)
+
+
 if __name__ == "__main__":
     unittest.main()
