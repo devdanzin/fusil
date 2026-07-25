@@ -550,6 +550,19 @@ class Fuzzer(Application):
             default=False,
         )
         tsan_options.add_option(
+            "--tsan-mutate-types",
+            action="store_true",
+            help="Also race a shared TYPE object: a new op (l) concurrently mutates ONE shared "
+            "class -- setattr/delattr methods + class attributes, and reassigns __bases__ -- while "
+            "readers resolve+call those methods and run isinstance() on a shared instance. This "
+            "drives the type-version-tag / _PyType_Lookup method-cache / tp_mro-recompute "
+            "free-threading surface that op (d)'s per-INSTANCE __dict__ churn never reaches. Uses a "
+            "fresh generic class (not the target's), so it works across every target. Opt-in "
+            "(default off): type mutation raises more benign exceptions and can surface the type "
+            "machinery's own races as noise.",
+            default=False,
+        )
+        tsan_options.add_option(
             "--tsan-shared-objects-only",
             action="store_true",
             help="Restrict the stress region to racing the TARGET module's objects: drop the "

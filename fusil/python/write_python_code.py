@@ -1031,6 +1031,11 @@ class WritePythonCode(WriteCode):
         # builtin iterators (op h) and shared containers (ops f/i) that flood an extension hunt
         # with CPython-core races. See the ops-list / iterator-factory / worker gates below.
         objects_only = bool(getattr(self.options, "tsan_shared_objects_only", False))
+        # Opt-in: op (l), concurrent mutation of a shared TYPE object (setattr/delattr methods +
+        # __bases__ swap) while readers resolve+call them -- the type-version-tag / _PyType_Lookup
+        # method-cache / tp_mro-recompute surface op (d)'s per-instance __dict__ churn never reaches.
+        # Uses a fresh generic class (not the target's), emitted always but runtime-gated below.
+        mutate_types = bool(getattr(self.options, "tsan_mutate_types", False))
 
         # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
         # iterable) -- real target objects rather than only bare Class() instances. The same
@@ -1106,6 +1111,8 @@ class WritePythonCode(WriteCode):
             ops_list.append("i:read-while-mutate")
         if mutate_state:
             ops_list.append("j:prop-reassign")
+        if mutate_types:
+            ops_list.append("l:type-mutate")
         self.tsan_shared_kind = shared_kind
         self.tsan_manifest = {
             "kind": "tsan-provenance",
@@ -1132,6 +1139,9 @@ class WritePythonCode(WriteCode):
             # Opt-in concurrent-mutation ops: op (b) gets real args + curated mutators, and op (j)
             # (property reassignment) is added. Reflected in the ops list only when actually on.
             "mutate_state": mutate_state,
+            # Opt-in op (l): concurrent mutation of a shared TYPE (methods / __bases__) vs
+            # method-resolution readers -- the type-cache / version-tag / MRO race surface.
+            "mutate_types": mutate_types,
             "ops": ops_list,
             "workers_per_obj": workers_per_obj,
             "iters": iters,
@@ -1152,7 +1162,7 @@ class WritePythonCode(WriteCode):
                 len(builtin_iterators),
                 ext_iterators,
                 iter_off,
-                "a-j" if mutate_state else "a-i",
+                ("a-j" if mutate_state else "a-i") + ("+l" if mutate_types else ""),
                 " objonly" if objects_only else "",
                 workers_per_obj,
                 iters,
@@ -1215,6 +1225,28 @@ class WritePythonCode(WriteCode):
             0,
             "_tsan_call_args = "
             '["x", "fusil", 1, 2, 0, -1, 1.5, True, ["a", "b"], ("a",), {"a": 1}, b"x", None]',
+        )
+        # op (l) support (inert unless --tsan-mutate-types): a fresh GENERIC shared type + instance.
+        # Op (l) below mutates the CLASS (setattr/delattr methods, swap __bases__) while readers
+        # resolve+call them -- the type-version-tag / _PyType_Lookup method-cache / tp_mro-recompute
+        # race surface op (d)'s per-instance __dict__ churn never reaches. Generic (not the target's)
+        # so it works for every target and never corrupts the module under test.
+        self.write(0, "_MUTATE_TYPES = %r" % mutate_types)
+        self.write_block(
+            0,
+            """
+            class _TsanTypeBaseA:
+                _tsan_base_id = 0
+            class _TsanTypeBaseB:
+                _tsan_base_id = 1
+            class _TsanSharedType(_TsanTypeBaseA):
+                _tsan_cv = 0
+                def _tm0(self):
+                    return 0
+                def _tm1(self):
+                    return 1
+            _tsan_type_inst = _TsanSharedType()
+            """,
         )
         # Build the shared objects from the guarded factories (Slice C): a few real target
         # objects (module-level instances, class instances w/ & w/o args, plugin objects),
@@ -1569,6 +1601,33 @@ class WritePythonCode(WriteCode):
                                     setattr(_obj, _pn, getattr(_obj, _pn))
                                 if _role != 1:
                                     getattr(_obj, _pn, None)
+                        except Exception:
+                            pass
+                    # (l) shared-type mutation race: writers setattr/delattr methods + reassign
+                    # __bases__ on ONE shared CLASS while readers resolve+call them + isinstance()
+                    # a shared instance -- the type-version-tag / _PyType_Lookup method-cache /
+                    # tp_mro-recompute FT surface op (d)'s per-instance __dict__ churn never reaches.
+                    if _MUTATE_TYPES:
+                        try:
+                            if _role != 0:
+                                setattr(_TsanSharedType, "_tm%d" % (_i % 4),
+                                        lambda self, _v=_i: _v)
+                                _TsanSharedType._tsan_cv = _i
+                                if _i % 8 == 0:
+                                    try:
+                                        delattr(_TsanSharedType, "_tm%d" % (_i % 4))
+                                    except Exception:
+                                        pass
+                                if _i % 32 == 0:
+                                    _TsanSharedType.__bases__ = (
+                                        (_TsanTypeBaseB,) if (_i // 32) % 2
+                                        else (_TsanTypeBaseA,))
+                            if _role != 1:
+                                _tm = getattr(_tsan_type_inst, "_tm%d" % (_wid % 4), None)
+                                if callable(_tm):
+                                    _tm()
+                                getattr(_tsan_type_inst, "_tsan_cv", None)
+                                isinstance(_tsan_type_inst, _TsanSharedType)
                         except Exception:
                             pass
             """,
