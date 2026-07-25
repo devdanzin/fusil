@@ -1100,6 +1100,146 @@ class StatefulHashType(metaclass=_StatefulHashMeta):
     """A *class* (pass it, don't instantiate) whose hash works, then arms and starts raising."""
 
 
+# --- Instance-check metaclass bombs (target isinstance()/issubclass() C paths) ------------
+#
+# A hostile metaclass whose __instancecheck__ / __subclasscheck__ is a landmine. Pass the CLASS
+# (not an instance) where a type is expected -- isinstance(x, ThisType), issubclass(C, ThisType),
+# abc registration / __subclasshook__, functools.singledispatch, or any C code that type-checks an
+# argument against a user-supplied class -- and the check RAISES or LIES. C paths that call
+# PyObject_IsInstance / PyObject_IsSubclass and then PyErr_Clear (or cache the result and dispatch
+# on it) either skip the raised error or act on a contradictory, changing answer.
+
+
+class _RaisingInstanceCheckMeta(type):
+    """__instancecheck__/__subclasscheck__ succeed a random number of times, then raise."""
+
+    def __new__(mcls, name, bases, namespace):
+        cls = super().__new__(mcls, name, bases, namespace)
+        # list cell so the check can mutate state without going through __setattr__
+        cls._bomb_ic_state = [0, _bomb_random.randint(0, 3)]
+        return cls
+
+    def _bomb_ic_fire(cls):
+        state = type.__getattribute__(cls, "_bomb_ic_state")
+        state[0] += 1
+        if state[0] > state[1]:
+            raise _bomb_exc()("fusil instancecheck")
+
+    def __instancecheck__(cls, instance):
+        cls._bomb_ic_fire()
+        return False
+
+    def __subclasscheck__(cls, subclass):
+        cls._bomb_ic_fire()
+        return False
+
+
+class RaisingInstanceCheckType(metaclass=_RaisingInstanceCheckMeta):
+    """A *class* (pass it, don't instantiate) whose isinstance()/issubclass() work, then arm and
+    raise -- detonating a C error path that type-checks a value against this passed class."""
+
+
+class _LyingInstanceCheckMeta(type):
+    """__instancecheck__/__subclasscheck__ SUCCEED but flip their answer every few calls, so a C
+    routine that checks the same class more than once (a cached isinstance dispatch, an abc
+    __subclasshook__ memo, a singledispatch registry) sees membership change underneath it."""
+
+    def __new__(mcls, name, bases, namespace):
+        cls = super().__new__(mcls, name, bases, namespace)
+        cls._bomb_ic_state = [0, _bomb_random.randint(2, 4)]
+        return cls
+
+    def __instancecheck__(cls, instance):
+        state = type.__getattribute__(cls, "_bomb_ic_state")
+        state[0] += 1
+        return (state[0] // state[1]) % 2 == 0
+
+    __subclasscheck__ = __instancecheck__
+
+
+class LyingInstanceCheckType(metaclass=_LyingInstanceCheckMeta):
+    """A *class* (pass it, don't instantiate) whose isinstance()/issubclass() alternate True/False,
+    so repeated checks against it contradict each other -- desyncs cached type dispatch."""
+
+
+# --- Numeric / in-place-protocol bombs (target PyNumber_InPlace* and reflected ops) -------
+#
+# The number protocol's in-place slots (__iadd__/__imul__/... reached by ``x OP= bomb``), reflected
+# slots (__radd__/... reached by ``n OP bomb`` when the left operand returns NotImplemented), and
+# forward slots (__add__/...) all SUCCEED here but return a value of an UNEXPECTED type (str, None,
+# bytes, a huge int, NaN, self). A C accumulator/reducer -- ``PyNumber_InPlaceAdd(acc, x)`` in a
+# loop, sum() / functools.reduce, the same-type in-place fast paths (_BINARY_OP_INPLACE_ADD_UNICODE
+# and friends) -- that assumes the op returns the original type then operates on the wrong-typed
+# result. SuperBomb *raises* from these slots; this bomb *lies*, so it slips past a raise-guard and
+# corrupts the value instead. Hash/repr are left working so it survives arg-passing to reach a slot.
+
+_LYING_NUMERIC_RETURNS = (0, 1, -1, "", "lie", b"", None, 10**30, float("nan"))
+
+_LYING_NUMERIC_SLOTS = (
+    "__add__",
+    "__radd__",
+    "__iadd__",
+    "__sub__",
+    "__rsub__",
+    "__isub__",
+    "__mul__",
+    "__rmul__",
+    "__imul__",
+    "__mod__",
+    "__rmod__",
+    "__imod__",
+    "__pow__",
+    "__rpow__",
+    "__ipow__",
+    "__truediv__",
+    "__rtruediv__",
+    "__itruediv__",
+    "__floordiv__",
+    "__rfloordiv__",
+    "__ifloordiv__",
+    "__and__",
+    "__rand__",
+    "__iand__",
+    "__or__",
+    "__ror__",
+    "__ior__",
+    "__xor__",
+    "__rxor__",
+    "__ixor__",
+    "__lshift__",
+    "__rlshift__",
+    "__ilshift__",
+    "__rshift__",
+    "__rrshift__",
+    "__irshift__",
+    "__matmul__",
+    "__rmatmul__",
+    "__imatmul__",
+)
+
+
+def _make_lying_numeric_slot(name):
+    def _slot(self, *args):
+        return _bomb_random.choice(_LYING_NUMERIC_RETURNS)
+
+    _slot.__name__ = name
+    return _slot
+
+
+class _LyingInplaceMeta(type):
+    def __new__(mcls, cname, bases, namespace):
+        for _name in _LYING_NUMERIC_SLOTS:
+            namespace.setdefault(_name, _make_lying_numeric_slot(_name))
+        return super().__new__(mcls, cname, bases, namespace)
+
+
+class LyingInplace(metaclass=_LyingInplaceMeta):
+    """Every numeric slot (forward / reflected / in-place) succeeds but returns a random UNEXPECTED
+    type, so ``acc += bomb`` / ``n + bomb`` / a C reduction loop gets a str/None/huge-int/NaN where
+    it expected a number and then operates on the wrong type. Hashable + reprable (left working) so
+    it reaches the number-protocol slot instead of detonating during arg handling."""
+
+
 # Names the argument generator instantiates (as ``Name()``); every class constructs with no
 # required arguments and self-randomises its delay/exception.
 BOMB_CLASS_NAMES = [
@@ -1129,13 +1269,21 @@ BOMB_CLASS_NAMES = [
     # value they are not, or flip the answer on each call) -- desyncs C hash tables.
     "LyingEq",
     "ShiftyEq",
+    # Numeric / in-place-protocol bomb: forward/reflected/in-place ops succeed but return an
+    # unexpected type, corrupting a C accumulator that assumes the op preserves the operand type.
+    "LyingInplace",
 ]
 
 # Names the argument generator passes *as the class object itself* (not instantiated) -- the
-# bomb is the type: a metaclass turns attribute/hash access on the class into a landmine.
+# bomb is the type: a metaclass turns attribute/hash access, or an isinstance()/issubclass()
+# check, on the class into a landmine.
 BOMB_TYPE_NAMES = [
     "HiddenNameType",
     "StatefulHashType",
+    # Instance-check metaclass bombs: isinstance(x, T) / issubclass(C, T) against these raises
+    # or flips its answer -- detonates / desyncs C type-check-against-a-passed-class paths.
+    "RaisingInstanceCheckType",
+    "LyingInstanceCheckType",
 ]
 
 

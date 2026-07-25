@@ -368,5 +368,69 @@ class TestLyingEqualityBombs(unittest.TestCase):
             self.assertIn(name, B.BOMB_CLASS_NAMES)
 
 
+class TestInstanceCheckAndNumericBombs(unittest.TestCase):
+    """5th family: hostile __instancecheck__/__subclasscheck__ metaclasses + a lying numeric /
+    in-place-protocol bomb (ops succeed but return an unexpected type)."""
+
+    def test_raising_instancecheck_type_arms_then_raises(self):
+        T = B.RaisingInstanceCheckType
+        raised = False
+        for _ in range(20):
+            try:
+                isinstance(123, T)
+            except Exception:
+                raised = True
+                break
+        self.assertTrue(raised, "isinstance against RaisingInstanceCheckType never raised")
+
+    def test_raising_instancecheck_type_subclasscheck_also_raises(self):
+        T = B.RaisingInstanceCheckType  # fresh state per class access is not reset, so loop
+        raised = False
+        for _ in range(20):
+            try:
+                issubclass(int, T)
+            except Exception:
+                raised = True
+                break
+        self.assertTrue(raised, "issubclass against RaisingInstanceCheckType never raised")
+
+    def test_lying_instancecheck_type_flips_answer(self):
+        L = B.LyingInstanceCheckType
+        results = [isinstance(object(), L) for _ in range(16)]
+        self.assertIn(True, results)
+        self.assertIn(False, results)
+
+    def test_lying_instancecheck_type_supports_issubclass(self):
+        # __subclasscheck__ is wired (aliased) so issubclass() doesn't raise TypeError.
+        self.assertIsInstance(issubclass(int, B.LyingInstanceCheckType), bool)
+
+    def test_lying_inplace_returns_varied_unexpected_types(self):
+        inst = B.LyingInplace()
+        seen = set()
+        for _ in range(60):
+            seen.add(type(inst.__iadd__(1)).__name__)
+            seen.add(type(inst.__radd__(1)).__name__)
+        # succeeds (never raises) but returns a spread of non-uniform types
+        self.assertGreaterEqual(len(seen), 3)
+
+    def test_lying_inplace_reached_via_reflected_add(self):
+        # `n + bomb` -> int.__add__ returns NotImplemented -> bomb.__radd__ supplies the result,
+        # so an int accumulator silently becomes whatever type the bomb returns.
+        inst = B.LyingInplace()
+        got_non_int = False
+        for _ in range(60):
+            x = 5
+            x = x + inst
+            if not isinstance(x, int):
+                got_non_int = True
+                break
+        self.assertTrue(got_non_int, "reflected op never yielded a non-int result")
+
+    def test_new_family_registered(self):
+        self.assertIn("LyingInplace", B.BOMB_CLASS_NAMES)
+        for name in ("RaisingInstanceCheckType", "LyingInstanceCheckType"):
+            self.assertIn(name, B.BOMB_TYPE_NAMES)
+
+
 if __name__ == "__main__":
     unittest.main()
