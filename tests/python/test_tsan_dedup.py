@@ -98,6 +98,49 @@ REPORT_TRUNCATED_SINGLE_STANZA = "\n".join(
     ]
 )
 
+# A FOREIGN-LIBRARY race: the actual racing accesses are INSIDE a system library (here OpenSSL's
+# libcrypto), unsymbolized (`<null>`); TSan attributes the memcmp/memcpy INTERCEPTORS to the
+# `python` module, and the only CPython frame is the call boundary (tp_new_wrapper). Keying on
+# tp_new_wrapper collapses distinct libcrypto races onto a real CPython function and needs a
+# per-pairing suppression -- so key on the foreign library instead.
+REPORT_FOREIGN_OPENSSL = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=1)",
+        "  Read of size 8 at 0x7f00 by thread T1:",
+        "    #0 memcmp <null> (python+0x10c) (BuildId: aa)",
+        "    #1 <null> <null> (libcrypto.so.3+0x250b01) (BuildId: bb)",
+        "    #2 tp_new_wrapper /b/./Objects/typeobject.c:10485:11 (python+0x400) (BuildId: aa)",
+        "",
+        "  Previous write of size 8 at 0x7f00 by thread T2:",
+        "    #0 memcpy <null> (python+0xfa) (BuildId: aa)",
+        "    #1 <null> <null> (libcrypto.so.3+0x250916) (BuildId: bb)",
+        "    #2 tp_new_wrapper /b/./Objects/typeobject.c:10485:11 (python+0x400) (BuildId: aa)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in tp_new_wrapper",
+    ]
+)
+
+# Foreign glibc race: concurrent time.tzset() -> glibc tzset_internal free()/strdup()s the
+# process-global TZ buffers. free/malloc interceptors are in `python`; the real racer is in
+# libc.so.6 (tzset_internal / strdup, whose `time/tzset.c` / `string/strdup.c` sources are NOT
+# CPython dirs so they don't resolve). Prefer the innermost NON-interceptor foreign func.
+REPORT_FOREIGN_TZSET = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=2)",
+        "  Write of size 8 at 0x7f00 by thread T1:",
+        "    #0 free <null> (python+0xfe) (BuildId: aa)",
+        "    #1 tzset_internal time/tzset.c:401:3 (libc.so.6+0xe90e5) (BuildId: cc)",
+        "    #2 cfunction_vectorcall_NOARGS /b/Objects/methodobject.c:508:24 (python+0x370) (BuildId: aa)",
+        "",
+        "  Previous write of size 8 at 0x7f00 by thread T2:",
+        "    #0 malloc <null> (python+0xfd) (BuildId: aa)",
+        "    #1 strdup string/strdup.c:42:15 (libc.so.6+0xbbc) (BuildId: cc)",
+        "    #2 cfunction_vectorcall_NOARGS /b/Objects/methodobject.c:508:24 (python+0x370) (BuildId: aa)",
+        "",
+        "SUMMARY: ThreadSanitizer: data race in tzset_internal",
+    ]
+)
+
 # TSan lowercases the whole SECOND access line, including the `atomic` qualifier: "Previous
 # atomic write". The reader-vs-atomic-writer shape is the single most common race class in the
 # catalog, so failing to match this header dropped the 2nd stanza and (via the len<2 fallback)
@@ -266,6 +309,29 @@ class TestParse(unittest.TestCase):
         self.assertNotEqual(
             r["signature"],
             "Include/object.h:_Py_TYPE_impl | Include/object.h:_Py_TYPE_impl",
+        )
+
+    def test_foreign_openssl_race_keys_on_library_not_boundary(self):
+        # libcrypto-internal race must NOT collapse to the CPython call boundary (tp_new_wrapper);
+        # it keys on the foreign library. func is `<null>` (unsymbolized) -> module + "?".
+        r = tsan_dedup.parse_report(REPORT_FOREIGN_OPENSSL)
+        self.assertEqual(r["signature"], "libcrypto.so.3:? | libcrypto.so.3:?")
+        self.assertNotIn("tp_new_wrapper", r["signature"])
+        self.assertFalse(r["framework"])
+
+    def test_foreign_tzset_race_prefers_noninterceptor_libc_func(self):
+        # Prefer the real libc function (tzset_internal) over the memory interceptor (strdup).
+        r = tsan_dedup.parse_report(REPORT_FOREIGN_TZSET)
+        self.assertEqual(r["signature"], "libc.so.6:strdup | libc.so.6:tzset_internal")
+        self.assertNotIn("cfunction_vectorcall_NOARGS", r["signature"])
+
+    def test_python_module_interceptor_does_not_trigger_foreign(self):
+        # REPORT_TWO_SITES' write stanza has `#0 memset <null> (python+0x1)` -- a `python`-module
+        # interceptor, NOT a foreign lib -- so it is skipped to reach list_append, unchanged.
+        r = tsan_dedup.parse_report(REPORT_TWO_SITES)
+        self.assertEqual(
+            r["signature"],
+            "Objects/listobject.c:list_append | Objects/listobject.c:list_extend",
         )
 
     def test_access_header_variants_match(self):
