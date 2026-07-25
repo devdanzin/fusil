@@ -19,6 +19,15 @@ across builds, so the signature is function-level; the exact lines are kept for 
 The catalog snapshot (``known_races.tsv``, produced by the sibling cpython-tsan-findings
 catalog) maps each known signature to a race id. Matching is exact on the signature.
 
+If a stanza's innermost real frame is in a FOREIGN system library (``libc.so.6`` /
+``libcrypto.so.3`` / ..., a curated allowlist -- NOT a target ``--tsan-source-root`` ``.so`` or a
+``*.cpython-*.so`` extension), the race happened inside that library and the CPython frame below is
+just the call boundary, so the site keys on the library (``libcrypto.so.3:?`` /
+``libc.so.6:tzset_internal``) instead of collapsing onto a real CPython function (tp_new_wrapper /
+cfunction_vectorcall_NOARGS) -- which used to mint a false signature that needed a per-pairing
+suppression each. A single ``libc.so`` / ``libcrypto.so`` suppression now covers the whole class.
+CPython (and source-root extension) signatures are byte-for-byte unchanged.
+
 ``parse_report`` optionally takes ``source_roots`` (Slice D): a list of ``--tsan-source-root``
 directories. A frame that is NOT CPython source but whose file lives under one of those roots is
 normalised to its path relative to the root (``/build/cereggii/src/atomic_dict.c`` ->
@@ -60,6 +69,11 @@ ACCESS = re.compile(
 # func or the location may be "<null>" (interceptors / non-CPython .so frames); those simply
 # don't yield a CPython source and are skipped by the source match below.
 FRAME = re.compile(r"^\s*#\d+\s+(\S+)\s+(.+?)\s+\(")
+# The module a frame lives in: the `(module+0xoffset)` tail (NOT the trailing `(BuildId: ...)`,
+# which has no `+0x`). Used to tell a FOREIGN-library frame (libcrypto.so.3 / libc.so.6) from the
+# `python` interpreter or a CPython extension (`*.cpython-*.so`). TSan attributes intercepted libc
+# calls (memcpy/free/...) to the `python` module, so the module -- not the func -- is the signal.
+FRAME_MODULE = re.compile(r"\(([^()]+?)\+0x[0-9a-fA-F]+\)")
 # The CPython-source-relative part of a frame location (handles the build dir's leading `./`).
 CPY_SRC = re.compile(
     r"(?:^|/)((?:Objects|Python|Modules|Include|Parser|Programs)/[\w./+-]+\.(?:c|h)):(\d+)"
@@ -194,16 +208,96 @@ def _is_plumbing(func):
     return func in PLUMBING_SKIP or bool(_STACKREF.fullmatch(func))
 
 
+# A FOREIGN SYSTEM library: a race whose innermost real frame is here (libcrypto.so.3, libc.so.6,
+# ...) happened INSIDE that library -- the CPython frame below it is just the call boundary -- so
+# keying on the CPython frame mints a false signature (tp_new_wrapper / cfunction_vectorcall_NOARGS)
+# that collides with real CPython functions and needs a per-pairing suppression. Key on the foreign
+# library instead. This is a CURATED allowlist of system libs that are NEVER a fuzzing target, on
+# purpose: a bare `\.so$` would also swallow a TARGET C extension (a `--tsan-source-root` .so such
+# as `cereggii.so`, or any `*.cpython-*.so`), whose races ARE findings -- those must still resolve
+# via the source-root / CPython path, not be relabeled "foreign". An uncatalogued foreign lib just
+# falls back to today's CPython-boundary collapse (needs a suppression), which is no worse than before.
+_FOREIGN_MODULE = re.compile(
+    r"(?:^|/)(?:lib(?:c|m|crypto|ssl|z|lzma|bz2|pthread|dl|rt|util|resolv|nsl|gcc_s|stdc\+\+|ffi)"
+    r"|ld-linux[\w.-]*)\.so(?:\.\d+)*$"
+)
+# libc/foreign memory + string interceptors: dispatch-like (the real foreign function is one frame
+# down), so prefer a non-interceptor foreign frame for the site when one is present.
+_MEM_INTERCEPTORS = frozenset(
+    {
+        "memcpy",
+        "memmove",
+        "memset",
+        "memcmp",
+        "memchr",
+        "bcmp",
+        "bcopy",
+        "bzero",
+        "malloc",
+        "calloc",
+        "realloc",
+        "free",
+        "reallocarray",
+        "posix_memalign",
+        "aligned_alloc",
+        "strdup",
+        "strndup",
+        "strlen",
+        "strnlen",
+        "strcmp",
+        "strncmp",
+        "strcpy",
+        "strncpy",
+        "strcat",
+        "strncat",
+        "strchr",
+        "strrchr",
+    }
+)
+
+
+def _is_foreign_module(module):
+    """True if ``module`` is a foreign shared library (not the interpreter, not a CPython ext)."""
+    return bool(module) and ".cpython-" not in module and bool(_FOREIGN_MODULE.search(module))
+
+
+def _foreign_site(foreign):
+    """Pick a (module, func, None) site from foreign frames (innermost first): prefer the innermost
+    NON-interceptor foreign func (e.g. `tzset_internal`), else the innermost named interceptor (e.g.
+    `strdup`/`memcmp`), else the module alone (func `?`, when every foreign frame is `<null>` -- the
+    common OpenSSL-internal case)."""
+    for module, func in foreign:
+        if func != "<null>" and func not in _MEM_INTERCEPTORS:
+            return (module, func, None)
+    for module, func in foreign:
+        if func != "<null>":
+            return (module, func, None)
+    return (foreign[0][0], "?", None)
+
+
 def _top_site(frames, source_roots=None):
-    """Given a stanza's frames (innermost first) as (func, location), return the top real
+    """Given a stanza's frames (innermost first) as (func, location, module), return the top real
     racing site (file, func, line): the innermost resolved frame whose func isn't plumbing.
-    Falls back to the innermost resolved frame if all are plumbing; None if none resolve.
-    ``source_roots`` (Slice D) additionally resolves extension frames under those roots."""
+
+    FOREIGN-library first: if any foreign-library frame (libcrypto.so.3 / libc.so.6 / ...) sits at
+    or above the innermost resolved CPython/ext site, the race happened inside that library, so key
+    on it (``(module, func, None)``) rather than collapsing to the CPython call boundary. Otherwise
+    unchanged: innermost resolved non-plumbing frame, falling back to the innermost resolved frame;
+    None if none resolve. ``source_roots`` (Slice D) additionally resolves extension frames under
+    those roots. Frames may be 2-tuples (legacy callers / tests) -- treated as having no module."""
     real = []
-    for func, location in frames:
+    foreign = []  # (module, func) for foreign frames seen BEFORE any resolved CPython/ext site
+    for frame in frames:
+        func, location = frame[0], frame[1]
+        module = frame[2] if len(frame) > 2 else None
         site = _frame_site(func, location, source_roots)
         if site is not None:
             real.append(site)
+            continue
+        if not real and _is_foreign_module(module):
+            foreign.append((module, func))
+    if foreign:
+        return _foreign_site(foreign)  # foreign frame(s) innermost -> foreign-library race
     if not real:
         return None
     for site in real:
@@ -276,7 +370,8 @@ def _parse_segv(text, m, source_roots=None):
             continue
         fm = FRAME.match(line)
         if fm:
-            frames.append((fm.group(1), fm.group(2)))
+            mm = FRAME_MODULE.search(line)
+            frames.append((fm.group(1), fm.group(2), mm.group(1) if mm else None))
         elif frames:
             break  # crash stack ended
     site = _top_site(frames, source_roots)
@@ -301,7 +396,8 @@ def _parse_race(text, source_roots=None):
             while i < n:
                 fm = FRAME.match(lines[i])
                 if fm:
-                    frames.append((fm.group(1), fm.group(2)))
+                    mm = FRAME_MODULE.search(lines[i])
+                    frames.append((fm.group(1), fm.group(2), mm.group(1) if mm else None))
                     i += 1
                     continue
                 # stanza ends at the first non-frame line (blank / next header)
