@@ -722,6 +722,83 @@ class MutatingIterable:
         return _gen()
 
 
+# --- Stateful / lying bombs: the protocol slot SUCCEEDS but returns an INCONSISTENT answer ---
+#
+# The exception bombs raise; the reentrant bombs mutate a container. These lie *quietly*: a slot
+# returns a value that is internally inconsistent across calls (or with a sibling slot), so C
+# code that reads it once to size/plan and then trusts it -- preallocating a buffer from __len__,
+# storing under a cached __hash__, specializing on the first element's type -- writes past the
+# buffer, lands in the wrong hash bucket, or trips a type fast-path. The lie is DELAYED (like the
+# other bombs) so the C routine has already committed to the first answer when it changes.
+
+
+class GrowingLen:
+    """__len__ under-reports on its first read (small presize) then reports a much larger size,
+    while __getitem__ / __iter__ yield up to the larger count. C code that presizes a buffer from
+    the first __len__ and then fills by index/iteration can write past it (the __len__-lies-small
+    buffer-preallocation class; complements LyingLen, which only over-reports)."""
+
+    def __init__(self):
+        self._calls = 0
+        self._small = _bomb_random.choice([0, 1, 2])
+        self._big = _bomb_random.choice([64, 256, 4096])
+
+    def __len__(self):
+        self._calls += 1
+        return self._small if self._calls <= 1 else self._big
+
+    def __getitem__(self, index):
+        if not isinstance(index, int) or index >= self._big or index < 0:
+            raise IndexError(index)
+        return index
+
+    def __iter__(self):
+        return iter(range(self._big))
+
+
+class MutatingHash:
+    """__hash__ is constant for a few calls -- long enough to be stored as a dict/set key -- then
+    starts returning different values, violating hash-constancy while the object is a live key.
+    A C hash table that cached the original hash now finds the key in the wrong bucket (lookup
+    miss / KeyError, or a corrupted probe sequence in a less-hardened C-extension mapping)."""
+
+    def __init__(self):
+        self._calls = 0
+        self._delay = _bomb_random.randint(1, 3)
+
+    def __hash__(self):
+        self._calls += 1
+        if self._calls <= self._delay:
+            return 0
+        return _bomb_random.randrange(1 << 60)
+
+    def __eq__(self, other):
+        return self is other
+
+
+class TypeFlipIterator:
+    """Yields a consistent type (ints) for a few items, then flips to an incompatible type
+    (str / None / float / a bare object) mid-stream, feeding C reducers that may specialize on
+    the first element's type -- max() / min() / sum() / sorted() / bytes() / b"".join() / heapq --
+    a wrong type after the fast-path has committed."""
+
+    def __init__(self):
+        self._i = 0
+        self._n = _bomb_random.randint(2, 8)
+        self._flip = _bomb_random.choice(["str", "none", "float", "obj"])
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._i += 1
+        if self._i > self._n + 4:
+            raise StopIteration
+        if self._i <= self._n:
+            return self._i  # a consistent run of ints
+        return {"str": "x", "none": None, "float": 1.5, "obj": object()}[self._flip]
+
+
 # --- SuperBomb: every protocol slot is a landmine ----------------------------------------
 #
 # Spray-and-pray. A metaclass installs a raising method for a broad set of dunders; each one
@@ -997,6 +1074,11 @@ BOMB_CLASS_NAMES = [
     "ReentrantClearList",
     "ReentrantClearDict",
     "MutatingIterable",
+    # Stateful / lying bombs: a slot SUCCEEDS but returns an inconsistent answer across calls
+    # (__len__ grows, __hash__ changes while keyed, iterator flips element type mid-stream).
+    "GrowingLen",
+    "MutatingHash",
+    "TypeFlipIterator",
 ]
 
 # Names the argument generator passes *as the class object itself* (not instantiated) -- the
