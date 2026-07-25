@@ -603,6 +603,125 @@ class FailingIterator:
         return self._i
 
 
+# --- Reentrant-mutation bombs: MUTATE the container mid-operation (not just raise) --------
+#
+# The exception bombs above make a protocol slot RAISE; these make it MUTATE the very
+# container the running C operation is iterating -- the reentrancy / use-after-free class.
+# When a C sequence/mapping routine borrows a container's internal storage (``ob_item`` array,
+# hash-table ``entries``) and then calls back into Python -- to compare (``__eq__``/``__lt__``),
+# hash (``__hash__``), or convert (``__index__``) an element -- clearing or resizing that
+# container from inside the callback frees/reallocates the borrowed pointer mid-loop. Core
+# CPython's own list/dict routines mostly re-check the size after each callback, but a great
+# deal of C-EXTENSION code (and less-trodden CPython C paths) caches the raw pointer once and
+# indexes it, so these objects are the protocol-slot analogue of an OOM injection aimed at the
+# reentrancy error path rather than the allocation-failure one. The mutation is DELAYED a few
+# calls (like the exception bombs) so a partially-consumed C loop is holding a live borrowed
+# pointer when it fires, rather than emptying the container before the loop starts.
+
+
+class _ClearParent:
+    """An element that clears the container holding it, from inside a comparison/hash/index
+    callback. Seeded into ``ReentrantClearList`` / ``ReentrantClearDict``; not used directly."""
+
+    def __init__(self, parent, max_delay=2):
+        self._parent = parent
+        self._calls = 0
+        self._delay = _bomb_random.randint(0, max_delay)
+
+    def _maybe_pull(self):
+        self._calls += 1
+        if self._calls > self._delay:
+            parent = self._parent
+            try:
+                parent.clear()
+            except Exception:
+                try:
+                    del parent[:]
+                except Exception:
+                    pass
+
+    def __eq__(self, other):
+        self._maybe_pull()
+        return False
+
+    def __lt__(self, other):
+        self._maybe_pull()
+        return True
+
+    def __gt__(self, other):
+        self._maybe_pull()
+        return False
+
+    def __hash__(self):
+        self._maybe_pull()
+        return 0
+
+    def __index__(self):
+        self._maybe_pull()
+        return 0
+
+    __int__ = __index__
+
+
+class ReentrantClearList(list):
+    """A pre-armed ``list``: it contains a self-clearing element, so any C op that compares,
+    hashes, or index-converts its items -- ``x in l`` / ``l.index(x)`` / ``l.sort()`` /
+    ``min(l)`` / ``max(l)`` / ``set(l)`` / ``bytes(l)``, or a C-extension routine iterating a
+    list argument -- can free the item array mid-loop (reentrant use-after-free)."""
+
+    def __init__(self):
+        super().__init__()
+        head = _bomb_random.randint(1, 4)
+        self.extend(range(head))
+        self.append(_ClearParent(self))
+        self.extend(range(head, head + _bomb_random.randint(2, 6)))
+
+
+class ReentrantClearDict(dict):
+    """A pre-armed ``dict``: a stored VALUE clears the dict from inside a comparison, so a C op
+    that compares the mapping's values -- ``d == other`` / dict richcompare, or a C-extension
+    routine walking a dict argument's values -- can free the entry table mid-walk."""
+
+    def __init__(self):
+        super().__init__()
+        for i in range(_bomb_random.randint(1, 3)):
+            self[i] = i
+        self["_fusil_pull"] = _ClearParent(self)
+        for i in range(_bomb_random.randint(1, 3)):
+            self["k%d" % i] = i
+
+
+class MutatingIterable:
+    """A hostile iterable whose ``__length_hint__`` lies (huge / zero / negative) and whose
+    iterator mutates its own backing store mid-iteration. C consumers that PRESIZE a buffer
+    from the hint and then fill it by iterating -- ``list()`` / ``tuple()`` / ``bytes()`` /
+    ``b"".join()`` / ``set()`` / ``[*it]`` / ``PySequence_Tuple`` / ``_PyList_Extend`` -- can
+    over-read or write past the presized buffer when the real yield count disagrees."""
+
+    def __init__(self):
+        self._data = list(range(_bomb_random.randint(4, 16)))
+        # A lie about the yield count: 0/1 (undersize -> grow path), -1 (negative -> the
+        # unguarded-negative presize/ValueError vector), and a large-but-not-guaranteed-OOM
+        # over-report (8 MB presize, not 8 TB -- a sprayed bomb must not just raise MemoryError).
+        self._hint = _bomb_random.choice([0, 1, -1, 1 << 16, 1 << 20])
+
+    def __length_hint__(self):
+        return self._hint
+
+    def __iter__(self):
+        data = self._data
+
+        def _gen():
+            for i, value in enumerate(list(data)):
+                if i == 1:
+                    data.clear()
+                elif i == 2:
+                    data.extend(range(1 << 10))
+                yield value
+
+        return _gen()
+
+
 # --- SuperBomb: every protocol slot is a landmine ----------------------------------------
 #
 # Spray-and-pray. A metaclass installs a raising method for a broad set of dunders; each one
@@ -873,6 +992,11 @@ BOMB_CLASS_NAMES = [
     "WrongTypeFile",
     "FilenoBomb",
     "DescriptorBomb",
+    # Reentrant-mutation bombs: MUTATE the container mid-C-operation (reentrancy / UAF class),
+    # rather than raising. Self-contained, built with no required args, arg-injectable like the rest.
+    "ReentrantClearList",
+    "ReentrantClearDict",
+    "MutatingIterable",
 ]
 
 # Names the argument generator passes *as the class object itself* (not instantiated) -- the
