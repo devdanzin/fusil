@@ -563,6 +563,19 @@ class Fuzzer(Application):
             default=False,
         )
         tsan_options.add_option(
+            "--tsan-mutate-callables",
+            action="store_true",
+            help="Also race a shared FUNCTION object: a new op (m) concurrently swaps a shared "
+            "closure's __code__ / __defaults__ and stomps its cell's cell_contents while readers "
+            "CALL it -- races on func->func_code / func_version, the __defaults__ tuple, and the "
+            "closure cell's ob_ref (the cell-refcount race no other op reaches). Uses a fresh "
+            "generic closure (not the target's), so it works across every target. Opt-in "
+            "(default off): callable mutation raises more benign exceptions (arg-count mismatches "
+            "after a __code__/__defaults__ swap) and can surface the function machinery's own "
+            "races as noise.",
+            default=False,
+        )
+        tsan_options.add_option(
             "--tsan-shared-objects-only",
             action="store_true",
             help="Restrict the stress region to racing the TARGET module's objects: drop the "

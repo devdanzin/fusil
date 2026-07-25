@@ -1036,6 +1036,11 @@ class WritePythonCode(WriteCode):
         # method-cache / tp_mro-recompute surface op (d)'s per-instance __dict__ churn never reaches.
         # Uses a fresh generic class (not the target's), emitted always but runtime-gated below.
         mutate_types = bool(getattr(self.options, "tsan_mutate_types", False))
+        # Opt-in: op (m), concurrent mutation of a shared FUNCTION object (swap __code__ /
+        # __defaults__, stomp the closure cell's cell_contents) while readers CALL it -- the
+        # func_code / func_version / __defaults__ / closure-cell-refcount surface no other op
+        # reaches. Uses a fresh generic closure (not the target's), emitted always, gated below.
+        mutate_callables = bool(getattr(self.options, "tsan_mutate_callables", False))
 
         # Slice C: build a richer, guarded set of shared-object FACTORIES (source_expr, label,
         # iterable) -- real target objects rather than only bare Class() instances. The same
@@ -1113,6 +1118,8 @@ class WritePythonCode(WriteCode):
             ops_list.append("j:prop-reassign")
         if mutate_types:
             ops_list.append("l:type-mutate")
+        if mutate_callables:
+            ops_list.append("m:callable-mutate")
         self.tsan_shared_kind = shared_kind
         self.tsan_manifest = {
             "kind": "tsan-provenance",
@@ -1142,6 +1149,9 @@ class WritePythonCode(WriteCode):
             # Opt-in op (l): concurrent mutation of a shared TYPE (methods / __bases__) vs
             # method-resolution readers -- the type-cache / version-tag / MRO race surface.
             "mutate_types": mutate_types,
+            # Opt-in op (m): concurrent mutation of a shared FUNCTION (__code__ / __defaults__ /
+            # cell_contents) vs callers -- the func_code / func_version / closure-cell surface.
+            "mutate_callables": mutate_callables,
             "ops": ops_list,
             "workers_per_obj": workers_per_obj,
             "iters": iters,
@@ -1162,7 +1172,9 @@ class WritePythonCode(WriteCode):
                 len(builtin_iterators),
                 ext_iterators,
                 iter_off,
-                ("a-j" if mutate_state else "a-i") + ("+l" if mutate_types else ""),
+                ("a-j" if mutate_state else "a-i")
+                + ("+l" if mutate_types else "")
+                + ("+m" if mutate_callables else ""),
                 " objonly" if objects_only else "",
                 workers_per_obj,
                 iters,
@@ -1246,6 +1258,28 @@ class WritePythonCode(WriteCode):
                 def _tm1(self):
                     return 1
             _tsan_type_inst = _TsanSharedType()
+            """,
+        )
+        # op (m) support (inert unless --tsan-mutate-callables): a fresh GENERIC shared CLOSURE
+        # (1 free var -> a real cell to stomp) + a pool of __code__-swap-compatible code objects
+        # (each a 1-freevar closure, so func_set_code's freevar-count check passes). Op (m) below
+        # swaps __code__/__defaults__ and stomps the cell's cell_contents while readers CALL it.
+        self.write(0, "_MUTATE_CALLABLES = %r" % mutate_callables)
+        self.write_block(
+            0,
+            """
+            def _tsan_make_closure(_seed=0):
+                _closed = _seed
+                def _fn(_a=0, _b=0):
+                    return _closed + _a + _b
+                return _fn
+            def _tsan_alt_closure():
+                _closed = 0
+                def _fn(_a, _b, _c):  # different arity, still 1 freevar -> __code__-swap-compatible
+                    return _closed
+                return _fn
+            _tsan_shared_fn = _tsan_make_closure()
+            _tsan_code_pool = [_tsan_shared_fn.__code__, _tsan_alt_closure().__code__]
             """,
         )
         # Build the shared objects from the guarded factories (Slice C): a few real target
@@ -1628,6 +1662,34 @@ class WritePythonCode(WriteCode):
                                     _tm()
                                 getattr(_tsan_type_inst, "_tsan_cv", None)
                                 isinstance(_tsan_type_inst, _TsanSharedType)
+                        except Exception:
+                            pass
+                    # (m) shared-callable mutation race: writers swap __code__ / __defaults__ /
+                    # __kwdefaults__ and stomp the closure cell's cell_contents on ONE shared
+                    # function while readers CALL it -- races on func->func_code / func_version,
+                    # the __defaults__/__kwdefaults__ containers (their setters Py_XSETREF the old
+                    # value with no critical section -> concurrent double-free; the func_set_qualname
+                    # class of cpython#153297, whose fix PR #153335 covers __name__/__qualname__/
+                    # __code__ but NOT __defaults__/__kwdefaults__), and the closure cell's ob_ref.
+                    if _MUTATE_CALLABLES:
+                        try:
+                            if _role != 0:
+                                _tsan_shared_fn.__defaults__ = (_i, _i) if _i % 2 else ()
+                                _tsan_shared_fn.__kwdefaults__ = {"_z": _i} if _i % 3 else None
+                                _tsan_cells = _tsan_shared_fn.__closure__
+                                if _tsan_cells:
+                                    _tsan_cells[0].cell_contents = _i
+                                if _i % 16 == 0:
+                                    try:
+                                        _tsan_shared_fn.__code__ = _tsan_code_pool[
+                                            (_i // 16) % len(_tsan_code_pool)]
+                                    except Exception:
+                                        pass
+                            if _role != 1:
+                                try:
+                                    _tsan_shared_fn()
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
             """,

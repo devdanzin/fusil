@@ -657,6 +657,33 @@ under test. The manifest advertises it (`mutate_types`, `l:type-mutate` in `ops`
 Distinct from generators (op h skip above → cpython#120321): type mutation is *not* already
 covered by the mix or the skip list, so it opens genuinely new surface.
 
+## Phase 8 as-built: shared-callable mutation (`--tsan-mutate-callables`, op m)
+
+**Motivation.** The op-mix still never mutated a **function** object — the `func_code` /
+`func_version` / `__defaults__` / `__kwdefaults__` / closure-cell surface was untouched. Function
+attribute setters `Py_XSETREF` the old value with **no critical section**, so two threads assigning
+one shared function's attribute both decref the old value → a concurrent **double-free** (the
+`func_set_qualname` class of cpython#153297).
+
+**op (m)** (opt-in, `--tsan-mutate-callables`, `store_true`, default off; `tsan_options`). A fresh
+**generic** shared closure `_tsan_shared_fn` (1 free var → a real cell) + a pool of
+`__code__`-swap-compatible code objects (each a 1-freevar closure, so `func_set_code`'s
+freevar-count check passes) are emitted always (inert under `_MUTATE_CALLABLES`, like op l/j). When
+on, the worker:
+- **writers** (`_role != 0`) swap `__defaults__` / `__kwdefaults__`, stomp the closure cell's
+  `cell_contents`, and periodically swap `__code__` from the pool;
+- **readers** (`_role != 1`) **call** the shared function (which reads `func_code`/defaults/cell).
+
+Generic (not the target's), so it works for every target. Manifest advertises it (`mutate_callables`,
+`m:callable-mutate`, human line `ops=…+m`); default runs unchanged. Tests: `test_tsan_generation.py`
+(`test_mutate_callables_off_by_default` / `_op_emitted_when_enabled` /
+`_composes_with_types_and_state`). **Immediately effective:** on `debug-ft-nojit` (no sanitizer) the
+`__defaults__` and `__code__` swaps abort 3/3 with `_Py_NegativeRefcount` (double-free of the
+replaced tuple / code object). Prior art: cpython#153297 / PR #153335 harden `__name__` /
+`__qualname__` / `__code__` — but **not** `__defaults__` / `__kwdefaults__`, which op (m) surfaces as
+uncovered siblings of the same setter race. (`cell_contents` stomping did **not** crash — that path
+is already FT-safe.)
+
 ## 10. Testing
 
 - **Golden emitter tests:** the stress region is deterministic given a seed → add a golden

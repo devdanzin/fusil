@@ -64,6 +64,7 @@ def _make_tsan_options(
     mutate_state=False,
     shared_objects_only=False,
     mutate_types=False,
+    mutate_callables=False,
 ):
     o = MagicMock()
     o.tsan = True
@@ -91,6 +92,7 @@ def _make_tsan_options(
     o.tsan_mutate_state = mutate_state
     o.tsan_shared_objects_only = shared_objects_only  # same auto-vivify caveat
     o.tsan_mutate_types = mutate_types  # same auto-vivify caveat (op l, opt-in)
+    o.tsan_mutate_callables = mutate_callables  # same auto-vivify caveat (op m, opt-in)
     return o
 
 
@@ -448,6 +450,46 @@ class TestTSanGeneration(unittest.TestCase):
         self.assertIn("j:prop-reassign", manifest["ops"])
         self.assertIn("l:type-mutate", manifest["ops"])
         self.assertIn("ops=a-j+l", src)
+
+    def test_mutate_callables_off_by_default(self):
+        # --tsan-mutate-callables is opt-in: op (m) never runs by default.
+        src = _generate_tsan()
+        self.assertIn("_MUTATE_CALLABLES = False", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertFalse(manifest["mutate_callables"])
+        self.assertNotIn("m:callable-mutate", manifest["ops"])
+        self.assertIn("ops=a-i", src)  # human provenance line unchanged when off
+
+    def test_mutate_callables_op_emitted_when_enabled(self):
+        # With --tsan-mutate-callables the worker gains op (m): concurrent mutation of a shared
+        # FUNCTION (__code__ / __defaults__ / cell_contents) vs caller readers.
+        src = _generate_tsan(mutate_callables=True)
+        ast.parse(src)  # still valid Python
+        self.assertIn("_MUTATE_CALLABLES = True", src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertTrue(manifest["mutate_callables"])
+        self.assertIn("m:callable-mutate", manifest["ops"])
+        self.assertIn("ops=a-i+m", src)  # human provenance line advertises op m
+        # the shared closure + swap-compatible code pool are emitted, and the worker mutates the
+        # callable (defaults / code swap / cell stomp) while readers call it.
+        self.assertIn("_tsan_shared_fn = _tsan_make_closure()", src)
+        self.assertIn("_tsan_code_pool = [", src)
+        self.assertIn("_tsan_shared_fn.__defaults__ =", src)  # defaults-tuple race
+        self.assertIn(
+            "_tsan_shared_fn.__kwdefaults__ =", src
+        )  # kwdefaults race (uncovered sibling)
+        self.assertIn(".cell_contents = _i", src)  # closure-cell refcount race
+        self.assertIn("_tsan_shared_fn.__code__ = _tsan_code_pool[", src)  # func_code swap
+        self.assertIn("_tsan_shared_fn()", src)  # reader-side call
+
+    def test_mutate_callables_composes_with_types_and_state(self):
+        # All three opt-in mutation ops together: provenance advertises a-j+l+m.
+        src = _generate_tsan(mutate_state=True, mutate_types=True, mutate_callables=True)
+        ast.parse(src)
+        manifest = _extract_tsan_manifest(src)
+        self.assertIn("l:type-mutate", manifest["ops"])
+        self.assertIn("m:callable-mutate", manifest["ops"])
+        self.assertIn("ops=a-j+l+m", src)
 
     def test_shared_objects_only_off_by_default(self):
         # Default: the generic builtin iterators (op h) and shared-container ops (f/i) are present.
