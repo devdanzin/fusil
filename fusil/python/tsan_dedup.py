@@ -316,10 +316,17 @@ def _parse_race(text, source_roots=None):
         else:
             i += 1
     if len(stanzas) < 2:
-        # A malformed / single-stanza report: still try to key on whatever we have.
+        # A single-stanza report is INCOMPLETE: TSan always emits >=2 accesses for a data race,
+        # so a lone stanza means the 2nd was lost -- either an unmatched access header (a parser
+        # gap) or, under halt_on_error=0, the report was read mid-flush while the child was still
+        # writing it. Key the one site we DO have against "?" rather than DUPLICATING it into a
+        # symmetric "A | A": a fabricated self-race is indistinguishable from a genuine two-thread
+        # self-race, so it pollutes the catalog and invents spurious "NEW"s (seen live in
+        # fusil-tsan_fleet_17: partial reads mislabeled _Py_TYPE_impl|_Py_TYPE_impl etc.). "? | A"
+        # instead preserves the one site we saw and honestly marks the report as partial.
         if not stanzas:
             return None
-        stanzas.append(stanzas[0])
+        stanzas.append([])
     sites = [_top_site(fr, source_roots) for fr in stanzas[:2]]
     if all(s is None for s in sites):
         return None

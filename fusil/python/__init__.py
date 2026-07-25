@@ -745,6 +745,15 @@ class Fuzzer(Application):
         target_cmd = [self.options.python, "-u", "<source.py>"]
         if self.options.tsan:
             target_cmd = ["setarch", "-R"] + target_cmd
+            # Under --tsan the child keeps running (and printing) after the first race trips the
+            # stdout watcher (halt_on_error=0). CreateProcess.on_session_stop terminates it on the
+            # stop -- ahead of the SessionAgent keep-policy that reads stdout -- so it needs a
+            # grace-drain: without one, terminate() SIGKILLs immediately and the kept report is
+            # truncated mid-stanza (a partial single-stanza race then mis-keys as a self-race).
+            # Default it here; an explicit --crash-drain-ms wins (0 was only ever the sensible
+            # default for non-tsan targets, where the crash self-terminates the child).
+            if not self.options.crash_drain_ms:
+                self.options.crash_drain_ms = 5000
         process = PythonProcess(
             project,
             self.options,

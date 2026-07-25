@@ -419,6 +419,30 @@ class CreateProcess(ProjectAgent):
                 self._terminate()
                 sleep(0.500)
 
+    def on_session_stop(self):
+        """Reap the child on the session stop -- BEFORE the keep-policy reads its stdout.
+
+        A watcher can score a session to a stop while the child is still RUNNING -- most
+        importantly a TSan ``WARNING: ThreadSanitizer: data race`` under halt_on_error=0
+        (``--tsan-no-halt``), where the child keeps executing (and printing more reports) after
+        the first race trips the stdout watcher. ``SessionDirectory`` is a ``SessionAgent``, so
+        its ``deinit`` -> ``checkKeepDirectory`` (which runs the in-loop dedupe keep-policy)
+        fires AHEAD of this ``ProjectAgent``'s own ``deinit`` -> ``terminate()``: the keep-policy
+        then reads a HALF-WRITTEN stdout and mis-keys the truncated report (a single-stanza race
+        fabricated into a bogus ``A | A`` self-race). Terminating here, on the stop, runs the
+        grace-drain (``--crash-drain-ms``) so the child finishes its in-flight report and is
+        reaped + flushed before the keep-policy reads.
+
+        Gated to ``--tsan``: it is the mode where a crash-scored stop routinely leaves the child
+        alive (halt_on_error=0). Elsewhere the crash self-terminates the child, so terminate()
+        here is the same no-op reap it already does at ``deinit`` time; ``deinit`` remains the
+        backstop for both (terminate() is idempotent once the child is reaped).
+        """
+        if not getattr(self.options, "tsan", False):
+            return
+        if self.process is not None:
+            self.terminate()
+
     def deinit(self):
         if self.process:
             self.terminate()

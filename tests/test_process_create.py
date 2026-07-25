@@ -731,6 +731,38 @@ class TestLive(unittest.TestCase):
         self.assertIn(("session_rename", ("timeout",)), agent.sent)
 
 
+# =================================================================== on_session_stop (reap)
+@unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
+class TestOnSessionStop(unittest.TestCase):
+    """Under --tsan the child keeps running after the first race trips the stdout watcher, so
+    it must be reaped on the stop -- ahead of the SessionAgent keep-policy that reads stdout --
+    or the keep-policy reads a half-written report. on_session_stop terminates it for --tsan."""
+
+    def test_tsan_running_child_is_terminated_on_stop(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(tsan=True))
+        agent.process = _FakePopen(poll_status=None)  # still running
+        agent._terminated = False
+        agent.terminate = lambda: setattr(agent, "_terminated", True)
+        agent.on_session_stop()
+        self.assertTrue(agent._terminated)
+
+    def test_non_tsan_does_not_terminate_on_stop(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(tsan=False))
+        agent.process = _FakePopen(poll_status=None)
+        agent._terminated = False
+        agent.terminate = lambda: setattr(agent, "_terminated", True)
+        agent.on_session_stop()
+        self.assertFalse(agent._terminated)  # unchanged: terminate() stays at deinit time
+
+    def test_tsan_no_child_is_noop(self):
+        agent, _ = _make(arguments=["python"], name="p", options=_options(tsan=True))
+        agent.process = None
+        agent._terminated = False
+        agent.terminate = lambda: setattr(agent, "_terminated", True)
+        agent.on_session_stop()
+        self.assertFalse(agent._terminated)
+
+
 # =========================================================================== terminate
 @unittest.skipUnless(HAVE_CREATE, "fusil runtime stack (python-ptrace) not importable")
 class TestTerminate(unittest.TestCase):

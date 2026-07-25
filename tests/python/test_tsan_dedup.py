@@ -82,6 +82,22 @@ REPORT_PUBLIC_THREAD_API = "\n".join(
     ]
 )
 
+# A TRUNCATED report: the WARNING + first access stanza are present, but the report was read
+# mid-flush (halt_on_error=0, child still writing) so the SECOND stanza never arrived. A data race
+# always has >=2 accesses, so a lone stanza is incomplete -- it must NOT be duplicated into a
+# fabricated "A | A" self-race (which masquerades as a real two-thread self-race). Seen live in
+# fusil-tsan_fleet_17 (partial reads -> _Py_TYPE_impl|_Py_TYPE_impl, PyMem_RawMalloc|PyMem_RawMalloc).
+REPORT_TRUNCATED_SINGLE_STANZA = "\n".join(
+    [
+        "WARNING: ThreadSanitizer: data race (pid=7)",
+        "  Read of size 8 at 0x7f00 by thread T11:",
+        "    #0 _Py_TYPE_impl /b/./Include/object.h:270:12 (python+0x1) (BuildId: aa)",
+        "    #1 _PyEval_EvalFrameDefault /b/Python/ceval.c:1000:3 (python+0x2) (BuildId: aa)",
+        "    #2 method_vectorcall /b/./Objects/classobject.c:55:12 (python+0x3) (BuildId: aa)",
+        # ...file ends here, mid-flush: no "Previous write" stanza, no SUMMARY.
+    ]
+)
+
 # TSan lowercases the whole SECOND access line, including the `atomic` qualifier: "Previous
 # atomic write". The reader-vs-atomic-writer shape is the single most common race class in the
 # catalog, so failing to match this header dropped the 2nd stanza and (via the len<2 fallback)
@@ -241,6 +257,16 @@ class TestParse(unittest.TestCase):
             " | Modules/_threadmodule.c:rlock_repr",
         )
         self.assertFalse(r["framework"])
+
+    def test_truncated_single_stanza_keys_partial_not_self_pair(self):
+        # A report cut off after the first stanza (mid-flush read) must key as "? | <site>",
+        # NEVER duplicate the lone site into a fabricated "A | A" self-race.
+        r = tsan_dedup.parse_report(REPORT_TRUNCATED_SINGLE_STANZA)
+        self.assertEqual(r["signature"], "? | Include/object.h:_Py_TYPE_impl")
+        self.assertNotEqual(
+            r["signature"],
+            "Include/object.h:_Py_TYPE_impl | Include/object.h:_Py_TYPE_impl",
+        )
 
     def test_access_header_variants_match(self):
         for header in (
