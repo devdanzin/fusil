@@ -147,6 +147,23 @@ optionally prunes the ~96%-duplicate crashes as they happen.
 Full details: [`oom-fuzzing.md`](oom-fuzzing.md), [`oom-sequences.md`](oom-sequences.md),
 [`oom-dedup-plan.md`](oom-dedup-plan.md).
 
+## sys.monitoring hostile-callback fuzzing — `--sys-monitoring`
+
+Stresses the PEP 669 (`sys.monitoring`) instrumentation / event-dispatch C machinery — a complex
+state machine that is lightly fuzzed. `WritePythonCode._write_monitoring_region` emits a
+self-contained region (the whole session's logic, like `--new-uninit`): it acquires a monitoring
+tool id, registers a **hostile callback** for a rotating subset of events, instruments a generic
+loop plus the target module's own functions, and runs them so events fire. The callback mostly
+returns normally but every few calls detonates — it raises, returns the `DISABLE` sentinel or
+junk, or **re-entrantly mutates the monitoring state** (`set_events` / `register_callback` /
+`free_tool_id` / `restart_events`) from *inside* the dispatcher. A **second tool** statically
+instruments the same code so multi-tool dispatch (the most fragile area) is exercised too. The
+run is bounded (small targets, few rounds) so per-line/per-instruction events can't hang, and
+every step is guarded so one bad slot never stops the sweep; the tool ids are released at the end.
+Opt-in (`store_true`, default off; in the "generic hostile modes" group). On current CPython this
+runs clean (no immediate find), but it is an armed probe of an under-fuzzed surface. Tests:
+`test_monitoring_generation.py`.
+
 ## JIT fuzzing — moved to lafleur
 
 fusil no longer fuzzes the Tier-2 JIT. The `fusil/python/jit/` subsystem and the `--jit-*`
@@ -191,6 +208,7 @@ PYTHONPATH=$PWD python fuzzers/fusil-python-threaded --unsafe [options]
 #   --only-generate          write source.py without executing it
 #   --deep-dive              recursively fuzz method return values (off by default)
 #   --oom-fuzz / --oom-seq   OOM (allocation-failure) injection
+#   --sys-monitoring         PEP 669 sys.monitoring hostile-callback stress mode
 #   --oom-dedup-catalog F    in-loop crash dedup/labeling vs a known-sites snapshot
 #   --no-memory-limit        don't apply RLIMIT_AS (implied for ASan targets)
 ```
