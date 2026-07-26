@@ -93,6 +93,23 @@ class TestMonitoringGeneration(unittest.TestCase):
         self.assertIn("def _mon_target(", src)  # generic instrumented loop
         self.assertIn("for _name in list(dir(fuzz_target_module)):", src)  # module's own functions
 
+    def test_region_is_threaded(self):
+        # The rounds run CONCURRENTLY from barrier-released workers, so the hostile callbacks and
+        # their re-entrant monitoring-state mutations race across threads (PEP 669 x PEP 703).
+        src = _generate(sys_monitoring=True)
+        self.assertIn("def _mon_one_round(_round):", src)
+        self.assertIn("def _mon_worker():", src)
+        self.assertIn("import threading as _mon_threading", src)
+        self.assertIn("_mon_threading.Barrier", src)
+        self.assertIn("_mon_threading.Thread(target=_mon_worker)", src)
+        self.assertNotIn("for _round in range(200):", src)  # the old single-threaded loop is gone
+
+    def test_reentrant_reregistration_cycles_events(self):
+        # The reentrant register_callback inside the hostile callback must cycle through every event
+        # kind (not hardcode LINE), so the reentrant-mutation-from-dispatch path hits all events.
+        src = _generate(sys_monitoring=True)
+        self.assertIn("_local_evs[_mon_calls[0] % len(_local_evs)]", src)
+
 
 if __name__ == "__main__":
     unittest.main()

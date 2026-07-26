@@ -1792,8 +1792,14 @@ class WritePythonCode(WriteCode):
                         except BaseException:
                             pass
                     elif _r == 4:
+                        # cycle the re-registered event (not just LINE), so this reentrant
+                        # register_callback-from-inside-dispatch hits every event kind over time
                         try:
-                            _mon.register_callback(_TID, _evbit("LINE"), _mon_cb)
+                            _ev2 = (
+                                _local_evs[_mon_calls[0] % len(_local_evs)][1]
+                                if _local_evs else _evbit("LINE")
+                            )
+                            _mon.register_callback(_TID, _ev2, _mon_cb)
                         except BaseException:
                             pass
                     elif _r == 5:
@@ -1873,7 +1879,7 @@ class WritePythonCode(WriteCode):
                         except BaseException:
                             pass
 
-                for _round in range(200):
+                def _mon_one_round(_round):
                     try:
                         # (1) register the hostile callback for a rotating event subset
                         for _n, _bit in _local_evs:
@@ -1914,6 +1920,31 @@ class WritePythonCode(WriteCode):
                             pass
                     except BaseException:
                         pass
+
+                # Run the rounds CONCURRENTLY from several barrier-released workers, so the hostile
+                # callbacks -- and their re-entrant set_events / register_callback / free_tool_id /
+                # restart_events -- mutate the PROCESS-GLOBAL monitoring state from many threads at
+                # once. That is the PEP-669 (monitoring) x PEP-703 (free-threading) concurrent-
+                # monitoring surface the single-threaded sweep can't reach. Bounded rounds/threads so
+                # the per-line LINE/INSTRUCTION callbacks can't hang under the fleet timeout.
+                import threading as _mon_threading
+
+                _MON_NW = 6
+                _mon_barrier = _mon_threading.Barrier(_MON_NW)
+
+                def _mon_worker():
+                    try:
+                        _mon_barrier.wait(timeout=10)
+                    except BaseException:
+                        pass
+                    for _round in range(100):
+                        _mon_one_round(_round)
+
+                _mon_threads = [_mon_threading.Thread(target=_mon_worker) for _ in range(_MON_NW)]
+                for _t in _mon_threads:
+                    _t.start()
+                for _t in _mon_threads:
+                    _t.join()
 
                 # Final cleanup: clear all events and release both tool ids.
                 try:
