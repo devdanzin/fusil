@@ -110,6 +110,31 @@ class TestMonitoringGeneration(unittest.TestCase):
         src = _generate(sys_monitoring=True)
         self.assertIn("_local_evs[_mon_calls[0] % len(_local_evs)]", src)
 
+    def test_callback_detonation_is_gated_and_contained(self):
+        # The hostile callback fires on GLOBAL monitoring events, which dispatch process-wide --
+        # including on thread management, the region's own error handler, and interpreter shutdown.
+        # A raise/DISABLE there would escape un-instrumented code and kill the whole script (the
+        # exit-1-every-session bug). Detonation must be gated behind a thread-local flag armed ONLY
+        # around the wrapped target run, and the raise branch must disarm BEFORE raising so an
+        # interrupted disarm-store can't leave the flag stuck True (which would bomb thread teardown).
+        src = _generate(sys_monitoring=True)
+        self.assertIn("_mon_active = _mon_threading.local()", src)
+        self.assertIn('if not getattr(_mon_active, "on", False):', src)
+        # armed only around the target run, disarmed in a finally
+        self.assertIn("_mon_active.on = True", src)
+        self.assertIn("_mon_active.on = False", src)
+        # disarm-before-raise: the flag is cleared on the line immediately before the raise
+        self.assertIn(
+            '_mon_active.on = False\n            raise ValueError("fusil monitoring callback bomb")',
+            src,
+        )
+
+    def test_all_tool_ids_force_cleared_on_exit(self):
+        # Defense-in-depth: whatever a reentrant callback left set, no tool may keep GLOBAL events
+        # enabled past the region, or a stray event bombs threading._shutdown at interpreter exit.
+        src = _generate(sys_monitoring=True)
+        self.assertIn("for _tid in range(6):", src)
+
     def test_composes_with_tsan(self):
         # `--tsan --sys-monitoring` must emit the (threaded) MONITORING region -- run under the full
         # --tsan environment -- NOT the tsan concurrency-stress region. --sys-monitoring wins.

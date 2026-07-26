@@ -1748,6 +1748,15 @@ class WritePythonCode(WriteCode):
 
             def _mon_run():
                 _mon_calls = [0]
+                # Global monitoring events (set_events) fire process-wide -- on the main thread's
+                # thread management, this region's own error handler, and the import + threading-
+                # shutdown machinery, none of which we wrap. A callback that raises/DISABLEs there
+                # escapes into that un-instrumented code and kills the whole script (exit 1) before
+                # the machinery is even stressed. So detonation is gated on this thread-local flag,
+                # set True ONLY while a worker is running an instrumented target inside a try/except
+                # (below); everywhere else the callback fires but returns None, harmlessly.
+                import threading as _mon_threading
+                _mon_active = _mon_threading.local()
                 # Pick a tool id, freeing it first in case a previous region left it registered.
                 _TID = 3
                 for _cand in (3, 4, 2, 1, 0, 5):
@@ -1783,8 +1792,18 @@ class WritePythonCode(WriteCode):
                 # the monitoring state while the C dispatcher is still mid-callback.
                 def _mon_cb(*_a):
                     _mon_calls[0] += 1
+                    # Detonate ONLY inside a controlled target call (see _mon_active above); a global
+                    # event firing on thread management / the error handler / interpreter shutdown
+                    # dispatches here too, and a raise there would escape un-instrumented code.
+                    if not getattr(_mon_active, "on", False):
+                        return None
                     _r = _mon_calls[0] % 11
                     if _r == 0:
+                        # Disarm BEFORE raising: setting _mon_active.on is itself a monitored op,
+                        # so a global event can dispatch here mid-disarm-store. Clearing the flag
+                        # first guarantees it can't be left stuck True -- otherwise a later global
+                        # event (in thread teardown / _delete) would bomb and kill the worker.
+                        _mon_active.on = False
                         raise ValueError("fusil monitoring callback bomb")
                     if _r == 1:
                         return _mon.DISABLE
@@ -1911,12 +1930,17 @@ class WritePythonCode(WriteCode):
                                 _mon.set_local_events(_TID, _fn.__code__, _lmask)
                             except BaseException:
                                 pass
-                        # (4) run instrumented code -> events fire -> hostile callbacks dispatch
-                        for _fn in _mon_targets:
-                            try:
-                                _fn(12) if _fn is _mon_target else _fn()
-                            except BaseException:
-                                pass
+                        # (4) run instrumented code -> events fire -> hostile callbacks dispatch.
+                        # Arm detonation only for this bounded, wrapped stretch (see _mon_active).
+                        _mon_active.on = True
+                        try:
+                            for _fn in _mon_targets:
+                                try:
+                                    _fn(12) if _fn is _mon_target else _fn()
+                                except BaseException:
+                                    pass
+                        finally:
+                            _mon_active.on = False
                         # (5) tear down this round (the callback may already have)
                         try:
                             _mon.set_events(_TID, 0)
@@ -1931,8 +1955,6 @@ class WritePythonCode(WriteCode):
                 # once. That is the PEP-669 (monitoring) x PEP-703 (free-threading) concurrent-
                 # monitoring surface the single-threaded sweep can't reach. Bounded rounds/threads so
                 # the per-line LINE/INSTRUCTION callbacks can't hang under the fleet timeout.
-                import threading as _mon_threading
-
                 _MON_NW = 6
                 _mon_barrier = _mon_threading.Barrier(_MON_NW)
 
@@ -1944,14 +1966,16 @@ class WritePythonCode(WriteCode):
                     for _round in range(100):
                         _mon_one_round(_round)
 
-                _mon_threads = [_mon_threading.Thread(target=_mon_worker) for _ in range(_MON_NW)]
-                for _t in _mon_threads:
-                    _t.start()
-                for _t in _mon_threads:
-                    _t.join()
-
-                # Final cleanup: clear all events and release both tool ids.
                 try:
+                    _mon_threads = [
+                        _mon_threading.Thread(target=_mon_worker) for _ in range(_MON_NW)
+                    ]
+                    for _t in _mon_threads:
+                        _t.start()
+                    for _t in _mon_threads:
+                        _t.join()
+
+                    # Final cleanup: clear all events and release both tool ids.
                     for _fn in _mon_targets:
                         for _tid in (_TID, _TID2):
                             if _tid < 0:
@@ -1968,8 +1992,16 @@ class WritePythonCode(WriteCode):
                             _mon.free_tool_id(_tid)
                         except BaseException:
                             pass
-                except BaseException:
-                    pass
+                finally:
+                    # Defense-in-depth: whatever happened above (incl. a reentrant callback leaving
+                    # events set on some other id), guarantee NO tool has global events left on, so
+                    # interpreter shutdown / the rest of the script run clean instead of dispatching
+                    # a stray callback. Without this a leaked global event bombs threading._shutdown.
+                    for _tid in range(6):
+                        try:
+                            _mon.set_events(_tid, 0)
+                        except BaseException:
+                            pass
 
             if _mon is None:
                 print("[MONITORING] sys.monitoring unavailable (need CPython 3.12+); skipping",
