@@ -769,6 +769,17 @@ class WritePythonCode(WriteCode):
         """Writes the core fuzzing loops for functions, classes, and objects."""
         self._write_fuzzing_logic_preamble()
 
+        # --sys-monitoring mode: stress the sys.monitoring (PEP 669) instrumentation / event-
+        # dispatch C machinery with HOSTILE callbacks (raise / DISABLE / junk / re-entrant
+        # set_events / register_callback / free_tool_id from inside a callback), now from several
+        # barrier-released threads. Checked BEFORE --tsan so `--tsan --sys-monitoring` COMPOSES:
+        # the monitoring region runs under the full --tsan environment (TSan build, TSAN_OPTIONS,
+        # setarch -R, unlimited RLIMIT_AS, PYTHON_GIL=0), so its concurrent monitoring-state
+        # mutation is reported as data races -- the PEP 669 x PEP 703 surface. Self-contained.
+        if getattr(self.options, "sys_monitoring", False):
+            self._write_monitoring_region()
+            return
+
         # TSan / --concurrency-stress mode: skip the single-threaded function/class/object sweeps
         # and emit only the concurrency-stress region -- it instantiates its own shared objects and
         # hammers them from many threads, which is the whole point (and keeps the script small).
@@ -782,13 +793,6 @@ class WritePythonCode(WriteCode):
         # re-validating can segfault an alternative interpreter (the RustPython re.Match seam).
         if getattr(self.options, "new_uninit", False):
             self._write_new_uninit_region()
-            return
-
-        # --sys-monitoring mode: stress the sys.monitoring (PEP 669) instrumentation / event-
-        # dispatch C machinery with HOSTILE callbacks (raise / DISABLE / junk / re-entrant
-        # set_events / register_callback / free_tool_id from inside a callback). Self-contained.
-        if getattr(self.options, "sys_monitoring", False):
-            self._write_monitoring_region()
             return
 
         self._write_function_fuzzing_loop()
