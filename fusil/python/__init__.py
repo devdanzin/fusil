@@ -966,6 +966,13 @@ class Fuzzer(Application):
             # these is the injected object's own exception text, never a target crash.
             r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
             r"|stateful hash)",
+            # The --new-uninit region prints a progress marker per poked type,
+            # e.g. "[NEW-UNINIT] poking SystemError". The type name is arbitrary and
+            # routinely collides with a crash word ("SystemError" -> a 1.0 hit) or, worse,
+            # a kill word ("[NEW-UNINIT] poking MemoryError" -> the "MemoryError" kill word,
+            # which would drop the whole session and lose a genuine crash). These marker
+            # lines are our own output, never a target signal, so skip them before matching.
+            r"^\[NEW-UNINIT\] ",
         )
         for ignore_pattern in core_ignore_regexes + tuple(
             self.plugin_manager.get_stdout_ignore_regexes()
