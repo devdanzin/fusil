@@ -126,6 +126,30 @@ class TestProcessLineScoring(unittest.TestCase):
         w = _watch(words={"error": 0.3}, kill_words={"MemoryError"})
         self.assertEqual(w.processLine(b"MemoryError: out of memory"), "KILL")
 
+    def test_new_uninit_marker_lines_ignored_but_real_still_scores(self):
+        # The --new-uninit region prints "[NEW-UNINIT] poking <TypeName>" per poked type.
+        # The type name collides with detection words: "SystemError" is a 1.0 hit word and
+        # "MemoryError" is a kill word. Without the ignore filter, "[NEW-UNINIT] poking
+        # MemoryError" would return KILL and drop a genuinely-crashing session. The core
+        # ignore regex (mirrored from fusil.python.Fuzzer) must skip every marker line.
+        w = _watch(words={"SystemError": 1.0}, kill_words={"MemoryError"})
+        w.ignoreRegex(r"^\[NEW-UNINIT\] ")
+        for line in (
+            b"[NEW-UNINIT] entering uninitialized-object region",
+            b"[NEW-UNINIT] discovered 115 candidate types",
+            b"[NEW-UNINIT] poking SystemError",  # collides with the SystemError hit word
+            b"[NEW-UNINIT] poking MemoryError",  # collides with the MemoryError kill word
+            b"[NEW-UNINIT] region complete",
+        ):
+            self.assertIsNone(w.processLine(line))
+        self.assertEqual(w.score, 0.0)
+        self.assertEqual(w.sent, [])
+        # Real signatures on their own lines are unaffected: SystemError still scores, and a
+        # genuine MemoryError still kills.
+        w.processLine(b"SystemError: null argument to internal routine")
+        self.assertEqual(w.score, 1.0)
+        self.assertEqual(w.processLine(b"MemoryError: out of memory"), "KILL")
+
     def test_cleanup_func_applied_before_matching(self):
         w = _watch(words={"boom": 1.0})
         w.cleanup_func = lambda line: line.replace(b"XXX", b"boom")
