@@ -137,6 +137,16 @@ class Fuzzer(Application):
             default=0,
         )
         running_options.add_option(
+            "--debuginfod-urls",
+            help="Value to set DEBUGINFOD_URLS to in EVERY target child (all modes), default "
+            "empty = CLEARED. llvm-symbolizer (ASan/TSan/UBSan) honours DEBUGINFOD_URLS and blocks "
+            "~forever when it is the (currently blackholed) Ubuntu login-shell default, so clearing "
+            "it keeps symbolization fast for any sanitized build. Pass a URL to turn debuginfod back "
+            "ON (e.g. --debuginfod-urls=https://debuginfod.ubuntu.com, or your own server).",
+            type="str",
+            default="",
+        )
+        running_options.add_option(
             "--python",
             help="Python executable program path (default: %s)" % PYTHON,
             type="str",
@@ -772,6 +782,13 @@ class Fuzzer(Application):
         # panic, so the crash dir captures the panicking `crates/<path>.rs:<line>` frame (better
         # dedup + reports). Harmless no-op for CPython/PyPy, which ignore the variable.
         process.env.set("RUST_BACKTRACE", "1")
+        # Clear DEBUGINFOD_URLS in EVERY mode (default ""; --debuginfod-urls overrides). Ubuntu login
+        # shells export DEBUGINFOD_URLS=debuginfod.ubuntu.com, which llvm-symbolizer (ASan/TSan/UBSan)
+        # honours and then blocks ~forever on that currently-blackholed endpoint -- so any sanitized
+        # build, not just --tsan, needs it cleared for fast symbolization. fusil's child env is
+        # minimal and does not copy it, but set it explicitly so symbolization is fast regardless of
+        # how the parent/systemd env is configured. Pass --debuginfod-urls=<url> to turn it back on.
+        process.env.set("DEBUGINFOD_URLS", self.options.debuginfod_urls)
         # ThreadSanitizer reserves more virtual address space than any finite RLIMIT_AS allows and
         # re-execs itself to raise the cap; a finite hard cap makes that re-exec fail (setrlimit
         # EINVAL) and TSan then runs DEGRADED, detecting nothing. So leave the cap OFF under --tsan
@@ -896,11 +913,7 @@ class Fuzzer(Application):
                     )
             process.env.set("TSAN_OPTIONS", ":".join(tsan_opts))
             process.env.set("PYTHON_GIL", "0")
-            # Clear DEBUGINFOD_URLS so llvm-symbolizer resolves frames from the target's own (full)
-            # debug info instead of blocking on the unreachable Ubuntu debuginfod server. fusil's
-            # child env is minimal and does not copy DEBUGINFOD_URLS, but set it empty explicitly so
-            # symbolization stays fast regardless of how the parent env is configured.
-            process.env.set("DEBUGINFOD_URLS", "")
+            # (DEBUGINFOD_URLS is cleared unconditionally for every mode above, near RUST_BACKTRACE.)
             self.error(
                 "TSan: target verified free-threaded + ThreadSanitizer; ASLR disabled via "
                 "`setarch -R`; TSAN_OPTIONS=%s" % ":".join(tsan_opts)
