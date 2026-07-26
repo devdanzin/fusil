@@ -110,6 +110,14 @@ class TestMonitoringGeneration(unittest.TestCase):
         src = _generate(sys_monitoring=True)
         self.assertIn("_local_evs[_mon_calls[0] % len(_local_evs)]", src)
 
+    def test_composes_with_tsan(self):
+        # `--tsan --sys-monitoring` must emit the (threaded) MONITORING region -- run under the full
+        # --tsan environment -- NOT the tsan concurrency-stress region. --sys-monitoring wins.
+        src = _generate(sys_monitoring=True, tsan=True)
+        self.assertIn("# --- sys.monitoring hostile-callback region (--sys-monitoring) ---", src)
+        self.assertIn("def _mon_worker():", src)
+        self.assertNotIn("TSan concurrency-stress region", src)
+
 
 if __name__ == "__main__":
     unittest.main()

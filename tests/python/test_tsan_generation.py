@@ -68,6 +68,12 @@ def _make_tsan_options(
 ):
     o = MagicMock()
     o.tsan = True
+    # Other generation MODES must be explicitly False: a bare MagicMock auto-vivifies a truthy
+    # attribute, and _write_main_fuzzing_logic checks --sys-monitoring BEFORE --tsan (they compose),
+    # so an unset o.sys_monitoring would hijack every tsan test into the monitoring region.
+    o.sys_monitoring = False
+    o.new_uninit = False
+    o.concurrency_stress = False
     o.tsan_threads = threads
     o.tsan_iterations = iterations
     o.tsan_shared_objects = shared_objects
