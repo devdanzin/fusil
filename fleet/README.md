@@ -159,3 +159,44 @@ race that merely shares a frame with a gateway function). Prioritize the kept cr
 
 To see raw systemd state at any time: `systemctl status 'fusil@*'`,
 `journalctl -u fusil@3 -e`.
+
+## Troubleshooting
+
+### Every instance dies instantly with `status=203/EXEC` ("Permission denied")
+
+On **RHEL-family hosts** (Oracle Linux, RHEL, Fedora, Alma/Rocky) with SELinux **enforcing**,
+files under `/home` are labelled `user_home_t`, and systemd services (`init_t`) are **not
+permitted to execute them**. The journal looks like a missing `+x` bit:
+
+```
+fusil@1.service: Failed to locate executable /home/opc/projects/fusil/fleet/fleet-run: Permission denied
+fusil@1.service: Failed at step EXEC spawning .../fleet-run: Permission denied
+fusil@1.service: Main process exited, code=exited, status=203/EXEC
+```
+
+…but the real cause is an SELinux denial, visible only via `sudo ausearch -m avc -ts recent` or
+`setroubleshoot`. `chmod +x` will not help. `fleet check` now warns about this up front.
+
+Two things make it confusing: the error names the *executable* rather than SELinux, and the whole
+exec chain is affected — systemd runs `fleet-run`, which execs `RUNNER_PY`, which execs
+`TARGET_PYTHON`. **Relabelling only `fleet-run` just moves the denial to the next one.** A shim in
+`/usr/local/bin` doesn't help either: it still runs as `init_t` when it execs the home-dir script.
+
+Fixes, simplest first:
+
+```bash
+# 1. Dedicated fuzzing box: just stop enforcing. (A real, if small, security tradeoff --
+#    reasonable on a disposable instance whose job is running a fuzzer against hostile input.)
+sudo setenforce 0
+sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config   # persist
+
+# 2. Keep enforcing: relabel the whole toolchain (re-run restorecon after every rebuild).
+sudo semanage fcontext -a -t bin_t "/path/to/fusil/fleet/fleet-run"
+sudo semanage fcontext -a -t bin_t "/path/to/venvs(/.*)?/bin(/.*)?"
+sudo restorecon -Rv /path/to/fusil/fleet /path/to/venvs /path/to/builds
+
+# 3. Cleanest long-term: keep the toolchain outside /home entirely (e.g. /opt).
+```
+
+The `audit2allow` recipe `setroubleshoot` prints works too, but grants `init_t` exec on home-dir
+files — about as broad as option 1, and harder to audit later.

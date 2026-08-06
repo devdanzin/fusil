@@ -97,6 +97,44 @@ cmd_info(){  # the fleet banner: what this fleet is + where it lives
     echo "gil modes : ${GIL_MODES:-1}"
 }
 
+check_selinux(){  # RHEL-family footgun: SELinux blocks systemd from exec'ing out of $HOME
+    # On Oracle Linux / RHEL / Fedora with SELinux enforcing, files under /home get the label
+    # user_home_t, and systemd services (init_t) are NOT permitted to execute them. Every
+    # instance then dies instantly with `status=203/EXEC` and "Permission denied" -- which
+    # looks exactly like a missing +x bit, so the real cause (an SELinux AVC denial) is only
+    # visible in the journal. Warn here instead, since preflight otherwise passes happily.
+    #
+    # WARNING, not a failure: a site-local policy module may legitimately allow this, and we
+    # must not refuse to start a fleet that would actually work.
+    command -v getenforce >/dev/null 2>&1 || return 0
+    [ "$(getenforce 2>/dev/null)" = "Enforcing" ] || return 0
+    command -v ls >/dev/null 2>&1 || return 0
+    local bad="" p label
+    # The WHOLE exec chain matters: systemd execs fleet-run, which execs RUNNER_PY, which
+    # execs TARGET_PYTHON. Relabelling only the first just moves the denial to the next one.
+    for p in "$HERE/fleet-run" "$RUNNER_PY" "$TARGET_PYTHON"; do
+        [ -e "$p" ] || continue
+        label="$(ls -Zd "$p" 2>/dev/null | awk '{print $1}')"
+        case "$label" in
+            *user_home_t*|*admin_home_t*) bad="$bad    $p  [$label]
+" ;;
+        esac
+    done
+    [ -n "$bad" ] || return 0
+    echo "  WARNING: SELinux is Enforcing and these are labelled *home_t, which systemd"
+    echo "  (init_t) may NOT execute. Each instance would die at 203/EXEC 'Permission denied':"
+    printf '%s' "$bad"
+    echo "    Note: a +x bit is NOT the problem, and relabelling only fleet-run is not enough --"
+    echo "    the whole chain (fleet-run -> RUNNER_PY -> TARGET_PYTHON) must be executable by systemd."
+    echo "    Confirm: sudo ausearch -m avc -ts recent"
+    echo "    Fix (dedicated fuzzing box, simplest): sudo setenforce 0"
+    echo "      persist: sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config"
+    echo "    Or keep enforcing and relabel the toolchain, e.g.:"
+    echo "      sudo semanage fcontext -a -t bin_t '$HERE/fleet-run'"
+    echo "      sudo restorecon -Rv '$HERE' \"\$(dirname \"\$(dirname '$RUNNER_PY')\")\""
+    echo "      (repeat for TARGET_PYTHON's build tree; re-run restorecon after each rebuild)"
+}
+
 cmd_check(){  # validate fleet.conf before we start anything (catches the #1 footgun:
               # wrong paths / a non-venv python that can't import fusil under systemd)
     local ok=1 repo
@@ -144,6 +182,8 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
                      echo "    -> use a free-threaded runner python, or remove $g from GIL_MODES"; ok=0; }
         done
     fi
+    # Advisory only (never sets ok=0) -- see check_selinux.
+    check_selinux
     [ "$ok" = 1 ] || die "preflight failed -- fix fleet.conf (see above), then retry"
     echo "preflight OK: runner imports fusil+ptrace; paths exist"
 }
