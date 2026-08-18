@@ -35,6 +35,21 @@ class TestContainerShapes(unittest.TestCase):
 class TestKnownEntriesPresent(unittest.TestCase):
     """Pin a few high-value entries so accidental deletion is caught."""
 
+    def test_pypy_self_harming_helpers_blacklisted(self):
+        # These attack the fuzzer or the host, not the target. attach_gdb was caught live on
+        # a PyPy 3.11 fleet: it runs gdb inside the session and gdb's banner scores on the
+        # "bug" word, manufacturing a crash. remote_exec injects code into an arbitrary pid.
+        self.assertLessEqual(
+            {"attach_gdb", "remote_exec", "set_code_callback", "_internal_crash"},
+            bl.BLACKLIST["__pypy__"],
+        )
+
+    def test_pypy_blacklist_stays_narrow(self):
+        # __pypy__ is PyPy-only surface with no CPython counterpart -- the reason to fuzz PyPy
+        # at all. Only the self-harming helpers belong here, never the interesting internals.
+        for keep in ("newdict", "strategy", "internal_repr", "intop", "move_to_end"):
+            self.assertNotIn(keep, bl.BLACKLIST["__pypy__"])
+
     def test_sys_trace_hooks_blacklisted(self):
         self.assertEqual(
             bl.BLACKLIST["sys"] & {"settrace", "setprofile"}, {"settrace", "setprofile"}
