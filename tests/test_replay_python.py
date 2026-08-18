@@ -54,6 +54,16 @@ class TestFormatPath(unittest.TestCase):
             "b'a' + cwd_bytes + b'b'",
         )
 
+    def test_empty_str_is_a_valid_expression(self):
+        # An empty value used to make formatPath return "" -- joining an empty result list --
+        # which the env-dict emitter turned into `"KEY": ,`, a SyntaxError. fusil sets
+        # DEBUGINFOD_URLS="" in EVERY target child, so this is the common case, and it made
+        # every replay.py in every run unparseable.
+        self.assertEqual(formatPath("", "/work", b"/work"), "''")
+
+    def test_empty_bytes_is_a_valid_expression(self):
+        self.assertEqual(formatPath(b"", "/work", b"/work"), "b''")
+
     def test_no_match_returns_plain_value(self):
         self.assertEqual(formatPath("nothing", "<path>", b"<path>"), repr("nothing"))
 
@@ -214,6 +224,18 @@ class TestGlobalVariables(unittest.TestCase):
     def test_env_dict_rendered(self):
         out = self._emit(arguments=["prog"], env={"KEY": "value"})
         self.assertIn('"KEY":', out)
+
+    def test_env_dict_with_empty_value_is_parseable(self):
+        # The existing validity test's fixture env has no empty values, so it could not catch
+        # the `"KEY": ,` regression. Assert on the emitted dict directly.
+        out = self._emit(arguments=["prog"], env={"DEBUGINFOD_URLS": "", "OTHER": "x"})
+        self.assertIn("\"DEBUGINFOD_URLS\": '',", out)
+        # Exec just the env block (globalVariables also emits chdir()/limits lines).
+        block = out[out.index("env = {") : out.index("}", out.index("env = {")) + 1]
+        namespace = {"cwd": "/work"}
+        exec(compile(block, "replay.py", "exec"), namespace)
+        self.assertEqual(namespace["env"]["DEBUGINFOD_URLS"], "")
+        self.assertEqual(namespace["env"]["OTHER"], "x")
 
     def test_need_cwd_bytes_when_argument_contains_cwd(self):
         # A bytes argument containing the cwd triggers the cwd_bytes helper line.
