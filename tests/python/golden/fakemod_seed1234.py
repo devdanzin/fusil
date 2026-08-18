@@ -273,7 +273,10 @@ import types
 tricky_cell = types.CellType(None)
 tricky_simplenamespace = types.SimpleNamespace(dummy=None, cell=tricky_cell)
 tricky_simplenamespace.dummy = tricky_simplenamespace
-tricky_capsule = types.CapsuleType
+try:
+    tricky_capsule = types.CapsuleType
+except AttributeError:
+    tricky_capsule = None
 tricky_module = types.ModuleType("tricky_module", "docs")
 tricky_module2 = types.ModuleType("tricky_module2\\x00", "docs\\x00")
 try:
@@ -1415,14 +1418,14 @@ except Exception as e_instantiate:
     instance_c1_widget = None
 
 try:
-    print(f"--- (Depth 0) Dispatching Fuzz for: { instance_c1_widget!r } (hint: Widget, prefix: c1_widget_ops) ---", file=stderr)
+    print(f"--- (Depth 0) Dispatching Fuzz for: {instance_c1_widget!r} (hint: Widget, prefix: c1_widget_ops) ---", file=stderr)
 except Exception as e:
     print(f"--- (Depth 0) Error calling repr() prefix: c1_widget_ops) ---", file=stderr)
 if instance_c1_widget is not None:
     if skip_trivial_type(instance_c1_widget):
         print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
     try:
-        print(f'Instance { instance_c1_widget!r } (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
+        print(f'Instance {instance_c1_widget!r} (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
     except Exception as e:
         print(f'Error printing instance repr() { e } (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
     if skip_trivial_type(instance_c1_widget):
