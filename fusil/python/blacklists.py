@@ -183,6 +183,14 @@ BLACKLIST = {
         # EVERY __pypy__ session as a crash. Manufactured signal, never a target bug.
         "_internal_crash",
     },
+    # _testmultiphase.call_state_registration_func() exists to PROVE the error path: it calls
+    # PyState_AddModule/PyState_RemoveModule on a multi-phase-init module, which is defined to
+    # raise SystemError -- a 1.0 crash word. Identical on CPython and on PyPy's cpyext
+    # (verified both), so it is a guaranteed false positive on any interpreter; it kept 11
+    # dirs in one PyPy fleet. Only this function is blacklisted, not the module: the rest of
+    # _testmultiphase (foo/Example/Str) is real multi-phase-init surface worth fuzzing, and on
+    # PyPy it exercises the cpyext C-API emulation layer.
+    "_testmultiphase": {"call_state_registration_func"},
     "_socket": SOCKET,
     "socket": SOCKET,
     "posix": POSIX,
