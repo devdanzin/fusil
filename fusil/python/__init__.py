@@ -964,8 +964,13 @@ class Fuzzer(Application):
         core_ignore_regexes = (
             # The whole bomb-message family from fusil/python/samples/bomb_objects.py: any of
             # these is the injected object's own exception text, never a target crash.
+            # Keep this in sync with the raise sites: bomb_objects.py and the
+            # write_python_code.py monitoring-callback bomb. `instancecheck` (the metaclass
+            # bomb) is raised as SystemError -- a 1.0 word -- so a missing alternative here
+            # is not a cosmetic gap, it manufactures crashes: 7 such sessions were kept in a
+            # single PyPy fleet.
             r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
-            r"|stateful hash)",
+            r"|stateful hash|instancecheck|junk return|monitoring callback bomb)",
             # The --new-uninit region prints a progress marker per poked type,
             # e.g. "[NEW-UNINIT] poking SystemError". The type name is arbitrary and
             # routinely collides with a crash word ("SystemError" -> a 1.0 hit) or, worse,

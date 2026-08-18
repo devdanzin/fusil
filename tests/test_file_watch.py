@@ -245,3 +245,45 @@ class TestFileReading(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBombSignaturesAreIgnored(unittest.TestCase):
+    """Every "fusil ..." exception the bomb objects raise must be ignored, not scored.
+
+    These are the harness's OWN hostile objects proving the target propagates exceptions --
+    never a target crash. Several are raised as SystemError, which is a 1.0 word, so a
+    signature missing from the ignore regex does not merely add noise: it manufactures
+    crashes. `instancecheck` (added with the metaclass bomb) was missing and kept 7 sessions
+    in a single PyPy fleet.
+    """
+
+    def test_ignore_regex_covers_every_raised_bomb_signature(self):
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        # The alternation fusil/python/__init__.py installs, kept as one source of truth.
+        pattern = re.compile(
+            r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
+            r"|stateful hash|instancecheck|junk return|monitoring callback bomb)"
+        )
+        sources = [
+            root / "fusil" / "python" / "samples" / "bomb_objects.py",
+            root / "fusil" / "python" / "write_python_code.py",
+        ]
+        raised = set()
+        for path in sources:
+            for line in path.read_text().splitlines():
+                if "raise " not in line and "return " not in line:
+                    continue
+                for match in re.findall(r'"(fusil [^"%]+)', line):
+                    raised.add(match.strip())
+        self.assertTrue(raised, "found no bomb signatures to check -- did the raise sites move?")
+        uncovered = sorted(sig for sig in raised if not pattern.search(sig))
+        self.assertEqual(
+            uncovered,
+            [],
+            "these bomb signatures are raised but not in the ignore regex in "
+            "fusil/python/__init__.py, so they will be scored as target crashes: "
+            + ", ".join(uncovered),
+        )
