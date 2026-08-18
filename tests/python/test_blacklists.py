@@ -35,6 +35,12 @@ class TestContainerShapes(unittest.TestCase):
 class TestKnownEntriesPresent(unittest.TestCase):
     """Pin a few high-value entries so accidental deletion is caught."""
 
+    def test_default_int_handler_blacklisted(self):
+        # It raises KeyboardInterrupt, a BaseException, which escapes the generated script's
+        # `except Exception` handlers and kills the session outright (the #192 class).
+        for module in ("signal", "_signal"):
+            self.assertIn("default_int_handler", bl.BLACKLIST[module], module)
+
     def test_pypy_self_harming_helpers_blacklisted(self):
         # These attack the fuzzer or the host, not the target. attach_gdb was caught live on
         # a PyPy 3.11 fleet: it runs gdb inside the session and gdb's banner scores on the

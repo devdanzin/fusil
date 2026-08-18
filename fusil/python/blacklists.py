@@ -143,8 +143,13 @@ BLACKLIST = {
     # Sleep
     "time": {"sleep", "pthread_getcpuclockid"},
     "select": {"epoll", "poll", "select"},
-    "signal": {"pause", "alarm", "setitimer", "pthread_kill"},
+    "signal": {"default_int_handler", "pause", "alarm", "setitimer", "pthread_kill"},
     "_signal": {
+        # Raises KeyboardInterrupt -- a BaseException, so it blows straight through the
+        # generated script's `except Exception` handlers and kills the session (the fusil
+        # #192 class). Called directly as a fuzz target it tagged 16 dirs `-sigint` in one
+        # PyPy fleet, and it also hit the rustpython fleets; it exists on every interpreter.
+        "default_int_handler",
         "pause",
         "alarm",
         "setitimer",
