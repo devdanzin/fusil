@@ -4,7 +4,10 @@ import types
 tricky_cell = types.CellType(None)
 tricky_simplenamespace = types.SimpleNamespace(dummy=None, cell=tricky_cell)
 tricky_simplenamespace.dummy = tricky_simplenamespace
-tricky_capsule = types.CapsuleType
+try:
+    tricky_capsule = types.CapsuleType
+except AttributeError:
+    tricky_capsule = None
 tricky_module = types.ModuleType("tricky_module", "docs")
 tricky_module2 = types.ModuleType("tricky_module2\\x00", "docs\\x00")
 try:

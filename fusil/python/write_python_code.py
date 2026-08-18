@@ -2214,7 +2214,7 @@ class WritePythonCode(WriteCode):
             self.write(0, "try:")
             self.write_print_to_stderr(
                 1,
-                f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{ {target_obj_expr_str}!r }}, not generating deeper fuzzing.'",
+                f"f'Max fuzz code generation depth ({self.MAX_FUZZ_GENERATION_DEPTH}) reached for {{{target_obj_expr_str}!r}}, not generating deeper fuzzing.'",
             )
             self.write(0, "except Exception:")
             self.write_print_to_stderr(
@@ -2226,7 +2226,7 @@ class WritePythonCode(WriteCode):
         self.write(0, "try:")
         self.write_print_to_stderr(
             1,
-            f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{ {target_obj_expr_str}!r }} (hint: {class_name_hint}, prefix: {current_prefix}) ---"',
+            f'f"--- (Depth {generation_depth}) Dispatching Fuzz for: {{{target_obj_expr_str}!r}} (hint: {class_name_hint}, prefix: {current_prefix}) ---"',
         )
         self.write(0, "except Exception as e:")
         self.write_print_to_stderr(
@@ -2263,7 +2263,7 @@ class WritePythonCode(WriteCode):
                 self.write(0, "try:")
                 self.write_print_to_stderr(
                     1,
-                    f"f'Instance {{ {target_obj_expr_str}!r }} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
+                    f"f'Instance {{{target_obj_expr_str}!r}} (actual type {{type({target_obj_expr_str}).__name__}}) has no specific fuzzer type, doing generic calls.'",
                 )
                 self.write(0, "except Exception as e:")
                 self.write_print_to_stderr(
