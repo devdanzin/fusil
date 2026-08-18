@@ -153,6 +153,31 @@ BLACKLIST = {
         "sigwaitinfo",
         "sigtimedwait",
     },
+    # PyPy interpreter internals (__pypy__) that attack the fuzzer or the host rather than
+    # the target -- the "generated code kills its own session" class (see fusil #192).
+    # Everything else in __pypy__ is deliberately left fuzzable: it is PyPy-only surface with
+    # no CPython counterpart, which is the whole point of fuzzing PyPy.
+    "__pypy__": {
+        # Spawns an interp-level gdb *inside the session*. Observed live: gdb's own banner
+        # ("For bug reporting instructions...") lands in the captured stdout and scores on
+        # the "bug" word, so the session is kept as a crash that never happened.
+        "attach_gdb",
+        # "Executes a script of Python code in a given remote Python process." A fuzzer-chosen
+        # pid means arbitrary code injection into any process on the box -- including sibling
+        # fleet instances and the fuzzer itself.
+        "remote_exec",
+        # Installs a process-global hook invoked on every code-object creation; handing it one
+        # of fusil's bomb objects makes the rest of the session detonate on unrelated code.
+        "set_code_callback",
+        # Blocks: calls PyOS_InputHook() / stops under the reverse debugger.
+        "pyos_inputhook",
+        "revdb_stop",
+        # Documented as "for testing purposes, raise an interpreter-level ValueError.
+        # Should turn into a SystemError automatically" -- a deliberate self-test helper.
+        # "SystemError" is a 1.0 crash word, so with --test-private this alone tagged
+        # EVERY __pypy__ session as a crash. Manufactured signal, never a target bug.
+        "_internal_crash",
+    },
     "_socket": SOCKET,
     "socket": SOCKET,
     "posix": POSIX,
