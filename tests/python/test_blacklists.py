@@ -35,6 +35,15 @@ class TestContainerShapes(unittest.TestCase):
 class TestKnownEntriesPresent(unittest.TestCase):
     """Pin a few high-value entries so accidental deletion is caught."""
 
+    def test_testmultiphase_state_func_blacklisted_but_module_is_not(self):
+        # It raises SystemError by design (PyState_AddModule on a module with slots) on every
+        # interpreter. Blacklist the one function, not the module -- the rest is real
+        # multi-phase-init/cpyext surface.
+        self.assertIn("call_state_registration_func", bl.BLACKLIST["_testmultiphase"])
+        self.assertNotIn("_testmultiphase", bl.MODULE_BLACKLIST)
+        for keep in ("foo", "Example", "Str"):
+            self.assertNotIn(keep, bl.BLACKLIST["_testmultiphase"])
+
     def test_default_int_handler_blacklisted(self):
         # It raises KeyboardInterrupt, a BaseException, which escapes the generated script's
         # `except Exception` handlers and kills the session outright (the #192 class).
