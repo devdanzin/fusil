@@ -66,6 +66,12 @@ def formatPath(value, cwd, cwd_bytes):
         value = ""
     elif value:
         result.append(formatValue(value))
+    if not result:
+        # Nothing matched and nothing was left over, i.e. the value is empty. Joining an
+        # empty list yields "", which emits `"KEY": ,` -- a SyntaxError that makes the whole
+        # replay script unusable. fusil sets DEBUGINFOD_URLS="" in every target child, so
+        # without this every crash dir in every run got an unparseable replay.py.
+        return formatValue(value)
     return " + ".join(result)
 
 
