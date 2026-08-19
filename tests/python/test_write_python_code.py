@@ -623,3 +623,47 @@ class TestFaulthandlerPrelude(unittest.TestCase):
         header = self._header(no_faulthandler=True)
         self.assertNotIn("_fusil_faulthandler", header)
         self.assertIn("from gc import collect", header)
+
+
+class TestReprFailureKeepsDetail(unittest.TestCase):
+    """When repr(err) itself raises, keep the failure's MESSAGE, not just its class.
+
+    PyPy reports an escaped RPython-level exception as
+        SystemError: unexpected internal exception (please report a bug): <OutOfRange object>
+    and that text is the ONLY thing identifying which internal exception leaked. Recording
+    just the class turns every such hit into an indistinguishable "SystemError" -- which is
+    exactly what happened to a _pyio session that could then not be told apart from any other
+    SystemError.
+    """
+
+    def _emitted(self):
+        source_agent = MagicMock()
+        source_agent.options = make_test_options(no_numpy=True, no_tstrings=True)
+        module = ModuleType("reprmod")
+        module.fn = lambda *a: a
+        writer = WritePythonCode(
+            parent_python_source=source_agent,
+            filename="out.py",
+            module=module,
+            module_name="reprmod",
+            threads=False,
+            _async=False,
+        )
+        writer.output = StringIO()
+        writer._write_helper_call_functions()
+        return writer.output.getvalue()
+
+    def test_repr_failure_records_the_message(self):
+        emitted = self._emitted()
+        self.assertIn("_repr_detail", emitted)
+        self.assertIn("{e_repr.__class__.__name__}: {_repr_detail}", emitted)
+
+    def test_str_of_the_repr_failure_is_itself_guarded(self):
+        # str() can raise for the same reason repr() did.
+        emitted = self._emitted()
+        detail_at = emitted.index("_repr_detail = str(e_repr)")
+        self.assertIn("try:", emitted[:detail_at])
+        self.assertIn("'<unprintable>'", emitted[detail_at:])
+
+    def test_emitted_handler_is_valid_python(self):
+        ast.parse(self._emitted())
