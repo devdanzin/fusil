@@ -664,7 +664,24 @@ class WritePythonCode(WriteCode):
                 self.write(0, "try:")
                 self.write(1, "errmsg = repr(err)")
                 self.write(0, "except Exception as e_repr:")
-                self.write(1, "errmsg = f'Error during repr: {e_repr.__class__.__name__}'")
+                with self.indented():
+                    # Keep the repr-failure's MESSAGE, not just its class. PyPy surfaces an
+                    # escaped RPython-level exception as
+                    #   SystemError: unexpected internal exception (please report a bug):
+                    #                <OutOfRange object ...>
+                    # and that text is the only thing identifying WHICH internal exception
+                    # leaked. Recording the class alone turns every such hit into an
+                    # anonymous "SystemError" that cannot be told apart from any other -- a
+                    # real triage loss, seen on a _pyio session. str() can raise too, so it
+                    # is guarded in turn.
+                    self.write(0, "try:")
+                    self.write(1, "_repr_detail = str(e_repr)")
+                    self.write(0, "except Exception:")
+                    self.write(1, "_repr_detail = '<unprintable>'")
+                    self.write(
+                        0,
+                        "errmsg = f'Error during repr: {e_repr.__class__.__name__}: {_repr_detail}'",
+                    )
                 self.write(0, "errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')")
                 self.write(0, "if verbose:")
                 self.write_print_to_stderr(

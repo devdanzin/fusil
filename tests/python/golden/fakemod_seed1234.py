@@ -1367,7 +1367,11 @@ def callMethod(prefix, obj_to_call, method_name, *arguments, verbose=True):
         try:
             errmsg = repr(err)
         except Exception as e_repr:
-            errmsg = f'Error during repr: {e_repr.__class__.__name__}'
+            try:
+                _repr_detail = str(e_repr)
+            except Exception:
+                _repr_detail = '<unprintable>'
+            errmsg = f'Error during repr: {e_repr.__class__.__name__}: {_repr_detail}'
         errmsg = errmsg.encode('ASCII', 'replace').decode('ASCII')
         if verbose:
             print(f"[{prefix}] {func_display_name} => EXCEPTION: {err.__class__.__name__}: {errmsg}", file=stderr)
