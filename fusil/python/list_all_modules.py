@@ -44,7 +44,18 @@ class ListAllModules:
         self.skip_test = skip_test
         self.verbose = verbose
 
-        self.discovered_modules: set[str] = set(sys.builtin_module_names) - {"__main__"}
+        # Builtin modules are compiled into the interpreter, so they have no file for
+        # walk_packages() to find and are seeded here instead. They must still honour the
+        # blacklist: seeding them raw meant MODULE_BLACKLIST silently did NOT apply to any
+        # builtin, so _ctypes, _signal, _testinternalcapi and the _test* family were fuzzed in
+        # every full-discovery run despite being listed. Only the NAME rule applies -- the
+        # site-package/only-c checks in _is_valid_module are file-based, and a builtin is a C
+        # module by definition, so it must stay discoverable under --only-c.
+        self.discovered_modules: set[str] = {
+            name
+            for name in sys.builtin_module_names
+            if name != "__main__" and not self._is_blacklisted_name(name)
+        }
         self._seen_paths: set[str] = set()
 
     def _is_valid_module(
@@ -100,6 +111,15 @@ class ListAllModules:
             return False
 
         return True
+
+    def _is_blacklisted_name(self, name: str) -> bool:
+        """Name-only blacklist test, using the same substring rule as :meth:`_is_valid_module`.
+
+        Substring rather than exact match is deliberate and matches the walked path: a listed
+        ``test`` is what excludes ``_testbuffer``/``_testsinglephase``/``_xxtestfuzz``, and a
+        listed ``subprocess`` is what excludes ``_posixsubprocess``.
+        """
+        return any(entry in name for entry in self.blacklist)
 
     def keep_walked_module(
         self,
