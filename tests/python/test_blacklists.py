@@ -44,6 +44,12 @@ class TestKnownEntriesPresent(unittest.TestCase):
         for keep in ("foo", "Example", "Str"):
             self.assertNotIn(keep, bl.BLACKLIST["_testmultiphase"])
 
+    def test_asyncio_runner_on_sigint_blacklisted(self):
+        # Same class as default_int_handler: it raises KeyboardInterrupt, a BaseException,
+        # which escapes the generated script's handlers and kills the session. Reached only
+        # because --test-private exposes the underscore-prefixed method.
+        self.assertIn("_on_sigint", bl.BLACKLIST["asyncio.runners:Runner"])
+
     def test_default_int_handler_blacklisted(self):
         # It raises KeyboardInterrupt, a BaseException, which escapes the generated script's
         # `except Exception` handlers and kills the session outright (the #192 class).

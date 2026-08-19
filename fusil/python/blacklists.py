@@ -191,6 +191,13 @@ BLACKLIST = {
     # _testmultiphase (foo/Example/Str) is real multi-phase-init surface worth fuzzing, and on
     # PyPy it exercises the cpyext C-API emulation layer.
     "_testmultiphase": {"call_state_registration_func"},
+    # asyncio.runners.Runner._on_sigint is the SIGINT handler the Runner installs; called
+    # directly as a fuzz target it unconditionally `raise KeyboardInterrupt()`. Like
+    # signal.default_int_handler, that is a BaseException, so it escapes the generated
+    # script's `except Exception` handlers and kills the session (the #192 class). It was
+    # 29 of 53 kept dirs -- 55% -- in one PyPy fleet, reached because --test-private exposes
+    # the underscore-prefixed method.
+    "asyncio.runners:Runner": {"_on_sigint"},
     "_socket": SOCKET,
     "socket": SOCKET,
     "posix": POSIX,

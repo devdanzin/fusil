@@ -287,3 +287,20 @@ class TestBombSignaturesAreIgnored(unittest.TestCase):
             "fusil/python/__init__.py, so they will be scored as target crashes: "
             + ", ".join(uncovered),
         )
+
+
+class TestCookiejarWarningIgnored(unittest.TestCase):
+    """http.cookiejar's own "bug!" warning must not push a boring session over the threshold.
+
+    The message is the target's benign diagnostic for a malformed cookie -- routine input for
+    a fuzzer -- but it contains the "bug" word (0.10). On its own that is harmless; combined
+    with another weak signal it kept 6 dirs in one PyPy fleet.
+    """
+
+    def test_cookiejar_warning_is_ignored_but_a_real_hit_still_scores(self):
+        w = _watch(words={"bug": 0.10, "segfault": 1.0})
+        w.ignoreRegex(r"http\.cookiejar bug!")
+        self.assertIsNone(w.processLine(b"x.py:1369: UserWarning: http.cookiejar bug!"))
+        self.assertEqual(w.score, 0.0)
+        w.processLine(b"got a segfault here")
+        self.assertEqual(w.score, 1.0)
