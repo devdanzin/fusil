@@ -51,6 +51,7 @@ class _Options:
     test_private = False
     no_numpy = True
     no_tstrings = True
+    no_faulthandler = False  # the real default: the golden covers the emitted block
     external_references = True
     oom_fuzz = False
     oom_max_start = 50

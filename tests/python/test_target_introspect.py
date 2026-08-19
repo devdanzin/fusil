@@ -43,6 +43,7 @@ class _Options:
     fuzz_exceptions = False
     test_private = False
     no_numpy = True
+    no_faulthandler = False
     no_tstrings = True
     external_references = True
     no_threads = True

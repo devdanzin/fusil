@@ -1,5 +1,17 @@
 # FUSIL_BOILERPLATE_START
 
+# Record a Python-level backtrace if the target dies on a fatal signal.
+# Without this a SIGSEGV/SIGABRT leaves stdout ending at the last call line
+# with no indication of WHERE it died. That is worst for exactly the crashes
+# that need it most -- rare, threaded, load-dependent ones that do not
+# reproduce afterwards -- so capturing at crash time is the only chance.
+# Enabled first, before any other import, so a crash in the prelude is caught
+# too. Guarded: not every target interpreter ships a working faulthandler.
+try:
+    import faulthandler as _fusil_faulthandler
+    _fusil_faulthandler.enable()
+except Exception:
+    pass
 from gc import collect
 # NOTE: do NOT import `random` (the function) here -- it would shadow the
 # `random` module that embedded tricky-object code imports and uses as

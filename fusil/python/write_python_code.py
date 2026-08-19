@@ -383,12 +383,33 @@ class WritePythonCode(WriteCode):
 
     def _write_script_header_and_imports(self) -> None:
         """Writes standard imports and initial setup code to the generated script."""
+        # Indented to match the dedent() block below: the placeholder sits at 16 spaces, so
+        # the first line inherits that and the continuations must supply their own.
+        faulthandler_setup = (
+            ""
+            if self.options.no_faulthandler
+            else (
+                "try:\n"
+                "                    import faulthandler as _fusil_faulthandler\n"
+                "                    _fusil_faulthandler.enable()\n"
+                "                except Exception:\n"
+                "                    pass"
+            )
+        )
         self.write(
             0,
             dedent(
                 f"""\
                 # FUSIL_BOILERPLATE_START
 
+                # Record a Python-level backtrace if the target dies on a fatal signal.
+                # Without this a SIGSEGV/SIGABRT leaves stdout ending at the last call line
+                # with no indication of WHERE it died. That is worst for exactly the crashes
+                # that need it most -- rare, threaded, load-dependent ones that do not
+                # reproduce afterwards -- so capturing at crash time is the only chance.
+                # Enabled first, before any other import, so a crash in the prelude is caught
+                # too. Guarded: not every target interpreter ships a working faulthandler.
+                {faulthandler_setup}
                 from gc import collect
                 # NOTE: do NOT import `random` (the function) here -- it would shadow the
                 # `random` module that embedded tricky-object code imports and uses as
@@ -475,8 +496,6 @@ class WritePythonCode(WriteCode):
             self.write_block(
                 0,
                 """
-                import faulthandler
-                faulthandler.enable()
                 import ctypes
                 try:
                     _set_nomemory = ctypes.CDLL(None).fusil_malloc_arm
@@ -495,8 +514,6 @@ class WritePythonCode(WriteCode):
             self.write_block(
                 0,
                 """
-                import faulthandler
-                faulthandler.enable()
                 try:
                     from _testcapi import set_nomemory as _set_nomemory
                     _OOM_AVAILABLE = True

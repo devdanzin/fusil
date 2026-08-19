@@ -293,6 +293,17 @@ class Fuzzer(Application):
             default=False,
         )
         fuzzing_options.add_option(
+            "--no-faulthandler",
+            help="Don't enable faulthandler in the generated script. By default it is "
+            "enabled, so a target that dies on a fatal signal (SIGSEGV/SIGABRT/...) dumps a "
+            "Python-level backtrace into the session's stdout instead of just stopping. Use "
+            "this only if faulthandler's own signal handlers or internals interfere with the "
+            "run (e.g. when fuzzing signal handling itself, or if it perturbs --tsan race "
+            "signatures).",
+            action="store_true",
+            default=False,
+        )
+        fuzzing_options.add_option(
             "--filenames",
             help="Comma-separated readable files to feed as fuzz arguments. WARNING: a "
             "fuzzed call may open these for writing -- pass only expendable files. "
