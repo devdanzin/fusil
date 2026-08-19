@@ -227,5 +227,51 @@ class TestListAllModules(unittest.TestCase):
         self.assertIn("main_pkg", found_modules)
 
 
+class TestBuiltinModulesHonourBlacklist(unittest.TestCase):
+    """Builtin modules must obey MODULE_BLACKLIST like every other discovered module.
+
+    They have no file for walk_packages() to find, so they are seeded from
+    sys.builtin_module_names. Seeding them raw meant the blacklist silently did not apply to
+    any builtin: _ctypes, _signal and _testinternalcapi were fuzzed in every full-discovery
+    run despite being listed. _ctypes alone produced 9 of 31 signal-crash dirs in one fleet,
+    every one a by-contract int-as-pointer SIGSEGV that CPython reproduces identically.
+    """
+
+    def setUp(self):
+        self.logger = MagicMock()
+
+    def _discovered(self, blacklist, only_c=False):
+        lister = ListAllModules(
+            self.logger, only_c=only_c, site_package=True, blacklist=blacklist, skip_test=False
+        )
+        return lister.discovered_modules
+
+    def test_blacklisted_builtin_is_excluded(self):
+        builtin = next(n for n in sys.builtin_module_names if n != "__main__")
+        self.assertNotIn(builtin, self._discovered({builtin}))
+
+    def test_non_blacklisted_builtins_survive(self):
+        builtins_seen = self._discovered({"definitely_not_a_module_name"})
+        expected = set(sys.builtin_module_names) - {"__main__"}
+        self.assertEqual(builtins_seen, expected)
+
+    def test_substring_rule_matches_the_walked_path(self):
+        # A listed "test" is what excludes the _test* family; this mirrors _is_valid_module,
+        # so builtins and walked modules cannot drift apart.
+        discovered = self._discovered({"test"})
+        for name in sys.builtin_module_names:
+            if "test" in name:
+                self.assertNotIn(name, discovered, name)
+
+    def test_builtins_still_discoverable_under_only_c(self):
+        # Regression guard: a builtin IS a C module (compiled into the interpreter) but has no
+        # filename, so routing the seed through the file-based only-c check would drop every
+        # builtin from --only-c runs.
+        self.assertIn("math", self._discovered(set(), only_c=True))
+
+    def test_dunder_main_still_excluded(self):
+        self.assertNotIn("__main__", self._discovered(set()))
+
+
 if __name__ == "__main__":
     unittest.main()
