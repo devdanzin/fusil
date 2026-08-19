@@ -53,6 +53,9 @@ def _make_options(oom_fuzz, oom_verbose=False):
     o.sys_monitoring = False  # opt-in mode; a bare MagicMock attr would divert generation
     o.test_private = False
     o.no_numpy = True
+    # A bare MagicMock auto-vivifies a TRUTHY attribute, which would read as
+    # --no-faulthandler and suppress the prelude's crash-backtrace block.
+    o.no_faulthandler = False
     o.no_tstrings = True
     o.functions_number = 5
     o.classes_number = 0
@@ -130,7 +133,7 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         ast.parse(src)
 
         # Guarded _testcapi boilerplate + faulthandler.
-        self.assertIn("faulthandler.enable()", src)
+        self.assertIn("_fusil_faulthandler.enable()", src)  # now from the prelude, all modes
         self.assertIn("from _testcapi import set_nomemory", src)
         self.assertIn("_OOM_AVAILABLE", src)
 

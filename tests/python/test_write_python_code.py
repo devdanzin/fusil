@@ -562,3 +562,64 @@ class TestWritePythonCode(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFaulthandlerPrelude(unittest.TestCase):
+    """A fatal signal must leave a backtrace in the session's stdout.
+
+    Without faulthandler a SIGSEGV/SIGABRT just stops the output at the last call line with
+    no indication of where the target died. That is worst for the crashes that need it most:
+    rare, threaded, load-dependent ones that do not reproduce on a later replay, where the
+    crash-time dump is the only evidence there will ever be. Verified on PyPy 3.11: the dump
+    names the exact source.py line of the crashing call, from inside a worker thread.
+    """
+
+    def _header(self, **overrides):
+        source_agent = MagicMock()
+        source_agent.options = make_test_options(
+            no_numpy=True, no_tstrings=True, functions_number=1, **overrides
+        )
+        module = ModuleType("fhmod")
+        # The constructor refuses a module with nothing to fuzz.
+        module.fh_func = lambda *a: a
+        writer = WritePythonCode(
+            parent_python_source=source_agent,
+            filename="out.py",
+            module=module,
+            module_name="fhmod",
+            threads=False,
+            _async=False,
+        )
+        writer.output = StringIO()
+        writer._write_script_header_and_imports()
+        return writer.output.getvalue()
+
+    def test_enabled_by_default(self):
+        header = self._header()
+        self.assertIn("import faulthandler as _fusil_faulthandler", header)
+        self.assertIn("_fusil_faulthandler.enable()", header)
+
+    def test_enabled_before_any_other_import(self):
+        # A crash while the prelude itself is still running must be caught too.
+        header = self._header()
+        self.assertLess(
+            header.index("_fusil_faulthandler.enable()"),
+            header.index("from gc import collect"),
+        )
+
+    def test_guarded_so_a_target_without_faulthandler_still_runs(self):
+        header = self._header()
+        enable_at = header.index("_fusil_faulthandler.enable()")
+        self.assertIn("try:", header[:enable_at])
+        self.assertIn("except Exception:", header[enable_at:])
+
+    def test_emitted_header_is_valid_python(self):
+        # The block is spliced into a dedent()ed f-string, so a wrong indent would break
+        # every generated script -- assert the prelude still parses, both ways.
+        for overrides in ({}, {"no_faulthandler": True}):
+            ast.parse(self._header(**overrides))
+
+    def test_no_faulthandler_option_omits_it(self):
+        header = self._header(no_faulthandler=True)
+        self.assertNotIn("_fusil_faulthandler", header)
+        self.assertIn("from gc import collect", header)
