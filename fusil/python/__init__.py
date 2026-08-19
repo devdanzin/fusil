@@ -982,6 +982,12 @@ class Fuzzer(Application):
             # single PyPy fleet.
             r"fusil (bomb|iter bomb|superbomb|fileno bomb|hidden name|descriptor (get|set)"
             r"|stateful hash|instancecheck|junk return|monitoring callback bomb)",
+            # http.cookiejar warns "http.cookiejar bug!" (its own words) when it meets a
+            # malformed cookie -- routine for a fuzzer. The message contains the "bug" word
+            # (0.10), so on its own it is harmless, but combined with another weak signal it
+            # pushes a boring session over the threshold: 6 kept dirs in one PyPy fleet. It
+            # is the target's benign diagnostic, not a target defect.
+            r"http\.cookiejar bug!",
             # The --new-uninit region prints a progress marker per poked type,
             # e.g. "[NEW-UNINIT] poking SystemError". The type name is arbitrary and
             # routinely collides with a crash word ("SystemError" -> a 1.0 hit) or, worse,
