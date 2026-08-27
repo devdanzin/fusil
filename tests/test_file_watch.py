@@ -289,6 +289,73 @@ class TestBombSignaturesAreIgnored(unittest.TestCase):
         )
 
 
+class TestTracebackEchoIgnored(unittest.TestCase):
+    """A traceback is the target quoting ITSELF; neither half of it may score as a crash.
+
+    A routine fuzz traceback through ``concurrent/futures/_base.py`` kept a crash dir in a
+    PyPy fleet twice, via two different lines of the same traceback:
+
+      * the frame line   ``File ".../logging/__init__.py", line 1536, in critical``
+      * the source line  ``LOGGER.critical('Future %s in unexpected state: %s',``
+
+    ``critical`` is a 1.0 word, so either alone scores the session 100%. Both are ignored; a
+    real critical-level MESSAGE (``CRITICAL:root:...``) matches neither and still scores.
+
+    The frame-line rule requires the comma that Python tracebacks put before ``in``.
+    faulthandler writes ``line N in func`` WITHOUT one, so a genuine fatal-signal report is
+    untouched -- covered by the last test here.
+    """
+
+    FRAME_LINE = r'^\s*File "[^"]*", line \d+, in '
+    SOURCE_LINE = r"\.critical\("
+
+    def _watch_with_rules(self):
+        w = _watch(words={"critical": 1.0})
+        w.ignoreRegex(self.FRAME_LINE)
+        w.ignoreRegex(self.SOURCE_LINE)
+        return w
+
+    def test_echoed_source_line_is_ignored(self):
+        """Shape 2: the offending source, echoed below the frame line."""
+        w = self._watch_with_rules()
+        self.assertIsNone(
+            w.processLine(b"    LOGGER.critical('Future %s in unexpected state: %s',")
+        )
+        self.assertEqual(w.score, 0.0)
+
+    def test_traceback_frame_line_is_ignored(self):
+        """Shape 1: the frame line, whose FUNCTION name is the scored word."""
+        w = self._watch_with_rules()
+        self.assertIsNone(
+            w.processLine(b'  File "/usr/lib/pypy3.11/logging/__init__.py", line 1536, in critical')
+        )
+        self.assertEqual(w.score, 0.0)
+
+    def test_a_real_critical_message_still_scores(self):
+        w = self._watch_with_rules()
+        w.processLine(b"CRITICAL:root:the target said something critical")
+        self.assertEqual(w.score, 1.0)
+
+    def test_bdb_tracer_lines_are_ignored(self):
+        """bdb echoes the VALUE of every traced event; its repr may hold a scored word."""
+        w = _watch(words={"systemerror": 1.0})
+        w.ignoreRegex(r"^(\+\+\+|---|!!!) ")
+        self.assertIsNone(w.processLine(b"+++ return <class 'SystemError'>"))
+        self.assertEqual(w.score, 0.0)
+        w.processLine(b"SystemError: the target actually raised one")
+        self.assertEqual(w.score, 1.0)
+
+    def test_faulthandler_stack_lines_are_not_swallowed(self):
+        """faulthandler writes `line N in func` with NO comma; only real tracebacks have one.
+
+        The frame-line rule must not reach faulthandler's stack, which is how a genuine
+        fatal-signal crash is reported.
+        """
+        w = self._watch_with_rules()
+        w.processLine(b'  File "/tmp/session/source.py", line 1360 in critical')
+        self.assertEqual(w.score, 1.0)
+
+
 class TestCookiejarWarningIgnored(unittest.TestCase):
     """http.cookiejar's own "bug!" warning must not push a boring session over the threshold.
 

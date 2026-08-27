@@ -988,6 +988,27 @@ class Fuzzer(Application):
             # pushes a boring session over the threshold: 6 kept dirs in one PyPy fleet. It
             # is the target's benign diagnostic, not a target defect.
             r"http\.cookiejar bug!",
+            # A traceback is the target quoting ITSELF, not the target reporting a crash, and
+            # it prints two kinds of line that routinely collide with a scored word:
+            #
+            #   1. the frame line   `  File ".../logging/__init__.py", line 1536, in critical`
+            #      -- the crashing FUNCTION's name, here matching the 1.0 word `critical`;
+            #   2. the source line  `    LOGGER.critical('Future %s in unexpected state: %s',`
+            #      -- the offending SOURCE, echoed verbatim below the frame line.
+            #
+            # Each shape kept a crash dir in a PyPy fleet on its own (concurrent.futures._base,
+            # twice over, via different halves of the same traceback). Skip both: neither is
+            # ever a target-emitted diagnostic. A real critical-level MESSAGE is the formatted
+            # text ("CRITICAL:root:..."), which matches neither pattern and still scores.
+            r'^\s*File "[^"]*", line \d+, in ',
+            # bdb's tracer echoes every traced event and the VALUE involved:
+            #   `+++ return <class 'SystemError'>`
+            # The repr of an arbitrary fuzz value routinely contains a scored word -- here
+            # the builtin SystemError class, a 1.0 word -- so tracing any module under
+            # bdb/pdb manufactures crashes. Two kept dirs in one PyPy fleet. Only bdb emits
+            # these prefixes; no diagnostic starts with them.
+            r"^(\+\+\+|---|!!!) ",
+            r"\.critical\(",
             # The --new-uninit region prints a progress marker per poked type,
             # e.g. "[NEW-UNINIT] poking SystemError". The type name is arbitrary and
             # routinely collides with a crash word ("SystemError" -> a 1.0 hit) or, worse,
