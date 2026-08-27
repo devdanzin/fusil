@@ -173,6 +173,56 @@ class TestGoldenOutput(unittest.TestCase):
         )
 
 
+class SelfNoiseVocabularyTests(unittest.TestCase):
+    """Emitted COMMENTS must not contain fusil's own crash vocabulary.
+
+    ``pydoc.getdoc`` falls back to ``inspect.getcomments()`` for an object with no
+    docstring, so the comment block immediately above an undocumented class in a spliced
+    sample file is printed verbatim by ``help(obj)``. A fuzz session that calls
+    ``help()`` -- ``_sitebuiltins._Helper.__call__`` is a normal fuzz target -- therefore
+    echoes those comments into stdout, where ``WatchStdout`` matches them and manufactures
+    a crash. One PyPy fleet kept a ``_sitebuiltins-segfault`` dir this way, scored 100% on
+    fusil's own word ``segfault`` inside a ``tricky_objects.py`` comment.
+
+    Only comment lines are checked: the scored words also occur in real emitted CODE
+    (``SystemError`` in the bomb exception list, ``AssertionError`` in a class statement),
+    which ``inspect.getcomments`` never reaches.
+    """
+
+    # The 1.0-scoring words from Fuzzer.setupProject's WatchStdout configuration. The
+    # sub-1.0 words ("bug", "fatal", "oops") are not listed: they cannot score a session
+    # on their own and appear unavoidably in explanatory prose.
+    CRASH_WORDS = (
+        "assertion",
+        "critical",
+        "panic",
+        "panicked",
+        "glibc detected",
+        "segfault",
+        "segmentation fault",
+        "addresssanitizer",
+    )
+
+    def test_emitted_comments_are_free_of_crash_words(self):
+        offenders = []
+        for lineno, line in enumerate(generate().splitlines(), 1):
+            stripped = line.strip()
+            if not stripped.startswith("#"):
+                continue
+            lowered = stripped.lower()
+            for word in self.CRASH_WORDS:
+                if word in lowered:
+                    offenders.append((lineno, word, stripped[:100]))
+                    break
+        self.assertEqual(
+            offenders,
+            [],
+            "generated comments contain crash vocabulary that help() would echo into "
+            "stdout, scoring the session as a false crash; reword them:\n"
+            + "\n".join("  line %d [%s] %s" % o for o in offenders),
+        )
+
+
 def _update_snapshot():
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
     GOLDEN_FILE.write_text(generate(), encoding="utf-8")

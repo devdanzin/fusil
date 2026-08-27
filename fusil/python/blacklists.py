@@ -197,6 +197,11 @@ BLACKLIST = {
     # script's `except Exception` handlers and kills the session (the #192 class). It was
     # 29 of 53 kept dirs -- 55% -- in one PyPy fleet, reached because --test-private exposes
     # the underscore-prefixed method.
+    # Keyed on the module the class is DEFINED in. That is not enough on its own -- the same
+    # class is re-exported as `asyncio.Runner`, and a session whose target module is `asyncio`
+    # reaches `_on_sigint` through that path with this key never matching. `_on_sigint` is
+    # therefore also in METHOD_BLACKLIST, which is name-based and module-agnostic; this entry
+    # stays because it also filters the static generation path for the defining module.
     "asyncio.runners:Runner": {"_on_sigint"},
     "_socket": SOCKET,
     "socket": SOCKET,
@@ -296,6 +301,15 @@ METHOD_BLACKLIST = {
     "_acquire_lock",
     "_acquire_restore",
     "_handle_request_noblock",
+    # Two SIGINT handlers that unconditionally `raise KeyboardInterrupt()`. Called directly as
+    # fuzz targets they raise a BaseException, which escapes the generated script's
+    # `except Exception` handlers and kills the session; an uncaught KeyboardInterrupt then
+    # makes the interpreter re-raise SIGINT, so the process looks "killed by signal 2" and
+    # WatchProcess scores it 1.0. Name-based so every path to them is covered, including the
+    # runtime generic-method loop and re-export modules (`asyncio.Runner`, not just
+    # `asyncio.runners.Runner`) -- three kept dirs in one PyPy fleet came in that way.
+    "_on_sigint",
+    "sigint_handler",
     "_randbelow",
     "_randbelow_with_getrandbits",
     "_read",

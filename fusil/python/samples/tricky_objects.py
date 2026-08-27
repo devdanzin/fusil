@@ -122,7 +122,7 @@ if tricky_list_with_cycle[0] and tricky_list_with_cycle[0][0] is tricky_list_wit
 # Each object re-enters a protocol on a PARTNER object, so the recursion crosses object boundaries
 # (mutual recursion, harder to short-circuit than plain self-recursion). CPython raises
 # RecursionError on the protocol call; an interpreter without a recursion guard on that native
-# path overflows its C/Rust stack -> segfault. Construction is cheap -- the recursion fires only
+# path overflows its C/Rust stack instead. Construction is cheap -- the recursion fires only
 # when the fuzzer exercises the named protocol (hash/eq/getitem/iter/repr/call) on the object.
 class _TrickyRecur:
     def __init__(self, name):
@@ -155,7 +155,7 @@ tricky_recur_b.partner = tricky_recur_a
 
 # Deep generic-alias nesting list[list[...list[T]...]] bottomed on a TypeVar so the parameter walk
 # actually recurses to collect it -- exercises the genericalias parameter-walk native path
-# (RustPython segfaulted in genericalias::make_parameters_from_slice). Bounded depth so construction
+# (RustPython crashed in genericalias::make_parameters_from_slice). Bounded depth so construction
 # + a CPython repr stay well under the recursion limit; the native walk (and __getitem__
 # substitution) is the target. Falls back to a plain nested alias if TypeVar is unavailable.
 try:

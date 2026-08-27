@@ -50,6 +50,20 @@ class TestKnownEntriesPresent(unittest.TestCase):
         # because --test-private exposes the underscore-prefixed method.
         self.assertIn("_on_sigint", bl.BLACKLIST["asyncio.runners:Runner"])
 
+    def test_sigint_handlers_blacklisted_by_NAME_not_only_by_module(self):
+        """The module-keyed entry alone is not enough, and a fleet proved it.
+
+        `Runner` is defined in `asyncio.runners` but re-exported as `asyncio.Runner`, so a
+        session whose target module is `asyncio` never matches the
+        `"asyncio.runners:Runner"` key -- and reached `_on_sigint` anyway, through the
+        runtime generic-method loop. `pdb.sigint_handler` is the same shape and was never
+        keyed at all. Both raise KeyboardInterrupt unconditionally; uncaught, the interpreter
+        re-raises SIGINT, the process looks "killed by signal 2", and WatchProcess scores it
+        1.0. METHOD_BLACKLIST is name-based, so it covers every path.
+        """
+        for name in ("_on_sigint", "sigint_handler"):
+            self.assertIn(name, bl.METHOD_BLACKLIST, name)
+
     def test_default_int_handler_blacklisted(self):
         # It raises KeyboardInterrupt, a BaseException, which escapes the generated script's
         # `except Exception` handlers and kills the session outright (the #192 class).
