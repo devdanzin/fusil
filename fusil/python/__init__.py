@@ -1009,6 +1009,22 @@ class Fuzzer(Application):
             # these prefixes; no diagnostic starts with them.
             r"^(\+\+\+|---|!!!) ",
             r"\.critical\(",
+            # Third face of the same disease, and the one that survived PR #265: `warnings`
+            # prints the source line of whatever frame was running when it fired --
+            #
+            #   /.../logging/__init__.py:1536: RuntimeWarning: coroutine '...' was never awaited
+            #     self._log(CRITICAL, msg, args, **kwargs)
+            #
+            # -- so any un-awaited coroutine collected while logging is on the stack echoes
+            # `logging`'s own source, and `CRITICAL` there is the LEVEL CONSTANT being passed
+            # as an argument, not a diagnostic. 14 kept dirs in one PyPy fleet, across
+            # asyncio.base_events, asyncio.streams and asyncio.selector_events.
+            #
+            # Match the constant only where it sits in an argument position, so a real
+            # formatted record (`CRITICAL:root:...`) and English prose ("critical error")
+            # both still score. Case-sensitive on purpose: the all-caps spelling is the
+            # module constant.
+            r"[(,]\s*CRITICAL\s*[),]",
             # The --new-uninit region prints a progress marker per poked type,
             # e.g. "[NEW-UNINIT] poking SystemError". The type name is arbitrary and
             # routinely collides with a crash word ("SystemError" -> a 1.0 hit) or, worse,
