@@ -94,8 +94,9 @@ class TestKnownEntriesPresent(unittest.TestCase):
         does what it is told on any interpreter. It dominated a PyPy
         --concurrency-stress fleet: 163 of 229 kept dirs, in two faces that split on the value
         passed -- 120 carrying glibc's `Unexpected error 9 on netlink descriptor 11`
-        (`socket.AF_ROSE == 11`), and 43 SIGABRTs with an EMPTY stdout, every one of which had
-        been handed a constant worth 0, 1 or 2 and had closed its own stdout or stderr.
+        (`socket.AF_ROSE == 11`), and 43 SIGABRTs with an EMPTY stdout, which had closed their own
+        stdout or stderr -- of the 100 dirs carrying a constant worth 0, 1 or 2, 43 went silent;
+        of the 63 without one, none did.
         """
         self.assertLessEqual({"close", "dup", "fromfd", "send_fds"}, bl.BLACKLIST["socket"])
 

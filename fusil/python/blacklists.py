@@ -82,8 +82,9 @@ SOCKET = {
     # value passed. 120 closed some other descriptor and were captured with glibc's own
     # `Unexpected error 9 on netlink descriptor 11` -- 11 being `socket.AF_ROSE`, which the
     # stress region had picked as a shared object. The other 43 were SIGABRTs with an EMPTY
-    # stdout, and all 43 shared a constant whose value is 0, 1 or 2: they had closed the
-    # child's own stdout or stderr, so the diagnostic had nowhere to go.
+    # stdout: they had closed the child's own stdout or stderr, so the diagnostic had nowhere
+    # to go. Of the 100 dirs whose shared constants include a 0, 1 or 2, 43 went silent; of the
+    # 63 that do not, none did.
     "close",
     "dup",
     "fromfd",
