@@ -71,8 +71,11 @@ SOCKET = {
     # CTYPES above, one layer up. These four take a RAW INTEGER file descriptor
     # (`close(integer) -> None`, `dup(integer) -> integer`, `fromfd(fd, family, type)`,
     # `send_fds(sock, buffers, fds)`), so handing them any fuzz integer closes or
-    # reinterprets a descriptor the interpreter is still using. It is not a target defect:
-    # CPython aborts on it too.
+    # reinterprets a descriptor the interpreter is still using. It is not a target defect --
+    # the contract is the argument: `close(integer)` does what it is told, on any interpreter.
+    # (A standalone harness closing fd 11 while sibling threads call getaddrinfo did NOT
+    # reproduce the abort on either interpreter, so the window needs the full stress region;
+    # the case here rests on the evidence below, not on a differential.)
     #
     # Measured, and it is not a small effect: 163 of 229 kept dirs in one PyPy
     # --concurrency-stress fleet (71%) were this, in two faces that split exactly on the

@@ -90,7 +90,8 @@ class TestKnownEntriesPresent(unittest.TestCase):
 
         Handing them a fuzz integer closes or reinterprets a descriptor the interpreter is
         still using -- the int-as-FD analogue of the int-as-pointer functions in CTYPES, and
-        self-harm rather than a target defect (CPython aborts on it too). It dominated a PyPy
+        self-harm rather than a target defect -- the contract is the argument, and `close(integer)`
+        does what it is told on any interpreter. It dominated a PyPy
         --concurrency-stress fleet: 163 of 229 kept dirs, in two faces that split on the value
         passed -- 120 carrying glibc's `Unexpected error 9 on netlink descriptor 11`
         (`socket.AF_ROSE == 11`), and 43 SIGABRTs with an EMPTY stdout, every one of which had
