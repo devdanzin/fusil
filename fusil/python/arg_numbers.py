@@ -11,6 +11,8 @@ import inspect
 import re
 from random import randint
 
+from fusil.python.meta_proxy import is_meta_proxy
+
 MAX_ARG = 6
 MAX_VAR_ARG = 5
 PARSE_PROTOTYPE = True
@@ -317,7 +319,7 @@ def get_arg_number(func, func_name, min_arg):
     # Metadata proxy (discovery ran in the target subprocess, no live object): the arity was
     # already computed there (argspec branch) as `_fusil_arity`, or is unknown (`None`, e.g. a C
     # builtin) -> fall to the same doc/default the live branch below uses.
-    if getattr(func, "_fusil_is_meta", False):
+    if is_meta_proxy(func):
         ar = getattr(func, "_fusil_arity", None)
         if ar:
             return ar[0], ar[1]
@@ -349,7 +351,7 @@ def class_arg_number(class_name, cls):
     if class_name in CLASS_NB_ARG:
         min_args, max_args = CLASS_NB_ARG[class_name]
         nb_arg = randint(min_args, max_args)
-    elif getattr(cls, "_fusil_is_meta", False):
+    elif is_meta_proxy(cls):
         # Metadata proxy: ctor arity computed in the target subprocess (or unknown -> 0..3).
         ca = getattr(cls, "_fusil_ctor_arity", None)
         nb_arg = randint(ca[0], ca[1]) if ca else randint(0, 3)
