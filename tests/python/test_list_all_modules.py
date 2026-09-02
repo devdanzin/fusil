@@ -267,7 +267,13 @@ class TestBuiltinModulesHonourBlacklist(unittest.TestCase):
         # Regression guard: a builtin IS a C module (compiled into the interpreter) but has no
         # filename, so routing the seed through the file-based only-c check would drop every
         # builtin from --only-c runs.
-        self.assertIn("math", self._discovered(set(), only_c=True))
+        #
+        # Which modules are built in is a property of the BUILD, not of fusil: `math` is
+        # compiled into the interpreters used here but is a shared extension on the
+        # python.org builds CI installs, where naming it made this fail on every run since
+        # 2026-08-19. Assert the invariant over whatever this interpreter actually has.
+        expected = set(sys.builtin_module_names) - {"__main__"}
+        self.assertEqual(self._discovered(set(), only_c=True) & expected, expected)
 
     def test_dunder_main_still_excluded(self):
         self.assertNotIn("__main__", self._discovered(set()))

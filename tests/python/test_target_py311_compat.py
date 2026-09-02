@@ -38,9 +38,14 @@ class TestPreludeSurvivesOldTarget(unittest.TestCase):
         # killing the session during the prelude -- before a single call is fuzzed.
         source = (SAMPLES / "tricky_objects.py").read_text()
 
+        # `__getattr__` must be skipped as well, not just CapsuleType. CPython 3.13 defines
+        # CapsuleType LAZILY through a module-level __getattr__ (PEP 562); copying that into
+        # the shim resolves the attribute straight back to the real module and the shim stops
+        # shimming. 3.14 defines it eagerly via _types, which is why this passed locally and
+        # failed on CI's 3.13 job on every run since 2026-08-19.
         shim = types.ModuleType("types")
         for name in dir(types):
-            if name != "CapsuleType":
+            if name not in ("CapsuleType", "__getattr__"):
                 setattr(shim, name, getattr(types, name))
         self.assertFalse(hasattr(shim, "CapsuleType"))
 
