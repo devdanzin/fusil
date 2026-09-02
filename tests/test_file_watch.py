@@ -356,6 +356,56 @@ class TestTracebackEchoIgnored(unittest.TestCase):
         self.assertEqual(w.score, 1.0)
 
 
+class TestWarningSourceEchoIgnored(unittest.TestCase):
+    """`warnings` echoes the source of whatever frame it fired in; that source may score.
+
+    The default warning formatter prints two lines -- a header naming a file and line, and
+    then that line's SOURCE, verbatim:
+
+        /.../logging/__init__.py:1536: RuntimeWarning: coroutine '...' was never awaited
+          self._log(CRITICAL, msg, args, **kwargs)
+
+    So an un-awaited coroutine collected while `logging` happens to be on the stack echoes
+    `logging`'s own source, and the `CRITICAL` in it is the level CONSTANT being passed as an
+    argument -- not a diagnostic. This is a third, distinct route to the same 1.0 word as the
+    traceback shapes above, and the traceback rules do not cover it: the line is neither a
+    `File "...", line N, in ...` frame nor a `.critical(` call. 14 kept dirs in one PyPy
+    fleet came in this way.
+
+    The rule matches the constant only in an argument position, so a real formatted record
+    and English prose both still score.
+    """
+
+    ARG_CONSTANT = r"[(,]\s*CRITICAL\s*[),]"
+
+    def _watch_with_rule(self):
+        w = _watch(words={"critical": 1.0})
+        w.ignoreRegex(self.ARG_CONSTANT)
+        return w
+
+    def test_logging_source_echo_is_ignored(self):
+        for line in (
+            b"  self._log(CRITICAL, msg, args, **kwargs)",
+            b"  if self.isEnabledFor(CRITICAL):",
+            b"        self.log(CRITICAL, msg, *args, **kwargs)",
+        ):
+            with self.subTest(line=line):
+                w = self._watch_with_rule()
+                self.assertIsNone(w.processLine(line))
+                self.assertEqual(w.score, 0.0)
+
+    def test_a_real_record_or_prose_still_scores(self):
+        for line in (
+            b"CRITICAL:root:something exploded",
+            b"CRITICAL: target failed",
+            b"a critical error occurred in the target",
+        ):
+            with self.subTest(line=line):
+                w = self._watch_with_rule()
+                w.processLine(line)
+                self.assertEqual(w.score, 1.0)
+
+
 class TestCookiejarWarningIgnored(unittest.TestCase):
     """http.cookiejar's own "bug!" warning must not push a boring session over the threshold.
 

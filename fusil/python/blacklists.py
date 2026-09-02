@@ -67,6 +67,28 @@ SOCKET = {
     "getaddrinfo",
     "socket",
     "SocketType",
+    # The int-as-FD family: the same self-harm shape as the int-as-pointer functions in
+    # CTYPES above, one layer up. These four take a RAW INTEGER file descriptor
+    # (`close(integer) -> None`, `dup(integer) -> integer`, `fromfd(fd, family, type)`,
+    # `send_fds(sock, buffers, fds)`), so handing them any fuzz integer closes or
+    # reinterprets a descriptor the interpreter is still using. It is not a target defect --
+    # the contract is the argument: `close(integer)` does what it is told, on any interpreter.
+    # (A standalone harness closing fd 11 while sibling threads call getaddrinfo did NOT
+    # reproduce the abort on either interpreter, so the window needs the full stress region;
+    # the case here rests on the evidence below, not on a differential.)
+    #
+    # Measured, and it is not a small effect: 163 of 229 kept dirs in one PyPy
+    # --concurrency-stress fleet (71%) were this, in two faces that split exactly on the
+    # value passed. 120 closed some other descriptor and were captured with glibc's own
+    # `Unexpected error 9 on netlink descriptor 11` -- 11 being `socket.AF_ROSE`, which the
+    # stress region had picked as a shared object. The other 43 were SIGABRTs with an EMPTY
+    # stdout: they had closed the child's own stdout or stderr, so the diagnostic had nowhere
+    # to go. Of the 100 dirs whose shared constants include a 0, 1 or 2, 43 went silent; of the
+    # 63 that do not, none did.
+    "close",
+    "dup",
+    "fromfd",
+    "send_fds",
 }
 POSIX = {
     "_exit",

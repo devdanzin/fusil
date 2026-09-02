@@ -85,6 +85,32 @@ class TestKnownEntriesPresent(unittest.TestCase):
         for keep in ("newdict", "strategy", "internal_repr", "intop", "move_to_end"):
             self.assertNotIn(keep, bl.BLACKLIST["__pypy__"])
 
+    def test_socket_int_as_fd_functions_blacklisted(self):
+        """socket.close/dup/fromfd/send_fds take a RAW INTEGER file descriptor.
+
+        Handing them a fuzz integer closes or reinterprets a descriptor the interpreter is
+        still using -- the int-as-FD analogue of the int-as-pointer functions in CTYPES, and
+        self-harm rather than a target defect -- the contract is the argument, and `close(integer)`
+        does what it is told on any interpreter. It dominated a PyPy
+        --concurrency-stress fleet: 163 of 229 kept dirs, in two faces that split on the value
+        passed -- 120 carrying glibc's `Unexpected error 9 on netlink descriptor 11`
+        (`socket.AF_ROSE == 11`), and 43 SIGABRTs with an EMPTY stdout, which had closed their own
+        stdout or stderr -- of the 100 dirs carrying a constant worth 0, 1 or 2, 43 went silent;
+        of the 63 without one, none did.
+        """
+        self.assertLessEqual({"close", "dup", "fromfd", "send_fds"}, bl.BLACKLIST["socket"])
+
+    def test_socket_blacklist_keeps_the_socket_object_surface(self):
+        """Only the MODULE-level int-taking functions are excluded.
+
+        `close` and `dup` are also METHODS on a socket object, where they take no descriptor
+        and are perfectly safe to fuzz. The entry is module-keyed for exactly that reason --
+        putting these names in the name-based METHOD_BLACKLIST would silently stop fusil from
+        ever closing a socket, a file or anything else with a `close`.
+        """
+        for name in ("close", "dup"):
+            self.assertNotIn(name, bl.METHOD_BLACKLIST)
+
     def test_sys_trace_hooks_blacklisted(self):
         self.assertEqual(
             bl.BLACKLIST["sys"] & {"settrace", "setprofile"}, {"settrace", "setprofile"}
