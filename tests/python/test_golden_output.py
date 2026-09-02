@@ -173,6 +173,69 @@ class TestGoldenOutput(unittest.TestCase):
         )
 
 
+class SkipTrivialTypeTests(unittest.TestCase):
+    """The emitted ``skip_trivial_type`` must refuse to dive into cffi objects.
+
+    ``--blacklist`` excludes ``_cffi_backend`` / ``_rawffi`` / ``ctypes`` by MODULE NAME, but
+    PyPy's stdlib hands out live cffi objects as module ATTRIBUTES -- ``resource.ffi``,
+    ``_ssl.ffi``, ``_sqlite3._ffi``, ``_lzma.ffi``, ``_tkinter.tkffi`` and their matching
+    ``.lib`` -- so the int-as-pointer surface was reachable regardless. Four consecutive PyPy
+    fleets kept dirs from it.
+
+    The function is emitted as SOURCE into every generated script, so testing the snapshot
+    text alone would not catch a logic error in it. Exec the emitted definition and exercise
+    it, matching on the type's defining module rather than on the attribute name.
+    """
+
+    def _emitted_skip_trivial_type(self):
+        source = generate()
+        tree = ast.parse(source)
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "skip_trivial_type":
+                namespace = {}
+                # TRIVIAL_TYPES is assigned just above the def in the same emitted block.
+                for prior in tree.body:
+                    if (
+                        isinstance(prior, ast.Assign)
+                        and getattr(prior.targets[0], "id", "") == "TRIVIAL_TYPES"
+                    ):
+                        exec(compile(ast.Module([prior], []), "<emitted>", "exec"), namespace)
+                exec(compile(ast.Module([node], []), "<emitted>", "exec"), namespace)
+                return namespace["skip_trivial_type"]
+        self.fail("skip_trivial_type was not emitted")
+
+    def test_cffi_objects_are_skipped_and_ordinary_objects_are_not(self):
+        skip = self._emitted_skip_trivial_type()
+
+        class _FakeFFI:
+            pass
+
+        # cffi types report _cffi_backend as their defining module; that is the signal, not
+        # the attribute name the object happens to be bound to.
+        _FakeFFI.__module__ = "_cffi_backend"
+        self.assertTrue(skip(_FakeFFI()))
+
+        class _OrdinaryTarget:
+            pass
+
+        self.assertFalse(skip(_OrdinaryTarget()))
+
+    def test_trivial_types_are_still_skipped(self):
+        skip = self._emitted_skip_trivial_type()
+        for value in (1, "s", 1.0, True, b"b", (), [], {}, set(), None):
+            with self.subTest(value=value):
+                self.assertTrue(skip(value))
+
+    def test_an_attribute_merely_NAMED_ffi_is_not_skipped(self):
+        """Name-based matching would collide with legitimate targets; this is type-based."""
+        skip = self._emitted_skip_trivial_type()
+
+        class ffi:  # noqa: N801 - deliberately named like the cffi attribute
+            pass
+
+        self.assertFalse(skip(ffi()))
+
+
 class SelfNoiseVocabularyTests(unittest.TestCase):
     """Emitted COMMENTS must not contain fusil's own crash vocabulary.
 

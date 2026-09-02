@@ -42,6 +42,24 @@ TRIVIAL_TYPES = {int, str, float, bool, bytes, tuple, list, dict, set, type(None
 def skip_trivial_type(obj_instance_or_class):
     if type(obj_instance_or_class) in TRIVIAL_TYPES:
         return True
+    # The int-as-pointer family, reached as a module ATTRIBUTE rather than as a
+    # module. --blacklist already excludes _cffi_backend/_rawffi/ctypes by NAME, but
+    # PyPy's stdlib hands out live cffi objects as attributes -- resource.ffi,
+    # _ssl.ffi, _sqlite3._ffi, _lzma.ffi, _gdbm.ffi, _curses.ffi, _tkinter.tkffi,
+    # _sha3._ffi, _posixshmem.ffi and their matching .lib -- so the surface is
+    # reachable regardless of the module blacklist. ffi.memmove(int, int, n) treats
+    # its arguments as raw pointers and dies BY CONTRACT on whatever integer it is
+    # handed, exactly as CPython's ctypes does on the same input, so a fault here is
+    # never a target defect. Seen in four consecutive PyPy fleets (05, 06, 07, 08).
+    #
+    # (Worded without fusil's own crash vocabulary on purpose: help() echoes emitted
+    # comments via inspect.getcomments, and SelfNoiseVocabularyTests enforces it.)
+    #
+    # Matched on the TYPE's defining module, not on the attribute name: an
+    # OBJECT_BLACKLIST entry for "ffi"/"lib"/"_ffi"/"tkffi" would match those names
+    # on unrelated targets that legitimately expose them.
+    if type(obj_instance_or_class).__module__ == "_cffi_backend":
+        return True
     return False
 
 
