@@ -559,11 +559,27 @@ class WritePythonCode(WriteCode):
             # turning rare "GC fires while an object is tracked but half-initialised"
             # races (tp_traverse reading a NULL field) into deterministic crashes. A cheap
             # global coercion like the OOM hook; composes with the bombs + class fuzzing.
+            #
+            # GUARDED, and the guard is load-bearing: gc.set_threshold is CPython-only.
+            # PyPy's gc module does not have it, so an unguarded call raises AttributeError at
+            # MODULE LEVEL -- before a single target call -- and every session dies in the
+            # prelude scoring 0. A 43 368-session PyPy fleet produced exactly zero crashes,
+            # zero timeouts and 0.3-second sessions that way, and nothing in the logs said why:
+            # the sessions look "clean", not broken. This is the same shape as the pre-3.13
+            # target-compat break fixed in #256; the lesson is that anything CPython-specific
+            # in the prelude must be guarded, because the prelude runs on the TARGET.
+            #
+            # The flag stays a no-op rather than an error on such a target: it is a tuning
+            # knob, not a request, and PyPy's GC is not generational in CPython's sense so
+            # there is nothing to coerce.
             self.write_block(
                 0,
                 """
                 import gc
-                gc.set_threshold(1, 1, 1)
+                try:
+                    gc.set_threshold(1, 1, 1)
+                except AttributeError:
+                    pass  # not CPython: no generational threshold to tighten
                 """,
             )
             self.emptyLine()
