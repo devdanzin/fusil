@@ -18,6 +18,7 @@ from fusil.python.blacklists import (
     METHOD_BLACKLIST,
     OBJECT_BLACKLIST,
 )
+from fusil.python.meta_proxy import _MetaProxy, is_meta_proxy  # noqa: F401
 from fusil.write_code import WriteCode
 
 if TYPE_CHECKING:
@@ -76,30 +77,6 @@ TSAN_UNSAFE_CALLS = frozenset(
         "_exit", "abort", "system", "popen", "register_at_fork",
     }
 )  # fmt: skip
-
-
-class _MetaProxy:
-    """Stand-in for a live target member when module discovery ran in the target subprocess
-    (see ``target_introspect``). Carries the serializable metadata the generation path needs; the
-    duck-typed ``_fusil_*`` attributes are recognised by ``get_arg_number`` / ``class_arg_number``
-    / ``_get_object_methods``, so the live-object path is unchanged. Never a ``FunctionType`` /
-    ``type`` / ``ModuleType`` -- the classification already happened in the subprocess."""
-
-    _fusil_is_meta = True
-
-    def __init__(self, name: str, meta: dict):
-        self._name = name
-        self._meta = meta
-        self._fusil_arity = meta.get("arity")  # function/method: [lo, hi] or None (C builtin)
-        self._fusil_doc = meta.get("doc")
-        self._fusil_ctor_arity = meta.get("ctor_arity")  # class: [lo, hi] or None
-        self._fusil_is_exception = bool(meta.get("is_exception"))
-        self._fusil_class_name = meta.get("class_name", name)
-
-    def _fusil_raw_methods(self):
-        """(name, method-proxy) candidates for ``_get_object_methods`` to filter (blacklist /
-        private / plugin / exception-``__init__`` filtering stays in the parent)."""
-        return [(m["name"], _MetaProxy(m["name"], m)) for m in self._meta.get("methods", [])]
 
 
 class PythonFuzzerError(Exception):
@@ -327,7 +304,7 @@ class WritePythonCode(WriteCode):
         ``__init__``) is applied here, and the values are the objects/proxies the arity code reads.
         """
         methods: dict[str, Callable[..., Any]] = {}
-        is_meta = getattr(obj_instance_or_class, "_fusil_is_meta", False)
+        is_meta = is_meta_proxy(obj_instance_or_class)
         if not is_meta and type(obj_instance_or_class) in TRIVIAL_TYPES:
             return methods
 
@@ -2485,7 +2462,7 @@ class WritePythonCode(WriteCode):
         # Metadata mode: the proxy carries the class name + method set; live mode reads them off
         # the instance. Pass the proxy itself as the "type" so _get_object_methods finds its
         # _fusil_raw_methods (type(proxy) would be _MetaProxy, not the target's type).
-        if getattr(obj_instance, "_fusil_is_meta", False):
+        if is_meta_proxy(obj_instance):
             class_name = obj_instance._fusil_class_name
             type_for_methods = obj_instance
         else:
