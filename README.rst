@@ -64,3 +64,12 @@ Tests use ``unittest`` (not pytest)::
 
 Contributions to any part of fusil are welcome, but active development and CI focus on the
 Python fuzzer.
+
+Troubleshooting
+===============
+
+If `python -m unittest discover -s tests` fails with `ModuleNotFoundError: No module named 'ptrace'`, install the hard dependency::
+
+    pip install python-ptrace
+
+For `--tsan` runs, ensure you use a free-threaded CPython built with `--with-thread-sanitizer` and set `PYTHON_GIL=0` as documented in `doc/tsan-mode-plan.md`.
