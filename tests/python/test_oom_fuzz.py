@@ -151,10 +151,11 @@ class TestOOMFuzzGeneration(unittest.TestCase):
         self.assertNotIn("_remove_mem_hooks()", src)
 
         # Per-call marker (the pinpointing signal) and exception policy:
-        # MemoryError swallowed silently, SystemError surfaced.
+        # MemoryError swallowed silently, SystemError surfaced -- unless it is a bomb's own
+        # (see BombSystemErrorFilterTests, which drives the emitted handler).
         self.assertIn('print("[OOM] " + label', src)
         self.assertIn("except MemoryError:", src)
-        self.assertIn("except SystemError:", src)
+        self.assertIn("except SystemError as _exc:", src)
         # The old noisy "print every exception type" surfacing is gone.
         self.assertNotIn("print(type(_err).__name__)", src)
 
@@ -350,6 +351,85 @@ class TestForeignOOMGeneration(unittest.TestCase):
         src = _generate(oom_fuzz=True, oom_foreign=False)
         self.assertIn("from _testcapi import set_nomemory", src)
         self.assertNotIn("fusil_malloc_arm", src)
+
+
+class BombSystemErrorFilterTests(unittest.TestCase):
+    """The emitted ``oom_call`` must not report a BOMB's own SystemError.
+
+    ``SystemError`` is one of ``_BOMB_EXCEPTIONS``, so every bomb built with ``exc=None``
+    (``FailingIterator``, ``SuperBomb``, ``DescriptorBomb``, ``HiddenNameType`` ...) raises it
+    about one firing in twelve. The handler used to print ``[OOM] SystemError in <label>`` for
+    those -- a "PyCFunction contract violation" report for fusil's own object, reached without
+    any C code running -- and printed only the label, so a crash dir could not tell the two
+    apart. An ``--oom-foreign`` fleet of 68k sessions kept 410 such dirs, 74% of its output,
+    and every sampled one replayed to a bomb.
+
+    The handler is emitted as SOURCE into every generated script, so asserting on the snapshot
+    text alone would not catch a logic error in it: exec the emitted definition and drive it
+    with a callable that raises each kind.
+    """
+
+    def _emitted_oom_call(self, printed):
+        """Exec the generated ``oom_call`` with stubs, collecting what it prints."""
+        source = _generate(oom_fuzz=True)
+        tree = ast.parse(source)
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "oom_call":
+                ns = {
+                    "_OOM_AVAILABLE": True,
+                    "_OOM_MIN_START": 0,
+                    "_OOM_MAX_START": 1,  # one sweep iteration is enough
+                    "_OOM_VERBOSE": False,
+                    "_OOM_DISABLE": 2**60,
+                    "_set_nomemory": lambda *a: None,
+                    "stderr": None,
+                    "print": lambda *a, **k: printed.append(a[0] if a else ""),
+                }
+                exec(compile(ast.Module([node], []), "<emitted>", "exec"), ns)
+                return ns["oom_call"]
+        self.fail("generated script has no oom_call definition")
+
+    def _run(self, raiser):
+        printed = []
+        self._emitted_oom_call(printed)("oc1:mod.Thing", raiser)
+        # drop the per-call banner the sweep always prints
+        return [line for line in printed if "SystemError" in line]
+
+    def test_bomb_systemerror_is_not_reported(self):
+        def bomb():
+            raise SystemError("fusil superbomb via __eq__")
+
+        self.assertEqual(self._run(bomb), [])
+
+    def test_bomb_iterator_systemerror_is_not_reported(self):
+        def bomb():
+            raise SystemError("fusil iter bomb")
+
+        self.assertEqual(self._run(bomb), [])
+
+    def test_target_systemerror_is_still_reported_with_repr(self):
+        def genuine():
+            raise SystemError("<built-in function x> returned NULL without setting an exception")
+
+        reported = self._run(genuine)
+        self.assertEqual(len(reported), 1)
+        self.assertIn("oc1:mod.Thing", reported[0])
+        # the repr is what makes a real one triageable from stdout alone
+        self.assertIn("returned NULL without setting an exception", reported[0])
+
+    def test_memory_error_is_still_swallowed(self):
+        def oom():
+            raise MemoryError
+
+        self.assertEqual(self._run(oom), [])
+
+    def test_a_target_error_merely_mentioning_fusil_is_still_reported(self):
+        """The filter keys on the bomb's leading marker, not on the word anywhere."""
+
+        def genuine():
+            raise SystemError("returned a result with an exception set (fusil arg)")
+
+        self.assertEqual(len(self._run(genuine)), 1)
 
 
 if __name__ == "__main__":
