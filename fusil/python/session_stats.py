@@ -10,7 +10,7 @@ in isolation -- same split as ``oom_dedup.py``. The MAS wiring lives in ``stats_
 Sidecar schema (v1)::
 
     {
-      "schema": 2,
+      "schema": 3,
       "mode": "oom",              # active fuzzing mode ("oom"/"tsan"/"rustpython"/
                                   #   "concurrency-stress"/"normal"/a "+"-joined combo)
       "plugins": ["cereggii"],    # names of the loaded fusil plugins (entry-point discovered)
@@ -22,7 +22,13 @@ Sidecar schema (v1)::
       "sessions": 3092,           # sessions finished
       "crashes": 112,             # sessions scored as a success/finding
       "timeouts": 70,             # sessions the target-process timeout fired on
-      "cpu_load_kills": 5,        # sessions the CPU-load watcher killed
+      "high_cpu_sessions": 5,     # sessions that spent >=10s above 75% CPU. NOT kills:
+                                  #   CpuProbe only scores + renames, and the Python fuzzer
+                                  #   sets its max_score to 0 unless --record-high-cpu, so
+                                  #   the session is neither ended nor discarded.
+      "cpu_load_kills": 5,        # legacy alias of the above, still emitted so older readers
+                                  #   and archived sidecars keep working. Misnamed: it never
+                                  #   counted kills.
       "modules": {                # per-target-module breakdown
         "_blake2": {"hits": 15, "crashes": 3, "timeouts": 0},
         ...
@@ -41,7 +47,9 @@ import os
 import time
 from typing import Callable
 
-SCHEMA_VERSION = 2  # v2 adds "mode" + "plugins" (additive; readers use .get with defaults)
+# v2 adds "mode" + "plugins"; v3 renames "cpu_load_kills" -> "high_cpu_sessions" and keeps the
+# old key as an alias (additive both ways; readers use .get with defaults and accept either).
+SCHEMA_VERSION = 3
 
 
 class SessionStats:
@@ -74,7 +82,7 @@ class SessionStats:
         self.sessions = 0
         self.crashes = 0
         self.timeouts = 0
-        self.cpu_load_kills = 0
+        self.high_cpu_sessions = 0
         # module name -> {"hits": int, "crashes": int, "timeouts": int}
         self.modules: dict[str, dict[str, int]] = {}
         # --tsan shared-object composition -> count (Slice B). Empty for non-tsan runs.
@@ -96,7 +104,7 @@ class SessionStats:
         if timeout:
             self.timeouts += 1
         if cpu_load:
-            self.cpu_load_kills += 1
+            self.high_cpu_sessions += 1
         if tsan_kind:
             self.tsan_kinds[tsan_kind] = self.tsan_kinds.get(tsan_kind, 0) + 1
         # ``module`` can legitimately be None very early (before the first module loads);
@@ -126,7 +134,9 @@ class SessionStats:
             "sessions": self.sessions,
             "crashes": self.crashes,
             "timeouts": self.timeouts,
-            "cpu_load_kills": self.cpu_load_kills,
+            "high_cpu_sessions": self.high_cpu_sessions,
+            # Legacy alias: archived sidecars and any older reader still key on this name.
+            "cpu_load_kills": self.high_cpu_sessions,
             "modules": self.modules,
             "tsan_kinds": self.tsan_kinds,
         }
@@ -158,6 +168,7 @@ class SessionStats:
             "sessions": 0,
             "crashes": 0,
             "timeouts": 0,
+            "high_cpu_sessions": 0,
             "cpu_load_kills": 0,
             "modules": {},
             "tsan_kinds": {},
@@ -174,8 +185,12 @@ class SessionStats:
                 out["mode"] = d["mode"]
             if d.get("plugins"):
                 out["plugins"] = list(d["plugins"])
-            for key in ("sessions", "crashes", "timeouts", "cpu_load_kills"):
+            for key in ("sessions", "crashes", "timeouts"):
                 out[key] += int(d.get(key, 0) or 0)
+            # Accept either spelling: a v3 sidecar carries both, a pre-v3 one only the alias.
+            high_cpu = d.get("high_cpu_sessions", d.get("cpu_load_kills", 0))
+            out["high_cpu_sessions"] += int(high_cpu or 0)
+            out["cpu_load_kills"] = out["high_cpu_sessions"]
             for name, bucket in (d.get("modules") or {}).items():
                 acc = out["modules"].setdefault(name, {"hits": 0, "crashes": 0, "timeouts": 0})
                 for field in ("hits", "crashes", "timeouts"):
