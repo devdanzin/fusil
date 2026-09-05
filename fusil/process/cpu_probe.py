@@ -54,7 +54,11 @@ class CpuProbe(ProjectAgent):
         if duration < self.max_duration:
             return
 
-        # Success
+        # Success. NOTE: this does NOT kill the process -- it only scores, logs, and tags the
+        # session name. The Python fuzzer sets max_score to 0 unless --record-high-cpu, so the
+        # usual effect is a "cpu_load" name part and nothing else: the session runs to
+        # completion and is not discarded. The stats counter is named accordingly
+        # (high_cpu_sessions); its "cpu_load_kills" alias is legacy and was always a misnomer.
         self.score = self.max_score
         self.error(
             "CPU load (%.1f%%) bigger than maximum (%.1f%%) during %.1f sec: score=%.1f%%"
