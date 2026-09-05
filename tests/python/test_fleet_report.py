@@ -27,7 +27,7 @@ def _sidecar(path, **kw):
         "sessions": 0,
         "crashes": 0,
         "timeouts": 0,
-        "cpu_load_kills": 0,
+        "high_cpu_sessions": 0,
         "modules": {},
     }
     data.update(kw)

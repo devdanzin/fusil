@@ -30,9 +30,32 @@ class TestRecord(unittest.TestCase):
         self.assertEqual(s.sessions, 4)
         self.assertEqual(s.crashes, 2)
         self.assertEqual(s.timeouts, 1)
-        self.assertEqual(s.cpu_load_kills, 1)
+        self.assertEqual(s.high_cpu_sessions, 1)
         self.assertEqual(s.modules["json"], {"hits": 3, "crashes": 2, "timeouts": 0})
         self.assertEqual(s.modules["sqlite3"], {"hits": 1, "crashes": 0, "timeouts": 1})
+
+    def test_high_cpu_key_is_emitted_under_both_names(self):
+        """v3 renamed the counter; the old key stays as an alias.
+
+        `cpu_load_kills` was always a misnomer -- `CpuProbe` only scores and renames the
+        session, and the Python fuzzer zeroes its score unless --record-high-cpu, so nothing
+        is killed or discarded. Renaming it outright would break archived sidecars and any
+        reader still keying on the old name, so both are emitted.
+        """
+        s = self._stats()
+        s.record("json", cpu_load=True)
+        d = s.to_dict()
+        self.assertEqual(d["high_cpu_sessions"], 1)
+        self.assertEqual(d["cpu_load_kills"], 1)
+
+    def test_merge_reads_pre_v3_sidecars(self):
+        """A sidecar written before the rename carries only the alias; merge must still count it."""
+        legacy = {"sessions": 10, "crashes": 1, "timeouts": 2, "cpu_load_kills": 5}
+        current = {"sessions": 10, "crashes": 1, "timeouts": 2, "high_cpu_sessions": 3}
+        out = SessionStats.merge([legacy, current])
+        self.assertEqual(out["high_cpu_sessions"], 8)
+        # the alias mirrors it, so an old reader aggregating a mixed fleet still agrees
+        self.assertEqual(out["cpu_load_kills"], 8)
 
     def test_tsan_kinds_counted(self):
         # Slice B: --tsan sessions record their shared-object composition; non-tsan sessions
@@ -84,6 +107,7 @@ class TestSerialization(unittest.TestCase):
             "sessions",
             "crashes",
             "timeouts",
+            "high_cpu_sessions",
             "cpu_load_kills",
             "modules",
         ):

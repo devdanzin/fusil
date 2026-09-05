@@ -234,7 +234,8 @@ def collect_instance(inst_dir: str, *, now=None, systemd=True) -> dict:
         "kept_crashes": crash_total,
         "sidecar_crashes": merged.get("crashes", 0),
         "timeouts": merged.get("timeouts", 0),
-        "cpu_load_kills": merged.get("cpu_load_kills", 0),
+        # Either spelling: v3 sidecars carry "high_cpu_sessions", older ones only the alias.
+        "high_cpu_sessions": merged.get("high_cpu_sessions", merged.get("cpu_load_kills", 0)),
         "new": new_candidate_count(by_label),
         "mode": merged.get("mode") or (current or {}).get("mode"),
         "plugins": merged.get("plugins") or (current or {}).get("plugins") or [],
@@ -409,7 +410,7 @@ def render_instance(r: dict) -> str:
     to_pct = (100.0 * r["timeouts"] / r["sessions"]) if r["sessions"] else 0.0
     find = (1000.0 * r["kept_crashes"] / r["sessions"]) if r["sessions"] else 0.0
     L.append(
-        "sessions %-8d (%s)  crashes %-5d (%.1f/1k)  timeouts %d (%.1f%%)  cpu-kills %d"
+        "sessions %-8d (%s)  crashes %-5d (%.1f/1k)  timeouts %d (%.1f%%)  high-cpu %d"
         % (
             r["sessions"],
             format_rate(r["sessions"], r["uptime_s"]),
@@ -417,7 +418,7 @@ def render_instance(r: dict) -> str:
             find,
             r["timeouts"],
             to_pct,
-            r["cpu_load_kills"],
+            r["high_cpu_sessions"],
         )
     )
     L.append("-" * 72)

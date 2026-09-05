@@ -112,7 +112,7 @@ class TestStatsAgentWiring(unittest.TestCase):
             agent.on_session_start()  # resets rename parts
             agent.on_session_rename("cpu_load")
             agent.on_session_done(0.0)
-            self.assertEqual(agent.stats.cpu_load_kills, 1)
+            self.assertEqual(agent.stats.high_cpu_sessions, 1)
 
     def test_tsan_kind_recorded_from_source(self):
         # Slice B: StatsAgent reads the --tsan shared-object composition off the PythonSource and
