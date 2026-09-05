@@ -722,6 +722,16 @@ class WritePythonCode(WriteCode):
         self.emptyLine()
 
         if self.options.oom_fuzz:
+            # The emitted `except SystemError` handlers below filter out a bomb's OWN
+            # exception. SystemError is one of `_BOMB_EXCEPTIONS`, so every bomb built with
+            # `exc=None` (FailingIterator, SuperBomb, DescriptorBomb, HiddenNameType, ...)
+            # picks it about one firing in twelve -- and the handler then reported a
+            # "contract violation" for fusil's own object, with no C code involved at all.
+            # Because the marker printed only the label and never the exception, the two were
+            # indistinguishable in a crash dir: an --oom-foreign fleet (68k sessions) kept 410
+            # such dirs, 74% of its total output, every one of them traced back to a bomb.
+            # Every bomb message starts with "fusil " (samples/bomb_objects.py), which is the
+            # discriminator; the repr is now printed so a genuine one stays triageable.
             self.write_block(
                 0,
                 f"""
@@ -735,8 +745,9 @@ class WritePythonCode(WriteCode):
                     # sweep) identifies which invocation was running if a crash follows --
                     # more reliable than the faulthandler frame, which is often an
                     # incidental allocation rather than the fuzzed target. MemoryError is
-                    # the expected outcome and is swallowed silently; SystemError is
-                    # surfaced (PyCFunction contract violations); a real crash
+                    # the expected outcome and is swallowed silently; a SystemError the
+                    # target itself raised is surfaced (PyCFunction contract violations),
+                    # while one carrying a bomb's own "fusil ..." message is not; a real crash
                     # (segfault/abort) terminates the process, the signal fusil scores.
                     # The inner finally DISARMS injection (set_nomemory with an unreachable start)
                     # so the except clauses allocate freely, WITHOUT swapping the allocator -- the
@@ -756,8 +767,11 @@ class WritePythonCode(WriteCode):
                                 _set_nomemory(_OOM_DISABLE, 0)
                         except MemoryError:
                             pass
-                        except SystemError:
-                            print("[OOM] SystemError in " + label, file=stderr)
+                        except SystemError as _exc:
+                            # Skip a bomb's own exception (message "fusil ..."); report the
+                            # repr so a real one is triageable from stdout alone.
+                            if not str(_exc).startswith("fusil "):
+                                print("[OOM] SystemError in " + label + ": " + repr(_exc), file=stderr)
                         except BaseException:
                             pass
             """,
@@ -802,8 +816,10 @@ class WritePythonCode(WriteCode):
                                 _set_nomemory(_OOM_DISABLE, 0)
                         except MemoryError:
                             pass
-                        except SystemError:
-                            print("[OOM-SEQ] SystemError in " + label, file=stderr)
+                        except SystemError as _exc:
+                            # Same bomb filter as oom_call above.
+                            if not str(_exc).startswith("fusil "):
+                                print("[OOM-SEQ] SystemError in " + label + ": " + repr(_exc), file=stderr)
                         except BaseException:
                             pass
             """,
