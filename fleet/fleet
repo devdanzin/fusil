@@ -170,6 +170,128 @@ cmd_check(){  # validate fleet.conf before we start anything (catches the #1 foo
             echo "  --tsan is set but TARGET_PYTHON is not free-threaded + --with-thread-sanitizer: '$TARGET_PYTHON'"
             echo "    -> use a builds/*-ft-*-tsan interpreter"; ok=0; } ;;
     esac
+    # The TARGET must be executable by the UNPRIVILEGED FUZZ USER, not by whoever runs
+    # `fleet up`. fusil drops privileges before exec'ing it (fusil/process/prepare.py), so a
+    # target under someone's home directory is routinely executable by its owner and
+    # unreachable for the fuzz user, whose traversal fails on a path component. That failure
+    # surfaces once per session as a ProcessError, which kills the run; the supervisor restarts
+    # it and it fails again. Two fleets have now burned their opening minutes on exactly this,
+    # on two different target paths.
+    #
+    # Checked by walking the mode bits of every path component rather than by sudo'ing to the
+    # user: the answer is the same, it needs no privilege (passwordless sudo is often absent
+    # on exactly the boxes this bites), and it can name the component that actually blocks.
+    #
+    # --unsafe / --force-unsafe means no drop happens, so the question does not arise.
+    case "$FUSIL_FLAGS" in
+        *--unsafe*|*--force-unsafe*) ;;
+        *)
+            if [ -x "$TARGET_PYTHON" ] && [ -x "$RUNNER_PY" ]; then
+                blocker="$("$RUNNER_PY" - "$TARGET_PYTHON" "${FUZZ_USER:-fusil}" <<'PY' 2>/dev/null
+import grp, os, pwd, sys
+
+target, username = sys.argv[1], sys.argv[2]
+try:
+    pw = pwd.getpwnam(username)
+except KeyError:
+    print("NOUSER"); raise SystemExit(0)
+gids = {pw.pw_gid}
+for g in grp.getgrall():
+    if username in g.gr_mem:
+        gids.add(g.gr_gid)
+
+def executable_by(path):
+    st = os.stat(path)
+    if pw.pw_uid == 0:
+        return True
+    if st.st_uid == pw.pw_uid:
+        return bool(st.st_mode & 0o100)
+    if st.st_gid in gids:
+        return bool(st.st_mode & 0o010)
+    return bool(st.st_mode & 0o001)
+
+def components(path):
+    out, cur = [], "/"
+    for comp in path.strip("/").split("/"):
+        cur = os.path.join(cur, comp)
+        out.append(cur)
+    return out
+
+# BOTH chains matter, and checking only the resolved one is a hole: to exec a symlinked
+# target the kernel must traverse the link's own directories before it ever resolves the
+# link, and build trees commonly symlink the interpreter.
+seen, parts = set(), []
+for chain in (components(os.path.abspath(target)), components(os.path.realpath(target))):
+    for p in chain:
+        if p not in seen:
+            seen.add(p); parts.append(p)
+for p in parts:
+    try:
+        if not executable_by(p):
+            print(p); raise SystemExit(0)
+    except OSError:
+        print(p); raise SystemExit(0)
+print("")
+PY
+)"
+                case "$blocker" in
+                    ""|NOUSER)
+                        [ "$blocker" = NOUSER ] && {
+                            echo "  (advisory) no '${FUZZ_USER:-fusil}' user on this host; fusil will warn"
+                            echo "    or prompt at startup. Create it, or add --unsafe to FUSIL_FLAGS."; } ;;
+                    *)
+                        echo "  TARGET_PYTHON is not reachable by user '${FUZZ_USER:-fusil}': '$TARGET_PYTHON'"
+                        echo "    blocked at: $blocker"
+                        echo "    -> fusil drops to that user before exec'ing the target, so every"
+                        echo "       directory on the path needs +x for it:"
+                        echo "         chmod o+X $blocker"
+                        echo "       or move the build somewhere reachable, or add --unsafe."
+                        ok=0 ;;
+                esac
+            fi
+            ;;
+    esac
+    # Enumerating a target's modules and members only works in an interpreter that HAS them.
+    # Without --discover-in-target fusil imports them in the RUNNER, so a runner that is not the
+    # target produces a module list and member set the target does not have: sessions die in the
+    # prelude, or partway through on an attribute that exists only in the runner's stdlib. One
+    # PyPy fleet ran 43 368 sessions this way with a CPython 3.16 runner -- 20% of the modules it
+    # picked do not exist on PyPy at all.
+    #
+    # A DIFFERENT IMPLEMENTATION fails: cpython-vs-pypy stdlibs diverge by construction, and
+    # discovery in the wrong one is never right. A different VERSION of the same implementation
+    # is only advisory -- it costs coverage at the edges (3.16-only modules invisible to a 3.14
+    # runner) but does not systematically break, and fleets that pin --modules to one installed
+    # third-party package are unaffected either way.
+    case "$FUSIL_FLAGS" in
+        *--discover-in-target*) ;;
+        *)
+            if [ -x "$RUNNER_PY" ] && [ -x "$TARGET_PYTHON" ]; then
+                _impl='import sys;print(sys.implementation.name)'
+                _ver='import sys;print("%d.%d" % sys.version_info[:2])'
+                runner_impl="$("$RUNNER_PY" -c "$_impl" 2>/dev/null)"
+                target_impl="$("$TARGET_PYTHON" -c "$_impl" 2>/dev/null)"
+                runner_ver="$("$RUNNER_PY" -c "$_ver" 2>/dev/null)"
+                target_ver="$("$TARGET_PYTHON" -c "$_ver" 2>/dev/null)"
+                if [ -n "$runner_impl" ] && [ -n "$target_impl" ] \
+                   && [ "$runner_impl" != "$target_impl" ]; then
+                    echo "  RUNNER_PY and TARGET_PYTHON are different implementations but"
+                    echo "  --discover-in-target is not set:"
+                    echo "    runner: $runner_impl $runner_ver      target: $target_impl $target_ver"
+                    echo "    -> discovery would import the TARGET's modules in the RUNNER and emit"
+                    echo "       members the target does not have. Add --discover-in-target."
+                    ok=0
+                elif [ -n "$runner_ver" ] && [ -n "$target_ver" ] \
+                     && [ "$runner_ver" != "$target_ver" ]; then
+                    echo "  (advisory) runner is $runner_impl $runner_ver but the target is"
+                    echo "    $target_impl $target_ver, and --discover-in-target is not set:"
+                    echo "    modules present in only one of them are missed or emitted wrongly."
+                    echo "    Harmless if --modules pins an installed package; otherwise add"
+                    echo "    --discover-in-target."
+                fi
+            fi
+            ;;
+    esac
     if [ -x "$RUNNER_PY" ] && [ -f "$FUSIL_PY" ]; then
         PYTHONPATH="$repo${PYTHONPATH:+:$PYTHONPATH}" "$RUNNER_PY" -c 'import fusil, ptrace' 2>/dev/null \
             || { echo "  RUNNER_PY cannot 'import fusil, ptrace': '$RUNNER_PY'"
