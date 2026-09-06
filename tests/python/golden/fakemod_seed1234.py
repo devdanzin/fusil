@@ -1458,48 +1458,52 @@ except Exception as e:
 if instance_c1_widget is not None:
     if skip_trivial_type(instance_c1_widget):
         print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
-    try:
-        print(f'Instance {instance_c1_widget!r} (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
-    except Exception as e:
-        print(f'Error printing instance repr() { e } (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
-    if skip_trivial_type(instance_c1_widget):
-        print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
     else:
-        print(f'Instance instance_c1_widget (type {type(instance_c1_widget).__name__}) has no specific fuzzer, doing generic calls.', file=stderr)
-        c1_widget_ops_generic_methods = []
+        pass
         try:
-            for c1_widget_ops_generic_attr_name in dir(instance_c1_widget):
-                if c1_widget_ops_generic_attr_name.startswith('_'): continue
-                try:
-                    c1_widget_ops_generic_attr_val = getattr(instance_c1_widget, c1_widget_ops_generic_attr_name)
-                    if callable(c1_widget_ops_generic_attr_val) and c1_widget_ops_generic_attr_name not in _FUSIL_METHOD_BLACKLIST: c1_widget_ops_generic_methods.append((c1_widget_ops_generic_attr_name, c1_widget_ops_generic_attr_val))
-                except Exception: pass
-        except Exception: c1_widget_ops_generic_methods = [] # Failed to get methods
-        if c1_widget_ops_generic_methods:
-            print(f'Found {len(c1_widget_ops_generic_methods)} callable methods for generic fuzzing of instance_c1_widget', file=stderr)
-            for _i_c1_widget_ops_generic in range(min(len(c1_widget_ops_generic_methods), 2)):
-                c1_widget_ops_generic_method_name_to_call, c1_widget_ops_generic_method_obj_to_call = choice(c1_widget_ops_generic_methods)
-                # Conceptual call to generic method fuzzer
-                if c1_widget_ops_generic_method_name_to_call not in _FUSIL_METHOD_BLACKLIST: callMethod(f'c1_widget_ops_generic_gen{_i_c1_widget_ops_generic}', instance_c1_widget, c1_widget_ops_generic_method_name_to_call)
+            print(f'Instance {instance_c1_widget!r} (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
+        except Exception as e:
+            print(f'Error printing instance repr() { e } (actual type {type(instance_c1_widget).__name__}) has no specific fuzzer type, doing generic calls.', file=stderr)
+        if skip_trivial_type(instance_c1_widget):
+            print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
+        else:
+            print(f'Instance instance_c1_widget (type {type(instance_c1_widget).__name__}) has no specific fuzzer, doing generic calls.', file=stderr)
+            c1_widget_ops_generic_methods = []
+            try:
+                for c1_widget_ops_generic_attr_name in dir(instance_c1_widget):
+                    if c1_widget_ops_generic_attr_name.startswith('_'): continue
+                    try:
+                        c1_widget_ops_generic_attr_val = getattr(instance_c1_widget, c1_widget_ops_generic_attr_name)
+                        if callable(c1_widget_ops_generic_attr_val) and c1_widget_ops_generic_attr_name not in _FUSIL_METHOD_BLACKLIST: c1_widget_ops_generic_methods.append((c1_widget_ops_generic_attr_name, c1_widget_ops_generic_attr_val))
+                    except Exception: pass
+            except Exception: c1_widget_ops_generic_methods = [] # Failed to get methods
+            if c1_widget_ops_generic_methods:
+                print(f'Found {len(c1_widget_ops_generic_methods)} callable methods for generic fuzzing of instance_c1_widget', file=stderr)
+                for _i_c1_widget_ops_generic in range(min(len(c1_widget_ops_generic_methods), 2)):
+                    c1_widget_ops_generic_method_name_to_call, c1_widget_ops_generic_method_obj_to_call = choice(c1_widget_ops_generic_methods)
+                    # Conceptual call to generic method fuzzer
+                    if c1_widget_ops_generic_method_name_to_call not in _FUSIL_METHOD_BLACKLIST: callMethod(f'c1_widget_ops_generic_gen{_i_c1_widget_ops_generic}', instance_c1_widget, c1_widget_ops_generic_method_name_to_call)
 
 if instance_c1_widget is not None and instance_c1_widget is not SENTINEL_VALUE:
     print(f"--- Fuzzing instance: instance_c1_widget (type hint: Widget, prefix: c1m) ---", file=stderr)
     if skip_trivial_type(instance_c1_widget):
         print(f'Skipping deep diving on instance_c1_widget {type(instance_c1_widget)}', file=stderr)
-    # General method fuzzing for instance_c1_widget
-    try:
-        res_c1m1 = callMethod("c1m1", instance_c1_widget, "method_two",
-            list[weird_classes['weird_OrderedDict']] | weird_classes['weird_set'] | big_union,
-        verbose=True)
-    except Exception as _argexc_c1m1:
-        print("[c1m1] call skipped (argument build failed):", repr(_argexc_c1m1), file=stderr)
+    else:
+        pass
+        # General method fuzzing for instance_c1_widget
+        try:
+            res_c1m1 = callMethod("c1m1", instance_c1_widget, "method_two",
+                list[weird_classes['weird_OrderedDict']] | weird_classes['weird_set'] | big_union,
+            verbose=True)
+        except Exception as _argexc_c1m1:
+            print("[c1m1] call skipped (argument build failed):", repr(_argexc_c1m1), file=stderr)
 
 
-    try:
-        res_c1m2 = callMethod("c1m2", instance_c1_widget, "method_one",
-        verbose=True)
-    except Exception as _argexc_c1m2:
-        print("[c1m2] call skipped (argument build failed):", repr(_argexc_c1m2), file=stderr)
+        try:
+            res_c1m2 = callMethod("c1m2", instance_c1_widget, "method_one",
+            verbose=True)
+        except Exception as _argexc_c1m2:
+            print("[c1m2] call skipped (argument build failed):", repr(_argexc_c1m2), file=stderr)
 
 
     print(f"--- Finished fuzzing instance: instance_c1_widget ---", file=stderr)

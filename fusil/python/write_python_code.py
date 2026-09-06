@@ -2320,6 +2320,14 @@ class WritePythonCode(WriteCode):
                     )
                     if level is not None:
                         L_else_generic = level
+            # Without a plugin dispatcher no `else:` was ever opened, so the generic fallback
+            # ran even for an object the skip-trivial guard had just reported as skipped -- the
+            # guard printed and nothing else. Open the else ourselves in that case so the
+            # fallback is genuinely guarded; with a dispatcher, its own else still owns it.
+            if L_else_generic is None:
+                self.write(0, "else:")
+                L_else_generic = self.addLevel(1)
+                self.write(0, "pass")
             try:
                 self.write(0, "try:")
                 self.write_print_to_stderr(
@@ -2443,12 +2451,22 @@ class WritePythonCode(WriteCode):
             f'f"--- Fuzzing instance: {target_obj_expr_str} (type hint: {target_obj_class_name}, prefix: {current_prefix}) ---"',
         )
 
+        # The guard has to OWN the method fuzzing below: for four fleets it emitted only the
+        # "Skipping" print and then fuzzed the object anyway, so a cffi FFI object reached as a
+        # module attribute (PyPy's _curses_panel.ffi, _ssl.ffi, ...) still had ffi.memmove() and
+        # friends called on it -- raw-pointer entry points that fault by contract on whatever
+        # arguments they are handed. Hence the else: the print alone was never a skip.
         self.write(0, f"if skip_trivial_type({target_obj_expr_str}):")
         with self.indented():
             self.write_print_to_stderr(
                 0,
                 f"f'Skipping deep diving on {target_obj_expr_str} {{type({target_obj_expr_str})}}'",
             )
+        self.write(0, "else:")
+        skip_guard_level = self.addLevel(1)
+        # Keeps the block syntactically valid when the object turns out to have no methods to
+        # fuzz (methods_dict empty), which would otherwise leave `else:` with only a comment.
+        self.write(0, "pass")
 
         # General method fuzzing for other types
         self.write(0, f"# General method fuzzing for {target_obj_expr_str}")
@@ -2481,6 +2499,9 @@ class WritePythonCode(WriteCode):
                         is_method_call=True,
                         generation_depth=0,
                     )
+        # Close the `else:` opened by the skip-trivial guard above; the summary print belongs
+        # outside it so a skipped object still reports.
+        self.restoreLevel(skip_guard_level)
         self.write_print_to_stderr(
             0, f'f"--- Finished fuzzing instance: {target_obj_expr_str} ---"'
         )

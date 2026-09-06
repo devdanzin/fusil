@@ -236,6 +236,65 @@ class SkipTrivialTypeTests(unittest.TestCase):
         self.assertFalse(skip(ffi()))
 
 
+class SkipTrivialTypeGuardOwnsTheBlockTests(unittest.TestCase):
+    """The skip-trivial guard must OWN the fuzzing it claims to skip.
+
+    For four consecutive PyPy fleets the guard emitted only its "Skipping deep diving" print
+    and then fuzzed the object anyway. That is how ``_curses_panel.ffi`` -- a cffi ``FFI``
+    object handed out as a module attribute, whose type IS defined in ``_cffi_backend`` and
+    which ``skip_trivial_type`` therefore correctly identified -- still had ``ffi.memmove()``
+    called on it and took the process down: a raw-pointer entry point that faults by contract
+    on whatever arguments it is given, so never a target defect.
+
+    Asserting on the emitted text is not enough (the print was always there); assert on the
+    parsed structure instead -- every ``if skip_trivial_type(x):`` must carry the real work in
+    its ``orelse``, never after the statement.
+    """
+
+    def _guards(self, tree):
+        found = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            test = node.test
+            if (
+                isinstance(test, ast.Call)
+                and isinstance(test.func, ast.Name)
+                and test.func.id == "skip_trivial_type"
+            ):
+                found.append(node)
+        return found
+
+    def test_every_guard_has_an_else_branch(self):
+        guards = self._guards(ast.parse(generate()))
+        self.assertTrue(guards, "no skip_trivial_type guard emitted at all")
+        for node in guards:
+            self.assertTrue(
+                node.orelse,
+                "skip_trivial_type guard at line %d has no else: it prints 'Skipping' and "
+                "then falls through to the fuzzing it claims to skip" % node.lineno,
+            )
+
+    def test_guard_body_only_reports_and_never_calls(self):
+        """The taken branch must not itself call the object -- it is the skip path."""
+        for node in self._guards(ast.parse(generate())):
+            for sub in ast.walk(ast.Module(body=node.body, type_ignores=[])):
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+                    self.assertIn(
+                        sub.func.id,
+                        {"print", "type", "repr"},
+                        "the skip branch calls %s(); it must only report" % sub.func.id,
+                    )
+
+    def test_emitted_guard_skips_a_cffi_typed_object(self):
+        """Exec the emitted function against an object typed like PyPy's ``ffi``."""
+        skip = SkipTrivialTypeTests()._emitted_skip_trivial_type()
+        cffi_like = type("FFI", (), {})
+        cffi_like.__module__ = "_cffi_backend"
+        self.assertTrue(skip(cffi_like()), "a _cffi_backend-typed instance must be skipped")
+        self.assertFalse(skip(object()), "an ordinary object must NOT be skipped")
+
+
 class SelfNoiseVocabularyTests(unittest.TestCase):
     """Emitted COMMENTS must not contain fusil's own crash vocabulary.
 
