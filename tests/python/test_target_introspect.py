@@ -161,6 +161,85 @@ class TestParity(unittest.TestCase):
         self.assertEqual(live, got)
 
 
+class TestSyncPrimitiveObjectsAreSkipped(unittest.TestCase):
+    """A live lock held as a module attribute is that module's own mutex -- never a fuzz target.
+
+    PyPy implements ``grp`` in Python over cffi with ``_lock = _thread.allocate_lock()``, and
+    ``getgrall()`` holds it across its loop over libc's *static* group buffer. fusil selected
+    ``grp._lock`` as a module object and called ``lock.release_lock()`` on it, dropping the
+    mutual exclusion: a second thread clobbered the buffer and the first walked freed memory.
+    Measured 6/6 SIGSEGV with the release, 6/6 clean without it.
+
+    ``METHOD_BLACKLIST`` was no defence -- it blocks every way to TAKE a lock and none of the
+    ways to DROP one -- so the filter is on the object's TYPE, at selection time, and has to
+    hold on BOTH discovery paths: the runner cannot check it in ``--discover-in-target`` mode,
+    where the proxy carries only the type's name.
+
+    These modules need ``test_private=True`` (as the PyPy fleets run) or the underscore-prefixed
+    lock names are filtered before the type is ever looked at, and the test proves nothing.
+    """
+
+    class _PrivateOptions(_Options):
+        test_private = True
+
+    def _live_objects(self, module):
+        parent = _Parent()
+        parent.options = self._PrivateOptions()  # private names reach the type check
+        fd, path = tempfile.mkstemp(suffix=".py")
+        os.close(fd)
+        try:
+            w = WritePythonCode(parent, path, module, module.__name__,
+                                threads=False, _async=False, plugin_manager=None)  # fmt: skip
+            return sorted(w.module_objects)
+        finally:
+            os.unlink(path)
+
+    def test_live_path_skips_a_module_level_lock(self):
+        import tempfile as tempfile_mod
+
+        objs = self._live_objects(tempfile_mod)
+        self.assertNotIn("_once_lock", objs, "tempfile._once_lock is tempfile's own mutex")
+
+    def test_live_path_skips_a_module_level_rlock(self):
+        import logging as logging_mod
+
+        self.assertNotIn("_lock", self._live_objects(logging_mod))
+
+    def test_subprocess_path_skips_it_too(self):
+        """Metadata mode must agree: the proxy carries only the type name, so the target filters."""
+        meta = introspect_module(PYEXE, "tempfile")
+        self.assertIsNotNone(meta, "discovery failed outright")
+        names = [m["name"] for m in meta["members"] if m.get("kind") == "object"]
+        self.assertNotIn("_once_lock", names)
+
+    def test_a_lock_fusil_made_itself_is_still_fuzzable(self):
+        """The filter is on module ATTRIBUTES only -- the class path keeps lock coverage."""
+        import threading as threading_mod
+
+        from fusil.python.write_python_code import is_sync_primitive
+
+        self.assertTrue(is_sync_primitive(threading_mod.Lock()), "a live lock is a primitive")
+        self.assertFalse(
+            is_sync_primitive(threading_mod.Lock),
+            "the CLASS is not a live mutex: instantiating it yields fusil's own lock",
+        )
+        self.assertFalse(is_sync_primitive(object()), "an ordinary object must not be skipped")
+
+    def test_filter_does_not_swallow_ordinary_module_objects(self):
+        """Guard against over-filtering: a normal module still yields its objects."""
+        import json as jsonmod
+
+        parent = _Parent()
+        fd, path = tempfile.mkstemp(suffix=".py")
+        os.close(fd)
+        try:
+            w = WritePythonCode(parent, path, jsonmod, "json",
+                                threads=False, _async=False, plugin_manager=None)  # fmt: skip
+            self.assertTrue(w.module_functions or w.module_classes)
+        finally:
+            os.unlink(path)
+
+
 class TestPackageEnumeration(unittest.TestCase):
     def test_enumerate_script_is_valid_python(self):
         ast.parse(_ENUMERATE_SRC)

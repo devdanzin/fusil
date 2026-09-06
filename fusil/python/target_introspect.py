@@ -46,6 +46,11 @@ from types import FunctionType, BuiltinFunctionType, ModuleType, MethodType
 
 # Mirror WritePythonCode.TRIVIAL_TYPES (top-level object branch skips these).
 _TRIVIAL = {int, str, float, bool, bytes, tuple, list, dict, set, type(None)}
+# Mirror WritePythonCode.SYNC_PRIMITIVE_MODULES: a live lock held as a module attribute is that
+# module's own mutex, and releasing it corrupts the module (PyPy grp._lock -> getgrall walking
+# libc's static group buffer without exclusion). The runner cannot check this in metadata mode --
+# the proxy carries only the type NAME -- so the filter has to happen here, in the target.
+_SYNC_MODULES = {"_thread", "thread", "threading"}
 _MAX_METHODS = 300
 
 
@@ -132,6 +137,8 @@ def main():
             else:
                 if isinstance(attr, ModuleType) or type(attr) in _TRIVIAL:
                     continue  # not fuzzable (matches _get_module_members object branch)
+                if type(attr).__module__ in _SYNC_MODULES:
+                    continue  # the module's own mutex (matches is_sync_primitive)
                 is_exc = isinstance(attr, BaseException)
                 members.append({"name": name, "kind": "object", "is_module": False,
                                 "is_exception": is_exc,
