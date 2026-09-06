@@ -61,6 +61,27 @@ TRIVIAL_TYPES = {
 }
 TRIVIAL_TYPES_STR = "{int, str, float, bool, bytes, tuple, list, dict, set, type(None),}"
 
+# Modules whose types are synchronisation primitives. A LIVE INSTANCE of one held as a module
+# attribute is that module's own mutex -- PyPy's `grp._lock = _thread.allocate_lock()` is the
+# exemplar -- and fusil must not touch it: `grp.getgrall()` holds `_lock` across its loop over
+# libc's static group buffer, so calling `_lock.release_lock()` drops the mutual exclusion, a
+# second thread clobbers the buffer, and the first walks freed memory. Measured: 6/6 SIGSEGV with
+# the release, 6/6 clean without it. METHOD_BLACKLIST is no defence -- it blocks every way to
+# TAKE a lock (acquire / acquire_lock / _acquire_lock / _acquire_restore / wait) and none of the
+# ways to DROP one, i.e. it blocked what hangs fusil and left what corrupts the target.
+#
+# Keyed on the TYPE's defining module, and applied only when selecting MODULE-LEVEL objects:
+# a lock fusil instantiated itself is nobody's mutex and stays fuzzable, so fuzzing `threading`
+# still covers Lock/RLock/Condition through the class path. A name-based ban on "release" would
+# instead have cost `memoryview.release()`, which is the surface PYPY-FUZZ-011 came from.
+SYNC_PRIMITIVE_MODULES = frozenset({"_thread", "thread", "threading"})
+
+
+def is_sync_primitive(obj):
+    """True for a live synchronisation primitive (lock, RLock, Condition, Event, ...)."""
+    return type(obj).__module__ in SYNC_PRIMITIVE_MODULES
+
+
 # Process-lifecycle calls the --tsan stress region must never make: forking a fuzzer worker
 # thread (os.fork/forkpty, pty.fork/spawn, os.spawn*/posix_spawn without an immediate exec)
 # leaves the child with an inconsistent runtime -- and under ThreadSanitizer that is an
@@ -283,6 +304,8 @@ class WritePythonCode(WriteCode):
             else:
                 if isinstance(attr, ModuleType) or type(attr) in TRIVIAL_TYPES:
                     continue
+                if is_sync_primitive(attr):
+                    continue  # the module's own mutex -- see SYNC_PRIMITIVE_MODULES
                 if (
                     not self.options.fuzz_exceptions and isinstance(attr, BaseException)
                     # and attr.__class__.__name__ in _EXCEPTION_NAMES
